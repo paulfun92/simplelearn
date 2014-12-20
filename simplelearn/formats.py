@@ -12,28 +12,50 @@ converting from float to int, or complex to float, is not.
 import numpy
 import theano
 from theano.gof.op import get_debug_values
+from theano.tensor import TensorType
 from theano.sandbox.cuda.type import CudaNdarrayType
+from simplelearn.utils import safe_izip, flatten
 
 
-class DataFormat(object):
+class Format(object):
     """
-    Specifies the data format of a single tensor.
+    Abstract class. Represents the format of a numeric or symbolic data batch.
 
-    Data format includes things like dtype, shape (not including batch size),
-    and axis order / memory layout.
+    "format" means things like axis order, and optionally, dtype.
 
-    Primary methods:
+    Parameters
+    ----------
+    dtype: str or numpy.dtype or NoneType
 
-      format():    Converts a tensor from this format to another.
-      validate():  Returns True if a tensor fits this format.
-      new_theano_tensor(): Creates a Theano tensor in this format.
-      new_numpy_tensor(): Creates a numpy tensor in this format.
+      default: None.
+
+      If None, this format won't specify a dtype. Converting a batch from
+      another format will leave the batch's existing dtype unchanged. On the
+      other hand, you will need to specify a dtype when calling make_batch.
     """
+
+    def __init__(self, dtype=None):
+        self._dtype = (dtype if (dtype is None or str(dtype) is 'floatX')
+                       else numpy.dtype(dtype))
+
+    @property
+    def dtype(self):
+        if str(self._dtype) is 'floatX':
+            result = numpy.dtype(theano.config.floatX)
+        else:
+            result = self._dtype
+
+        assert result is None or isinstance(result, numpy.dtype)
+        return result
 
     @staticmethod
-    def get_variable_type(data):
+    def is_symbolic(batch):
         """
-        Returns whether the data is a numeric or symbolic variable.
+        Returns True i.f.f, batch is a (Theano) symbol.
+
+        Returns False if batch is a (numpy) numeric array.
+
+        Raises a TypeError if data is some other type.
 
         Parameters
         ----------
@@ -45,72 +67,109 @@ class DataFormat(object):
            "symbolic", "numeric", or "unrecognized".
         """
 
-        if isinstance(data, theano.gof.Variable):
-            return "symbolic"
-        elif (isinstance(data, (numpy.ndarray, numpy.memmap)) or
-              type(data) == 'CudaNdarray'):
-            return "numeric"
+        if isinstance(batch, theano.gof.Variable):
+            return True
+        elif (isinstance(batch, (numpy.ndarray, numpy.memmap)) or
+              type(batch) == 'CudaNdarray'):
+            return False
         else:
-            return "unrecognized"
+            raise TypeError("Unrecognized batch type %s." % type(batch))
 
-    def format(self, data, target_format, output=None):
+    def _is_equivalent(self, target_format):
         """
-        Formats numeric or symbolic data in this format to the target_format.
+        Returns True if converting from self to target_format is a no-op.
+        """
+        raise NotImplementedError("%s._is_equivalent() not yet implemented." %
+                                  type(self))
 
-        Output argument only supported for numeric data.
+    def format(self, batch, target_format, output=None):
+        """
+        Formats a data batch in this format to the target_format.
+
+        Output argument only supported for numeric batches.
 
         This function just calls self._format(), check()-ing its
         inputs and outputs.
 
+        Note that if output is None and self._is_equivalent(target_format), the
+        batch is returned as-is without calling self._format().
+
         Parameters
         ----------
-        data: numpy.ndarray-like or theano.gof.Variable
+        batch: numpy.ndarray-like or theano.gof.Variable
 
         target_format: DataFormat
 
         output: NoneType, or numpy.ndarray-like
-          Optional output variable. Can only be supplied if data is numeric.
+          Optional output variable. Can only be supplied if batch is numeric.
           If provided, this function won't return anything.
-          If omitted, this function will return the formatted data.
+          If omitted, this function will return the formatted batch.
 
         Returns
         -------
-        rval: NoneType, numpy.ndarray or theano.gof.Variable
-          If output is None, rval is the formatted data. When formatting
-          between two equivalent formats, rval will be data, returned as-is.
-
-          If output is not None, rval will be None.
+        rval: numpy.ndarray or theano.gof.Variable
+          The formatted batch. When formatting between equivalent formats, this
+          will be <batch>.
         """
 
-        self.check(data)
-        if output is None:
-            result = self._format(data, target_format)
-            target_format.check(result)
-        else:
-            if data_type == 'symbolic':
-                raise ValueError("You can't provide an output argument when "
-                                 "data is symbolic.")
-            target_format.check(output)
-            self._format(data, target_format, output)
+        self.check(batch)
 
-        # Checks that:  numeric data -> numeric result,
-        #              symbolic data -> symbolic result
+        if output is None and self._is_equivalent(target_format):
+            return batch
 
-        data_type = self.get_variable_type(data)
-        result_type = self.get_variable_type(result)
+        # def check_dtypes(batch_dtype, target_dtype):
+        #     """
+        #     Checks if casting from batch_dtype to target_dtype is very lossy.
 
-        if data_type != result_type:
-            raise TypeError("Expected %{classname}s._format(<%{data_type}s "
-                            "tensor>) to return a <%{data_type}s tensor>, but "
-                            "got a %{result_type}s instead." %
+        #     Raisses a TypeError if casting from float to int, or complex to
+        #     non-complex.
+        #     """
+
+        #     # checks that target_dtype is a legit dtype
+        #     target_dtype = numpy.dtype(target_dtype)
+
+        #     if numpy.issubdtype(batch_dtype, numpy.complex):
+        #         if not numpy.issubdtype(target_dtype, numpy.complex):
+        #             raise TypeError("Can't convert from complex to "
+        #                             "non-complex (in this case, %s to %s)." %
+        #                             (batch_dtype, target_dtype))
+        #     elif numpy.issubdtype(batch_dtype, numpy.float):
+        #         if not numpy.issubdtype(target_dtype, (numpy.float,
+        #                                                numpy.complex)):
+        #             raise TypeError("Can't convert %s to %s." %
+        #                             (batch_dtype, target_dtype))
+
+        # check_dtypes(self.dtype, target_format.dtype)
+
+        if target_format.dtype is not None and \
+           not numpy.can_cast(batch.dtype,
+                              target_format.dtype,
+                              casting='same_kind'):  # Allows float64->float32
+            raise TypeError("Can't cast from %s to %s." %
+                            (batch.dtype, target_format.dtype))
+
+        if self.is_symbolic(batch) and output is not None:
+            raise ValueError("You can't provide an output argument when "
+                             "data is symbolic.")
+
+        result = self._format(batch, target_format, output)
+
+        if self.is_symbolic(batch) != self.is_symbolic(result):
+            def symbolic_or_numeric(batch):
+                return "symbolic" if self.is_symbolic(batch) else "numeric"
+
+            raise TypeError("Expected %(classname)s._format(<%(data_type)s "
+                            "tensor>) to return a <%(data_type)s tensor>, but "
+                            "got a %(result_type)s instead." %
                             dict(self_type=type(self),
-                                 data_type=data_type,
-                                 result_type=result_type))
+                                 data_type=symbolic_or_numeric(batch),
+                                 result_type=symbolic_or_numeric(result)))
 
-        if output is None:
-            return result
+        target_format.check(result)
 
-    def _format(self, data, target_format):
+        return result
+
+    def _format(self, batch, target_format, output):
         """
         Implementation of format(). See that method's description for specs.
 
@@ -118,195 +177,299 @@ class DataFormat(object):
         conversion to target_format is not supported.
         """
 
-        raise NotImplementedError("%s._format() not implemented." %
+        raise NotImplementedError("%s._format() not yet implemented." %
                                   self.__class__)
 
-    def check(self, data):
+    def check(self, batch):
         """
-        Checks to see if data fits this format's specs.
+        Checks to see if batch fits this format's specs.
 
         If not, throws a ValueError or TypeError with an informative message.
 
         Parameters
         ----------
-        data: theano or numpy variable.
+        batch: theano or numpy variable.
 
         Returns
         -------
         nothing.
         """
 
-        # Type-checks data.
-        if self.get_variable_type(data) == 'unrecognized':
-            raise TypeError("Expected data to be a numpy or theano variable, "
-                            "not a %s." % type(data))
+        # Checks whether the batch is a known symbolic or numeric type.
+        self.is_symbolic(batch)
 
-        self._check(data)
+        if self.dtype is not None:
+            if batch.dtype != self.dtype:
+                raise TypeError("batch's dtype (%s) doesn't match this %s's "
+                                "dtype (%s)." %
+                                (batch.dtype, type(self), self.dtype))
+        self._check(batch)
 
-    def _check(self, data):
+    def _check(self, batch):
         """
         Implements check(). See that method's documentation.
         """
-        raise NotImplementedError("%s.is_valid() not implemented." %
+        raise NotImplementedError("%s._check() not yet implemented." %
                                   self.__class__)
 
-    def make_batch(self, batch_type, dtype=None):
+    def make_batch(self, is_symbolic, batch_size=-1, dtype=None):
         """
         Makes a numeric or symbolic batch.
 
         Parameters
         ----------
-        batch_type: str
-          'numeric' or 'symbolic'
+        is_symbolic: bool
+          if True, return a symbolic batch. Otherwise return a numeric batch.
 
-        dtype: str
-          A numpy/theano dtype.
+        batch_size: int
+          Number of examples in batch. Ignored if is_symbolic is True.
+
+        dtype: str/numpy.dtype, or NoneType
+          A numpy/theano dtype. Required if self.dtype is None.
+          Prohibited otherwise.
         """
-        if dtype is None and self.dtype is None:
-            raise TypeError("Since this %s doesn't specify a dtype, you must "
-                            "provide a dtype argument." % type(self))
+        if dtype is None:
+            if self.dtype is None:
+                raise TypeError("Since this %s doesn't specify a dtype, you "
+                                "must provide a dtype argument." % type(self))
+        elif self.dtype is not None:
+            raise TypeError("Can't supply a dtype argument because this %s's "
+                            "dtype is not None (it's %s)." %
+                            (type(self), self.dtype))
 
-        return self._make_batch(batch_type=batch_type)
+        return self._make_batch(is_symbolic, batch_size, dtype)
 
-    def _make_batch(self, batch_type, dtype=None):
+    def _make_batch(self, is_symbolic, batch_size, dtype):
         """
         Implements make_batch. See that method's documentation().
+
+        Parameters
+        ----------
+        dtype: numpy.dtype
+          The dtype of the batch to create. Unlike the argument to
+          make_batch(), this will never be None.
         """
         raise NotImplementedError("%s._make_batch() not yet implemented." %
                                   type(self))
 
 
-class OptionallyTypedFormat(DataFormat):
+class DenseFormat(Format):
     """
-    A DataFormat that optionally specifies the dtype of a variable.
+    Format for fixed-sized dense data.
 
-    Not yet sure if this merits being a separate class from Dataformat. I may
-    merge it into DataFormat.
-    """
+    Examples:
 
-    def __init__(self, dtype):
-        """
-        Parameters
-        ----------
-        dtype: str/numpy.dtype, or None
-          If not None, this Format will insist that data be of this dtype.
-        """
-        if dtype is None:
-            self.dtype = dtype
-        else:
-            self.dtype = numpy.dtype(dtype)  # checks that dtype str is legit
+      # vectors of size 100:
+      vector_format = DenseFormat(axes=('b', 'f'),
+                                  shape=(100, -1))
 
-    def _check(self, data):
-        super(OptionallyTypedFormat, self)._check(data)
-
-        if self.dtype is not None and not str(data.dtype) == self.dtype:
-            raise TypeError("Data's dtype (%s) doesn't match this %s's dtype "
-                            "(%s)" % (data.dtype, type(self), self.dtype))
-
-    def _check_target_dtype(self, target_dtype):
-        """
-        Throws an exception if casting from this.dtype to target_dtype would
-        entail a significant loss of precision (e.g. float->int,
-        complex->float).
-        """
-
-        # checks that target_dtype is a legit dtype
-        target_dtype = numpy.dtype(target_dtype)
-
-        if numpy.issubdtype(self.dtype, numpy.complex):
-            if not numpy.issubdtype(target_dtype, numpy.complex):
-                raise TypeError("Can't convert from complex to "
-                                "non-complex (in this case, %s to %s)."
-                                (self.dtype, target_dtype))
-        elif numpy.issubdtype(self.dtype, numpy.float):
-            if not numpy.issubdtype(target_dtype, (numpy.float,
-                                                   numpy.complex)):
-                raise TypeError("Can't convert %s to %s." %
-                                (self.dtype, target_dtype))
-
-
-class VectorFormat(OptionallyTypedFormat):
-    """
-    Fixed-size dense vectors.
+      # 640x480 RGB images, indexed as [channel, row, column, batch]:
+      image_format = DenseFormat(axes=('f', '0', '1', 'b'),
+                                 shape=(3, 480, 640, -1))
 
     Parameters
     ----------
-    size: int
-      Vector length.
 
-    dtype: numpy.dtype/str
-      Data type.
+    axes: sequence
+      A sequence of strings. Each string is the canonical name of an axis.
 
-    layout_order: sequence
-      A sequence of at least two strings, where the strings are axis
-      names. Specifies the axis order of memory layout. Used when converting to
-      topological formats.  Example: ('b', 'c', '0', '1'). 'b' axis must always
-      be first.
+    shape: sequence
+      A sequence of dimension sizes. Batch axis gets the dummy size -1.
+
+    dtype: see superclass' docs.
     """
 
-    def __init__(self, size, dtype, layout_order=('b', 'c', '0', '1')):
-        super(VectorFormat, self).__init__(dtype)
+    def __init__(self, axes, shape, dtype):
+        super(DenseFormat, self).__init__(dtype=dtype)
 
-        if not numpy.issubdtype(size, 'int'):
-            raise TypeError("size should be an int, not a %s." % type(size))
+        if not all(isinstance(axis, str) for axis in axes):
+            raise TypeError("axes contained non-strings: %s" %
+                            str(tuple(axes)))
 
-        if size < 0:
-            raise ValueError("size must be non-negative, not %d." % size)
+        if len(frozenset(axes)) < len(axes):
+            raise ValueError("axes contained duplicate elements: %s" %
+                             str(tuple(axes)))
 
-        self.size = size
+        if not all(numpy.issubdtype(type(size), 'int') for size in shape):
+            raise TypeError("shape contained non-ints: %s" % str(shape))
 
-        if len(layout_order) < 2:
-            raise ValueError("layout_order %s must have at least two elements."
-                             % str(layout_order))
+        if len(axes) != len(shape):
+            raise ValueError("axes and shape's lengths differ (%s vs %s)." %
+                             (str(axes), str(shape)))
 
-        if layout_order[0] != 'b':
-            raise ValueError("The 'b' axis must be first in layout_order %s." %
-                             str(layout_order))
+        if 'b' in axes:
+            b_size = shape[axes.index('b')]
 
-        if not all(isinstance(s, str) for s in layout_order):
-            raise TypeError("layout_order %s must be a sequence of strings." %
-                            str(layout_order))
+            if b_size != -1:
+                raise ValueError("Shape element corresonding to 'b' axis must "
+                                 "be given the dummy size -1, not %d. "
+                                 "shape: %s axes: %s" %
+                                 (b_size, str(shape), str(axes)))
 
-        self.layout_order = layout_order
+        if any(size < 0 and axis is not 'b'
+               for size, axis
+               in safe_izip(shape, axes)):
+            raise ValueError("Negative size in non-batch dimension. "
+                             "shape: %s, axes: %s" %
+                             (str(shape), str(axes)))
 
-    def _check(self, data):
-        super(VectorFormat, self)._check(data)
+        self.axes = tuple(axes)
+        self.shape = tuple(shape)
 
-        variable_type = self.get_variable_type(data)
+    def _make_batch(self, is_symbolic, batch_size, dtype=None):
+        if 'b' not in self.axes:
+            raise ValueError("This format has no batch ('b') axis.")
 
-        if variable_type is 'symbolic':
-            if not isinstance(data.type, (TensorType, CudaNdarrayType)):
+        if is_symbolic:
+            raise NotImplementedError()
+        else:
+            shape = list(self.shape)
+            shape[self.axes.index('b')] = batch_size
+
+            dtype = dtype if dtype is not None else self.dtype
+            if dtype is None:
+                raise ValueError("When self.dtype is None, you must provide a "
+                                 "dtype argument to make_batch")
+
+            return numpy.zeros(shape, dtype)
+
+    def _check(self, batch):
+        super(DenseFormat, self)._check(batch)
+
+        is_symbolic = self.is_symbolic(batch)
+
+        if is_symbolic:
+            if not isinstance(batch.type, (TensorType, CudaNdarrayType)):
                 raise TypeError("Expected a TensorType or CudaNdarrayType, "
-                                "not a %s." % data.type)
+                                "not a %s." % batch.type)
 
-            for val in get_debug_values(data):
+            for val in get_debug_values(batch):
                 self._check(val)
 
-        if data.ndim != 2:
+        if batch.ndim != len(self.axes):
             raise ValueError("Expected a 2-D tensor, but found %d" %
-                             data.ndim)
+                             batch.ndim)
 
-        if variable_type is 'numeric':
-            if batch.shape[1] != self.size:
-                raise ValueError("Expected batch.shape[1] to equal self.size "
-                                 "(%d), but it was %d." %
-                                 (self.size, batch.shape[1]))
+        if not is_symbolic:
+            for expected_size, size, axis in safe_izip(self.shape,
+                                                       batch.shape,
+                                                       self.axes):
+                if axis != 'b' and size != expected_size:
+                    raise ValueError("Mismatch between this format' size of "
+                                     "axis %s (%d) and batch's corresponding "
+                                     "size %d." %
+                                     (expected_size,
+                                      axis,
+                                      size))
 
-    def _format(self, data, target_format, output_data):
-        self._check_target_dtype(target_format.dtype)
+    def _format(self, batch, target_format, output_batch, **kwargs):
+        """
+        Converts a batch to another format.
 
-        if isinstance(target_format, VectorFormat):
-            if target_format.size != self.size:
-                raise ValueError("vector sizes don't match (self: %d, "
-                                 "target: %d)." %
-                                 (self.size, target_format.size))
+        When converting to another DenseFormat, if the axes are the same,
+        but in a different order, this will transpose the axes for you.
 
-            if output_data is None:
-                return data
-            else:
-                output_data[...] = data
-                return
+        Example 1: same axes, different order
+
+          from = DenseFormat(axes=('a, 'b', 'c'), sizes=(3, 3, 3))
+          to = DenseFormat(axes=('b', 'c', 'a'), sizes=(3, 3, 3))
+          from.format(batch, to)  # transposes axes correctly
+
+        If the axes are different, you must supply an "axis_map" dict to
+        clarify which axes of self correspond with which axes of target_format.
+
+        Example 2: same # of axes, different names.
+
+          from = DenseFormat(axes=('a', 'b'), sizes=(3, 3))
+          to = DenseFormat(axes('c', 'd'), sizes(3, 3))
+          from.format(batch, to, axis_map={'a': 'd',
+                                           'b': 'c'})
+
+        Example 3: different # of axes.
+
+          images = DenseFormat(axes=('f', '0', '1', 'b'),
+                               sizes=(1, 10, 10, 100))
+
+          vectors = DenseFormat(axes=('b', 'f'),
+                                sizes=(100, 100))
+
+          images.format(batch, vectors, axis_map={'b': 'b',
+                                                  'f': ('0', '1', 'f')}
+
+          axis_map always maps from the axis names of the format with
+          fewer axes, to the names of the format with more axes. In this
+          case, it's mapping from vectors' names to images' names, even
+          though we're formatting from images to vectors.
+
+          The line "'f': ('0', '1', 'f')" indicates that the image batch's
+          ('f', '0', '1') dimensions will first be transposed to ('0', '1',
+          'f'), before being flattened to a vector with a single dimension 'f'.
+
+        Parameters
+        ----------
+        axis_map: dict
+          If mapping from self.axes to target_format.axes is ambiguous,
+          you must supply axis_map. This is a dict that maps
+        """
+
+        if isinstance(target_format, DenseFormat):
+            if numpy.prod(self.shape) != numpy.prod(target_format.shape):
+                raise ValueError("Total batch size of self and target_format "
+                                 "differ (%d vs %d)." %
+                                 (numpy.prod(self.shape),
+                                  numpy.prod(target_format.shape)))
+
+            if frozenset(self.axes) != frozenset(target_format.axes):
+                if 'axis_map' not in kwargs:
+                    raise ValueError("self.axes contain different axes than "
+                                     "target_format.axes. You therefore must "
+                                     "supply an 'axis_map' argument.")
+
+                axis_map = kwargs['axis_map']
+
+                if len(self.axes) > len(target_format.axes):
+                    more, fewer = (self, target_format)
+                else:
+                    more, fewer = (target_format, self)
+
+                if frozenset(fewer.axes) != frozenset(axis_map.iterkeys()):
+                    raise ValueError("axis_map's keys %s don't correspond to "
+                                     "the axes of the format with fewer "
+                                     "dimensions %s" %
+                                     (frozenset(axis_map.iterkeys()),
+                                      frozenset(fewer.axes)))
+
+                expanded_fewer_axes = flatten(axis_map[x] for x in fewer.axes)
+
+                if self.is_symbolic(batch):
+                    raise NotImplementedError()
+                else:
+
+                    def transpose(batch, from_axes, to_axes):
+                        transposed_indices = tuple(from_axes.index(x)
+                                                   for x in to_axes)
+                        return batch.transpose(transposed_indices)
+
+                    if len(self.axes) > len(target_format.axes):  # more->fewer
+                        result = transpose(batch,
+                                           self.axes,
+                                           expanded_fewer_axes)
+                        result = result.reshape(target_format.shape)
+                    else:  # fewer->more
+                        expanded_fewer_shape = (more.shape[more.axes.index(x)]
+                                                for x in expanded_fewer_axes)
+                        batch = batch.reshape(expanded_fewer_shape)
+                        result = transpose(batch,
+                                           expanded_fewer_axes,
+                                           target_format.axes)
+
+                    if output_batch is not None:
+                        output_batch[...] = result
+                        return output_batch
+                    else:
+                        return result
+
         else:
-            raise NotImplementedError("%s.format(data, %s) not yet "
-                                      "implemented." %
-                                      (type(self), type(target_format)))
+            raise NotImplementedError("Converting from %s to %s not yet "
+                                      "implemented." % (type(self),
+                                                        type(target_format)))
