@@ -309,8 +309,8 @@ class DenseFormat(Format):
             b_size = shape[axes.index('b')]
 
             if b_size != -1:
-                raise ValueError("Shape element corresonding to 'b' axis must "
-                                 "be given the dummy size -1, not %d. "
+                raise ValueError("Shape element corresponding to 'b' axis "
+                                 "must be given the dummy size -1, not %d. "
                                  "shape: %s axes: %s" %
                                  (b_size, str(shape), str(axes)))
 

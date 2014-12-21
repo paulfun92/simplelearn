@@ -239,7 +239,79 @@ def test_format_convert():
                          symbolic_float_batch)
 
 
-def notest_denseformat_make_batch_numeric():
+def test_denseformat_init():
+    assert_raises_regexp(TypeError,
+                         "axes contained non-strings",
+                         DenseFormat,
+                         ('b', 0, 1, 'c'),
+                         (-1, 1, 1, 1),
+                         'floatX')
+
+    assert_raises_regexp(ValueError,
+                         "axes contained duplicate elements",
+                         DenseFormat,
+                         ('b', '0', '1', '0'),
+                         (-1, 1, 1, 1),
+                         'floatX')
+
+    assert_raises_regexp(TypeError,
+                         "shape contained non-ints",
+                         DenseFormat,
+                         ('b', '0', '1', 'c'),
+                         (-1, 1, 1, 1.),
+                         'floatX')
+
+    assert_raises_regexp(ValueError,
+                         "axes and shape's lengths differ",
+                         DenseFormat,
+                         ('b', '0', '1', 'c'),
+                         (-1, 1, 1),
+                         'floatX')
+
+    assert_raises_regexp(ValueError,
+                         "Shape element corresponding to 'b' axis must be "
+                         "given the dummy size -1",
+                         DenseFormat,
+                         ('b', '0', '1', 'c'),
+                         (1, 1, 1, 1),
+                         'floatX')
+
+    assert_raises_regexp(ValueError,
+                         "Negative size in non-batch dimension",
+                         DenseFormat,
+                         ('b', '0', '1', 'c'),
+                         (-1, 1, 1, -1),
+                         'floatX')
+
+    axes = ('b', '0', '1', 'c')
+    shape = (-1, 2, 3, 4)
+    dense_format = DenseFormat(axes, shape, 'floatX')
+
+    assert_equal(dense_format.axes, axes)
+    assert_equal(dense_format.shape, shape)
+    assert_equal(dense_format.dtype, numpy.dtype(theano.config.floatX))
+
+
+def test_denseformat_make_batch():
+    batchless_format = DenseFormat(('a', 'c', 'd'), (1, 1, 1), 'floatX')
+
+    assert_raises_regexp(ValueError,
+                         "This format has no batch \('b'\) axis",
+                         batchless_format.make_batch,
+                         True)
+
+    assert_raises_regexp(ValueError,
+                         "This format has no batch \('b'\) axis",
+                         batchless_format.make_batch,
+                         False,
+                         2)
+
+    axes = ('b', '0', '1', 'c')
+    shape = (-1, 2, 3, 4)
+    fmt = DenseFormat(axes, shape, 'floatX')
+
+
+def notest_denseformat_convert_numeric():
 
     def make_patterned_batch(batch_format):
         """
@@ -281,7 +353,3 @@ def notest_denseformat_make_batch_numeric():
         expected_target_batch = make_patterned_batch(target)
         pdb.set_trace()
         assert_allclose(target_batch, expected_target_batch)
-
-
-def notest_denseformat_format_numeric():
-    pass
