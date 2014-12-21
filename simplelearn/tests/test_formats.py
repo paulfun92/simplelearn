@@ -63,8 +63,8 @@ def test_format_abstract_methods():
                          batch_format)
 
     assert_raises_regexp(NotImplementedError,
-                         "_format\(\) not yet implemented.",
-                         batch_format._format,
+                         "_convert\(\) not yet implemented.",
+                         batch_format._convert,
                          batch_format,
                          batch_format,
                          None)
@@ -89,7 +89,7 @@ class DummyFormat(Format):
     def _is_equivalent(self, target_format):
         return self == target_format
 
-    def _format(self, batch, target_format, output):
+    def _convert(self, batch, target_format, output):
         output_dtype = (batch.dtype if target_format.dtype is None
                         else target_format.dtype)
 
@@ -136,12 +136,12 @@ def test_format_format():
         numeric_batch = numpy.zeros((10, 2), dtype=batch_dtype)
         for batch in (symbolic_batch, numeric_batch):
             if numpy.can_cast(batch_dtype, output_dtype, casting='same_kind'):
-                output = from_format.format(batch, to_format)
+                output = from_format.convert(batch, to_format)
                 assert_equal(output.dtype, output_dtype)
             else:
                 assert_raises_regexp(TypeError,
                                      "Can't cast from ",
-                                     from_format.format,
+                                     from_format.convert,
                                      batch,
                                      to_format)
 
@@ -214,7 +214,7 @@ def notest_denseformat_make_batch_numeric():
     # pdb.set_trace()
     for source, target in itertools.product(dense_formats, repeat=2):
         source_batch = make_patterned_batch(source)
-        target_batch = source.format(source_batch, target)
+        target_batch = source.convert(source_batch, target)
         expected_target_batch = make_patterned_batch(target)
         pdb.set_trace()
         assert_allclose(target_batch, expected_target_batch)

@@ -82,17 +82,17 @@ class Format(object):
         raise NotImplementedError("%s._is_equivalent() not yet implemented." %
                                   type(self))
 
-    def format(self, batch, target_format, output=None):
+    def convert(self, batch, target_format, output=None):
         """
         Formats a data batch in this format to the target_format.
 
         Output argument only supported for numeric batches.
 
-        This function just calls self._format(), check()-ing its
+        This function just calls self._convert(), check()-ing its
         inputs and outputs.
 
         Note that if output is None and self._is_equivalent(target_format), the
-        batch is returned as-is without calling self._format().
+        batch is returned as-is without calling self._convert().
 
         Parameters
         ----------
@@ -117,30 +117,6 @@ class Format(object):
         if output is None and self._is_equivalent(target_format):
             return batch
 
-        # def check_dtypes(batch_dtype, target_dtype):
-        #     """
-        #     Checks if casting from batch_dtype to target_dtype is very lossy.
-
-        #     Raisses a TypeError if casting from float to int, or complex to
-        #     non-complex.
-        #     """
-
-        #     # checks that target_dtype is a legit dtype
-        #     target_dtype = numpy.dtype(target_dtype)
-
-        #     if numpy.issubdtype(batch_dtype, numpy.complex):
-        #         if not numpy.issubdtype(target_dtype, numpy.complex):
-        #             raise TypeError("Can't convert from complex to "
-        #                             "non-complex (in this case, %s to %s)." %
-        #                             (batch_dtype, target_dtype))
-        #     elif numpy.issubdtype(batch_dtype, numpy.float):
-        #         if not numpy.issubdtype(target_dtype, (numpy.float,
-        #                                                numpy.complex)):
-        #             raise TypeError("Can't convert %s to %s." %
-        #                             (batch_dtype, target_dtype))
-
-        # check_dtypes(self.dtype, target_format.dtype)
-
         if target_format.dtype is not None and \
            not numpy.can_cast(batch.dtype,
                               target_format.dtype,
@@ -152,13 +128,13 @@ class Format(object):
             raise ValueError("You can't provide an output argument when "
                              "data is symbolic.")
 
-        result = self._format(batch, target_format, output)
+        result = self._convert(batch, target_format, output)
 
         if self.is_symbolic(batch) != self.is_symbolic(result):
             def symbolic_or_numeric(batch):
                 return "symbolic" if self.is_symbolic(batch) else "numeric"
 
-            raise TypeError("Expected %(classname)s._format(<%(data_type)s "
+            raise TypeError("Expected %(classname)s._convert(<%(data_type)s "
                             "tensor>) to return a <%(data_type)s tensor>, but "
                             "got a %(result_type)s instead." %
                             dict(self_type=type(self),
@@ -169,7 +145,7 @@ class Format(object):
 
         return result
 
-    def _format(self, batch, target_format, output):
+    def _convert(self, batch, target_format, output):
         """
         Implementation of format(). See that method's description for specs.
 
@@ -177,7 +153,7 @@ class Format(object):
         conversion to target_format is not supported.
         """
 
-        raise NotImplementedError("%s._format() not yet implemented." %
+        raise NotImplementedError("%s._convert() not yet implemented." %
                                   self.__class__)
 
     def check(self, batch):
@@ -362,7 +338,7 @@ class DenseFormat(Format):
                                       axis,
                                       size))
 
-    def _format(self, batch, target_format, output_batch, **kwargs):
+    def _convert(self, batch, target_format, output_batch, **kwargs):
         """
         Converts a batch to another format.
 
