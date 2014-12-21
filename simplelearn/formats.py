@@ -35,18 +35,24 @@ class Format(object):
     """
 
     def __init__(self, dtype=None):
-        self._dtype = (dtype if (dtype is None or str(dtype) is 'floatX')
-                       else numpy.dtype(dtype))
+        self.dtype = dtype
 
     @property
     def dtype(self):
-        if str(self._dtype) is 'floatX':
+        if str(self._dtype) == 'floatX':
             result = numpy.dtype(theano.config.floatX)
         else:
             result = self._dtype
 
         assert result is None or isinstance(result, numpy.dtype)
         return result
+
+    @dtype.setter
+    def dtype(self, new_dtype):
+        if new_dtype is None or str(new_dtype) == 'floatX':
+            self._dtype = new_dtype
+        else:
+            self._dtype = numpy.dtype(new_dtype)
 
     @staticmethod
     def is_symbolic(batch):
@@ -134,7 +140,7 @@ class Format(object):
             def symbolic_or_numeric(batch):
                 return "symbolic" if self.is_symbolic(batch) else "numeric"
 
-            raise TypeError("Expected %(classname)s._convert(<%(data_type)s "
+            raise TypeError("Expected %(self_type)s._convert(<%(data_type)s "
                             "tensor>) to return a <%(data_type)s tensor>, but "
                             "got a %(result_type)s instead." %
                             dict(self_type=type(self),
@@ -188,7 +194,7 @@ class Format(object):
         raise NotImplementedError("%s._check() not yet implemented." %
                                   self.__class__)
 
-    def make_batch(self, is_symbolic, batch_size=-1, dtype=None):
+    def make_batch(self, is_symbolic, batch_size=None, dtype=None):
         """
         Makes a numeric or symbolic batch.
 
@@ -198,12 +204,31 @@ class Format(object):
           if True, return a symbolic batch. Otherwise return a numeric batch.
 
         batch_size: int
-          Number of examples in batch. Ignored if is_symbolic is True.
+          Number of examples in numeric batch. Omit if is_symbolic is True.
 
         dtype: str/numpy.dtype, or NoneType
           A numpy/theano dtype. Required if self.dtype is None.
           Prohibited otherwise.
         """
+
+        # Sanity-checks batch_size
+        if batch_size is not None:
+            if not numpy.issubdtype(type(batch_size), numpy.integer):
+                raise TypeError("batch_size must be an integer, not an %s." %
+                                type(batch_size))
+            elif batch_size < 0:
+                raise ValueError("batch_size must be non-negative, not %d." %
+                                 batch_size)
+
+        # checks is_symbolic vs batch_size
+        if is_symbolic and batch_size is not None:
+            raise ValueError("Can't supply a batch_size when is_symbolic "
+                             "is True.")
+        if not is_symbolic and batch_size is None:
+            raise ValueError("Must supply a batch_size when is_symbolic "
+                             "is False.")
+
+        # Checks dtype vs self.dtype
         if dtype is None:
             if self.dtype is None:
                 raise TypeError("Since this %s doesn't specify a dtype, you "
@@ -212,8 +237,15 @@ class Format(object):
             raise TypeError("Can't supply a dtype argument because this %s's "
                             "dtype is not None (it's %s)." %
                             (type(self), self.dtype))
+        elif dtype == 'floatX':
+            dtype = theano.config.floatX
+        else:
+            dtype = numpy.dtype(dtype)
 
-        return self._make_batch(is_symbolic, batch_size, dtype)
+        result = self._make_batch(is_symbolic, batch_size, dtype)
+
+        self.check(result)
+        return result
 
     def _make_batch(self, is_symbolic, batch_size, dtype):
         """
@@ -223,7 +255,7 @@ class Format(object):
         ----------
         dtype: numpy.dtype
           The dtype of the batch to create. Unlike the argument to
-          make_batch(), this will never be None.
+          make_batch(), this will never be None, or 'floatX'.
         """
         raise NotImplementedError("%s._make_batch() not yet implemented." %
                                   type(self))

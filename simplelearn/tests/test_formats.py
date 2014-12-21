@@ -16,6 +16,11 @@ from nose.tools import assert_raises, assert_raises_regexp, assert_equal
 _all_dtypes = tuple(numpy.dtype(t.dtype) for t in theano.scalar.all_types)
 
 
+def _make_symbol(dtype):
+    tensor_type = T.TensorType(dtype=dtype, broadcastable=(False, False))
+    return tensor_type.make_variable()
+
+
 def test_is_symbolic():
     tmp_dir = tempfile.mkdtemp(prefix="test_formats-test_get_variable_type-"
                                "temp_files-")
@@ -56,6 +61,8 @@ def test_format_constructor():
 
 
 def test_format_abstract_methods():
+    # pylint: disable=protected-access,anomalous-backslash-in-string
+
     batch_format = Format()
     assert_raises_regexp(NotImplementedError,
                          "_is_equivalent\(\) not yet implemented.",
@@ -105,74 +112,131 @@ class DummyFormat(Format):
     def _check(self, batch):
         pass
 
-    def _make_batch(is_symbolic, batch_size, dtype):
+    def _make_batch(self, is_symbolic, batch_size, dtype):
         if dtype is None:
             dtype = self.dtype
 
         if is_symbolic:
             # return theano.tensor.tensor(dtype=dtype)
-            return T.TensorType(dtype=dtype).make_variable()
+            return _make_symbol(dtype)
         else:
             return numpy.zeros((batch_size, 2), dtype=dtype)
 
 
-def test_format_format():
+def test_format_check():
+    all_dtypes = _all_dtypes + (None, )
+    batch_dtypes = [dt for dt in _all_dtypes if dt is not 'floatX']
+
+    for format_dtype in all_dtypes:
+        fmt = DummyFormat(format_dtype)
+
+        for batch_dtype in batch_dtypes:
+            for batch in (numpy.zeros(2, dtype=batch_dtype),
+                          _make_symbol(batch_dtype)):
+                if fmt.dtype == batch_dtype or fmt.dtype is None:
+                    fmt.check(batch)
+                else:
+                    assert_raises_regexp(TypeError,
+                                         "batch's dtype ",
+                                         fmt.check,
+                                         batch)
+
+
+def test_format_make_batch():
+    all_dtypes = _all_dtypes + (None, )
+
+    for format_dtype in (None, 'floatX'):
+        for requested_dtype in (None, 'floatX'):
+            for is_symbolic in (True, False):
+                for batch_size in (None, 2):
+                    dummy_format = DummyFormat(format_dtype)
+                    bad_format = DummyFormat(format_dtype)
+
+                    if is_symbolic != (batch_size is None):
+                        assert_raises(ValueError,
+                                      dummy_format.make_batch,
+                                      is_symbolic,
+                                      batch_size,
+                                      requested_dtype)
+                    elif (format_dtype is None) == (requested_dtype is None):
+                        assert_raises(TypeError,
+                                      dummy_format.make_batch,
+                                      is_symbolic,
+                                      batch_size,
+                                      requested_dtype)
+
+
+class BadFormat(DummyFormat):
+
+    def __init__(self, dtype):
+        super(BadFormat, self).__init__(dtype)
+
+    def _convert(self, batch, target_format, output):
+        """
+        Converts numeric batches to symbolic batches, and vice versa.
+        """
+        if self.is_symbolic(batch):
+            return numpy.array([1, 2], dtype=target_format.dtype)
+        else:
+            return _make_symbol(target_format.dtype)
+
+
+def test_format_convert():
 
     # Does a N^2 check of formatting all dtypes to all other dtypes.
 
     all_dtypes = _all_dtypes + (None, )
 
-    for from_dtype, to_dtype in itertools.product(all_dtypes, repeat=2):
+    for from_dtype in all_dtypes:
         from_format = DummyFormat(dtype=from_dtype)
-        to_format = DummyFormat(dtype=to_dtype)
-
         batch_dtype = 'float32' if from_dtype is None else from_format.dtype
-        output_dtype = batch_dtype if to_dtype is None else to_format.dtype
 
-        # symbolic_batch = theano.tensor.dtensor4(dtype=batch_dtype)
-        tensor_type = T.TensorType(dtype=batch_dtype,
-                                   broadcastable=(False, False))
-        symbolic_batch = tensor_type.make_variable()
+        symbolic_batch = _make_symbol(batch_dtype)
         numeric_batch = numpy.zeros((10, 2), dtype=batch_dtype)
-        for batch in (symbolic_batch, numeric_batch):
-            if numpy.can_cast(batch_dtype, output_dtype, casting='same_kind'):
-                output = from_format.convert(batch, to_format)
-                assert_equal(output.dtype, output_dtype)
-            else:
-                assert_raises_regexp(TypeError,
-                                     "Can't cast from ",
-                                     from_format.convert,
-                                     batch,
-                                     to_format)
 
+        for to_dtype in all_dtypes:
+            to_format = DummyFormat(dtype=to_dtype)
+            output_dtype = batch_dtype if to_dtype is None else to_format.dtype
 
+            for batch in (symbolic_batch, numeric_batch):
+                if numpy.can_cast(batch_dtype,
+                                  output_dtype,
+                                  casting='same_kind'):
+                    output = from_format.convert(batch, to_format)
+                    assert_equal(output.dtype, output_dtype)
+                else:
+                    assert_raises_regexp(TypeError,
+                                         "Can't cast from ",
+                                         from_format.convert,
+                                         batch,
+                                         to_format)
 
-    # float32_format = DummyFormat(dtype='float32')
-    # none_format = DummyFormat()
+    # Checks that a format that takes a numeric batch and formats it to a
+    # symbolic one (or vice-versa) will cause an exception.
+    bad_int_format = BadFormat('int32')
+    bad_float_format = BadFormat('float32')
+    numeric_int_batch = numpy.zeros(3, dtype='int32')
+    symbolic_int_batch = _make_symbol('int32')
 
-    # for fmt in (float32_format, none_format):
-    #     assert_raises(TypeError, fmt.check, object())
+    for int_batch in (numeric_int_batch, symbolic_int_batch):
+        assert_raises_regexp(TypeError,
+                             "Expected",
+                             bad_int_format.convert,
+                             int_batch,
+                             bad_float_format)
 
-    # bad_dtype = numpy.dtype('int')
-
-    # def make_batches(dtype=None):
-    #     """
-    #     Returns a numeric batch and a symbolic batch.
-    #     """
-    #     return (numpy.zeros((2, 3), dtype=dtype),
-    #             theano.Tensor.dtensor4(dtype=dtype))
-
-    # for format_dtype
-
-    # for int_batch in make_batches('int'):
-    #     assert_raises(TypeError, float32_format.check, int_batch)
-
-    # for dtype in _all_dtypes:
-    #     for batch in (numpy.zeros((2, 3), dtype=dtype),
-    #                   theano.Tensor.dtensor4(dtype=dtype)):
-    #         assert_raises(ValueError, none_format.check, batch)
-
-
+    # Checks that providing an output argument when converting symbols raises
+    # an exception.
+    dummy_int_format = DummyFormat('int32')
+    dummy_float_format = DummyFormat('float32')
+    symbolic_float_batch = _make_symbol('float32')
+    assert_raises_regexp(ValueError,
+                         "You can't provide an output argument when data is "
+                         "symbolic.",
+                         dummy_int_format.convert,
+                         symbolic_int_batch,
+                         dummy_float_format,
+                         symbolic_float_batch)
 
 
 def notest_denseformat_make_batch_numeric():
@@ -206,12 +270,11 @@ def notest_denseformat_make_batch_numeric():
 
     # test simple permutations; i.e. no difference in the set of axes, or their
     # corresponding dimension sizes.
-    # pdb.set_trace()
     dense_formats = (DenseFormat(axes=axes, shape=shape, dtype=int)
                      for axes, shape
                      in safe_izip(itertools.permutations(('c', '0', '1', 'b')),
                                   itertools.permutations((2, 3, 4, -1))))
-    # pdb.set_trace()
+
     for source, target in itertools.product(dense_formats, repeat=2):
         source_batch = make_patterned_batch(source)
         target_batch = source.convert(source_batch, target)
