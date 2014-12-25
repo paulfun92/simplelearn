@@ -192,11 +192,16 @@ class Format(object):
         Implements check(). See that method's documentation.
         """
         raise NotImplementedError("%s._check() not yet implemented." %
-                                  self.__class__)
+                                  type(self))
 
-    def make_batch(self, is_symbolic, batch_size=None, dtype=None):
+    def make_batch(self, is_symbolic, batch_size=None, dtype=None, name=None):
         """
         Makes a numeric or symbolic batch.
+
+        May later split this into two functions: make_numeric_batch and
+        make_symbolic_batch. Keep it like this for now. If implementations of
+        _make_batch end up not sharing much logic between is_symbolic=True
+        and is_symbolic=False, then maybe split it.
 
         Parameters
         ----------
@@ -209,30 +214,41 @@ class Format(object):
         dtype: str/numpy.dtype, or NoneType
           A numpy/theano dtype. Required if self.dtype is None.
           Prohibited otherwise.
+
+        name: str, or NoneType
+          Name of the symbolic batch.
+          Optional when is_symbolic is True.
+          Omit if is_symbolic is False.
         """
 
         # Sanity-checks batch_size
         if batch_size is not None:
             if not numpy.issubdtype(type(batch_size), numpy.integer):
-                raise TypeError("batch_size must be an integer, not an %s." %
+                raise TypeError("batch_size must be an integer, not a %s." %
                                 type(batch_size))
             elif batch_size < 0:
                 raise ValueError("batch_size must be non-negative, not %d." %
                                  batch_size)
 
         # checks is_symbolic vs batch_size
-        if is_symbolic and batch_size is not None:
-            raise ValueError("Can't supply a batch_size when is_symbolic "
-                             "is True.")
+        # if is_symbolic and batch_size is not None:
+        #     raise ValueError("Can't supply a batch_size when is_symbolic "
+        #                      "is True.")
         if not is_symbolic and batch_size is None:
             raise ValueError("Must supply a batch_size when is_symbolic "
                              "is False.")
 
+        # checks is_symbolic vs name
+        if not is_symbolic and name is not None:
+            raise ValueError("Can't supply a name when is_symbolic is False.")
+
         # Checks dtype vs self.dtype
         if dtype is None:
             if self.dtype is None:
-                raise TypeError("Since this %s doesn't specify a dtype, you "
-                                "must provide a dtype argument." % type(self))
+                raise TypeError("Must supply a dtype argument, because this "
+                                "%s has no dtype of its own." % type(self))
+            else:
+                dtype = self.dtype
         elif self.dtype is not None:
             raise TypeError("Can't supply a dtype argument because this %s's "
                             "dtype is not None (it's %s)." %
@@ -242,12 +258,12 @@ class Format(object):
         else:
             dtype = numpy.dtype(dtype)
 
-        result = self._make_batch(is_symbolic, batch_size, dtype)
+        result = self._make_batch(is_symbolic, batch_size, dtype, name)
 
         self.check(result)
         return result
 
-    def _make_batch(self, is_symbolic, batch_size, dtype):
+    def _make_batch(self, is_symbolic, batch_size, dtype, name):
         """
         Implements make_batch. See that method's documentation().
 
@@ -324,12 +340,68 @@ class DenseFormat(Format):
         self.axes = tuple(axes)
         self.shape = tuple(shape)
 
-    def _make_batch(self, is_symbolic, batch_size, dtype=None):
+    def _make_batch(self, is_symbolic, batch_size, dtype, name):
+
         if 'b' not in self.axes:
             raise ValueError("This format has no batch ('b') axis.")
 
         if is_symbolic:
-            raise NotImplementedError()
+            shape = list(self.shape)
+
+            # ok if batch_size is None
+            shape[self.axes.index('b')] = batch_size
+
+            broadcastable = tuple(size == 1 for size in shape)
+
+            # broadcastable = [False] * len(self.axes)
+            # if 'f' in self.axes:
+            #     f_index = self.axes.index('f')
+            #     broadcastable[f_index] = (self.shape[f_index] == 1)
+
+            # if 'b' in self.axes:
+            #     broadcastable[self.axes.index('b')] = (batch_size == 1)
+
+            # broadcastable = tuple(broadcastable)
+
+            tensor_type = TensorType(dtype=dtype, broadcastable=broadcastable)
+            result = tensor_type.make_variable(name=name)
+
+            if theano.config.compute_test_value != 'off':
+                if batch_size is None:
+                    raise ValueError("When theano.config.compute_test_values "
+                                     "is not 'off', you must supply a "
+                                     "batch_size argument even when making"
+                                     "symbolic batches.")
+                else:
+                    result.tag.test_value = \
+                        self.make_batch(is_symbolic=False,
+                                        batch_size=batch_size,
+                                        dtype=dtype)
+                # Don't understand this, from
+                # pylearn2.space.ConvSpace2D.make_theano_batch, but keep it
+                # here in case it becomes clear later:
+
+                # if batch_size == 1:
+                #     n = 1
+                # else:
+                #     batch_size
+                #     # TODO: try to extract constant scalar value from batch_size
+                #     n = 4
+                # rval.tag.test_value = self.get_origin_batch(batch_size=n,
+                #                                             dtype=dtype)
+            return result
+
+            # This is what pylearn2.space.VectorSpace does, for efficiency
+            # reasons, but IIRC people on the mailing list were often
+            # complaining of breakages caused by batch type that changed from
+            # tensor.row to tensor.matrix depending on the value of batch_size.
+            # whether a batch was a row or a matrix. Seems like any
+            # efficiency gains may be more trouble that they're worth.
+
+            # if batch_size == 1:
+            #     return theano.tensor.row(name=name, dtype=dtype)
+            # else:
+            #     return theano.tensor.matrix(name=name, dtype=dtype)
         else:
             shape = list(self.shape)
             shape[self.axes.index('b')] = batch_size
@@ -342,8 +414,6 @@ class DenseFormat(Format):
             return numpy.zeros(shape, dtype)
 
     def _check(self, batch):
-        super(DenseFormat, self)._check(batch)
-
         is_symbolic = self.is_symbolic(batch)
 
         if is_symbolic:
@@ -355,8 +425,8 @@ class DenseFormat(Format):
                 self._check(val)
 
         if batch.ndim != len(self.axes):
-            raise ValueError("Expected a 2-D tensor, but found %d" %
-                             batch.ndim)
+            raise ValueError("Expected a %d-D tensor, but batch had %d "
+                             "dimensions" % (len(self.axes), batch.ndim))
 
         if not is_symbolic:
             for expected_size, size, axis in safe_izip(self.shape,

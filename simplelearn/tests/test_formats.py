@@ -16,9 +16,9 @@ from nose.tools import assert_raises, assert_raises_regexp, assert_equal
 _all_dtypes = tuple(numpy.dtype(t.dtype) for t in theano.scalar.all_types)
 
 
-def _make_symbol(dtype):
+def _make_symbol(dtype, name=None):
     tensor_type = T.TensorType(dtype=dtype, broadcastable=(False, False))
-    return tensor_type.make_variable()
+    return tensor_type.make_variable(name)
 
 
 def test_is_symbolic():
@@ -84,9 +84,10 @@ def test_format_abstract_methods():
     assert_raises_regexp(NotImplementedError,
                          "_make_batch\(\) not yet implemented.",
                          batch_format._make_batch,
-                         True,
-                         2,
-                         None)
+                         is_symbolic=True,
+                         batch_size=2,
+                         dtype=None,
+                         name=None)
 
 
 class DummyFormat(Format):
@@ -112,13 +113,13 @@ class DummyFormat(Format):
     def _check(self, batch):
         pass
 
-    def _make_batch(self, is_symbolic, batch_size, dtype):
+    def _make_batch(self, is_symbolic, batch_size, dtype, name):
         if dtype is None:
             dtype = self.dtype
 
         if is_symbolic:
             # return theano.tensor.tensor(dtype=dtype)
-            return _make_symbol(dtype)
+            return _make_symbol(dtype, name)
         else:
             return numpy.zeros((batch_size, 2), dtype=dtype)
 
@@ -143,27 +144,61 @@ def test_format_check():
 
 
 def test_format_make_batch():
-    all_dtypes = _all_dtypes + (None, )
+    floatX_format = Format('floatX')
+    none_format = Format(None)
 
-    for format_dtype in (None, 'floatX'):
-        for requested_dtype in (None, 'floatX'):
-            for is_symbolic in (True, False):
-                for batch_size in (None, 2):
-                    dummy_format = DummyFormat(format_dtype)
-                    bad_format = DummyFormat(format_dtype)
+    assert_raises_regexp(TypeError,
+                         "batch_size must be an integer, not a ",
+                         floatX_format.make_batch,
+                         False,
+                         1.)
 
-                    if is_symbolic != (batch_size is None):
-                        assert_raises(ValueError,
-                                      dummy_format.make_batch,
-                                      is_symbolic,
-                                      batch_size,
-                                      requested_dtype)
-                    elif (format_dtype is None) == (requested_dtype is None):
-                        assert_raises(TypeError,
-                                      dummy_format.make_batch,
-                                      is_symbolic,
-                                      batch_size,
-                                      requested_dtype)
+    assert_raises_regexp(ValueError,
+                         "batch_size must be non-negative, not ",
+                         floatX_format.make_batch,
+                         False,
+                         -2)
+
+    # Leave this commented-out block in for now.  Batch size is used even when
+    # creating symbolic batches, to make batch axis broadcastable when
+    # batch_size is 1. We may later decide that this is an unneeded bit of
+    # complexity that we just remove, in which case we can go back to making
+    # batch_size mutually exclusive with is_symbolic=True.
+
+    # assert_raises_regexp(ValueError,
+    #                     "Can't supply a batch_size when is_symbolic is True",
+    #                      floatX_format.make_batch,
+    #                      True,
+    #                      2)
+
+    assert_raises_regexp(ValueError,
+                         "Must supply a batch_size when is_symbolic is False",
+                         floatX_format.make_batch,
+                         False)
+
+    assert_raises_regexp(ValueError,
+                         "Must supply a batch_size when is_symbolic is False",
+                         floatX_format.make_batch,
+                         is_symbolic=False,
+                         name="foo")
+
+    assert_raises_regexp(ValueError,
+                         "Can't supply a name when is_symbolic is False",
+                         floatX_format.make_batch,
+                         is_symbolic=False,
+                         batch_size=2,
+                         name="foo")
+
+    assert_raises_regexp(TypeError,
+                         "Must supply a dtype argument, because this ",
+                         none_format.make_batch,
+                         True)
+
+    assert_raises_regexp(TypeError,
+                         "Can't supply a dtype argument because this ",
+                         floatX_format.make_batch,
+                         True,
+                         dtype='float64')
 
 
 class BadFormat(DummyFormat):
@@ -308,7 +343,36 @@ def test_denseformat_make_batch():
 
     axes = ('b', '0', '1', 'c')
     shape = (-1, 2, 3, 4)
-    fmt = DenseFormat(axes, shape, 'floatX')
+    floatX_format = DenseFormat(axes, shape, 'floatX')
+    none_format = DenseFormat(axes, shape, None)
+
+    symbolic_batch_0 = floatX_format.make_batch(is_symbolic=True, name="woo")
+    symbolic_batch_1 = none_format.make_batch(is_symbolic=True,
+                                              name="woo",
+                                              dtype='floatX')
+
+    # Different symbolic batches are by definition unequal, so this can't work
+    # assert_equal(symbolic_batch_0, symbolic_batch_1)
+
+    floatX = numpy.dtype(theano.config.floatX)
+
+    for batch in (symbolic_batch_0, symbolic_batch_1):
+        assert_equal(batch.dtype, floatX)
+        assert_equal(batch.name, 'woo')
+
+    batch_shape = list(shape)
+    batch_size = 7
+    batch_shape[axes.index('b')] = batch_size
+
+    numeric_batch_0 = floatX_format.make_batch(batch_size=batch_size,
+                                               is_symbolic=False)
+    numeric_batch_1 = none_format.make_batch(batch_size=batch_size,
+                                             is_symbolic=False, dtype='floatX')
+    zero_batch = numpy.zeros(batch_shape, dtype=floatX)
+
+    for batch in (numeric_batch_0, numeric_batch_1):
+        assert_equal(batch.dtype, floatX)
+        numpy.testing.assert_equal(batch, zero_batch)
 
 
 def notest_denseformat_convert_numeric():
