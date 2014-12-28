@@ -457,79 +457,103 @@ def test_denseformat_convert_to_denseformat():
     test_simple_transpose()
 
     def test_expand_and_collapse_axes():
-        mono_rgb = DenseFormat(axes=('b', '0', '1', 'f'),
-                               shape=(-1, 32, 32, 3),
-                               dtype=int)
+        permutations = itertools.permutations
 
-        stereo_vectors = DenseFormat(axes=('b', 's', 'f'),
-                                     shape=(-1, 2, 32 * 32 * 3),
-                                     dtype=int)
-        mono_rgb_batch = mono_rgb.make_batch(batch_size=10,
-                                             is_symbolic=False)
+        b01f = ('b', '0', '1', 'f')
+        b01f_shape = (-1, 32, 32, 3)
+        batch_size = 10
 
-        assert mono_rgb_batch.shape == (10, 32, 32, 3)
+        for mono_axes in permutations(('b', '0', '1', 'f')):
+            mono_shape = list(b01f_shape[b01f.index(a)] for a in mono_axes)
+            mono_rgb = DenseFormat(axes=mono_axes,
+                                   shape=mono_shape,
+                                   dtype=int)
 
-        mono_rgb_batch.flatten()[:] = xrange(mono_rgb_batch.size)
+            stereo_axes = ('b', 's', 'f')
+            stereo_shape = [0, 0, 0]
+            stereo_shape[stereo_axes.index('b')] = -1
+            stereo_shape[stereo_axes.index('s')] = 2
+            stereo_shape[stereo_axes.index('f')] = \
+                (b01f_shape[b01f.index('0')] *
+                 b01f_shape[b01f.index('1')] *
+                 b01f_shape[b01f.index('f')])
 
-        assert_raises_regexp(ValueError,
-                             "If self.axes and target_format.axes don't "
-                             "contain the same axes",
-                             mono_rgb.convert,
-                             mono_rgb_batch,
-                             stereo_vectors)
+            stereo_vectors = DenseFormat(axes=stereo_axes,
+                                         shape=stereo_shape,
+                                         dtype=int)
 
-        axis_map = {'b': ('b', 's'),
-                    ('0', '1', 'f'): 'f'}
-        stereo_vector_batch = mono_rgb.convert(mono_rgb_batch,
-                                               stereo_vectors,
-                                               axis_map=axis_map)
+            mono_rgb_batch = mono_rgb.make_batch(batch_size=batch_size,
+                                                 is_symbolic=False)
 
-        convert_func = get_convert_func(mono_rgb, stereo_vectors, axis_map)
-        theano_stereo_vector_batch = convert_func(mono_rgb_batch)
+            stereo_shape[stereo_axes.index('b')] = batch_size // 2
+            mono_shape[mono_axes.index('b')] = batch_size
+            assert mono_rgb_batch.shape == tuple(mono_shape)
 
-        assert stereo_vector_batch.shape == (5, 2, 32 * 32 * 3)
+            mono_rgb_batch.flat = xrange(mono_rgb_batch.size)
+            assert_array_equal(mono_rgb_batch.flatten()[:3], (0, 1, 2))
 
-        def mono_indices_to_stereo_indices(mono_indices):
-            mono_axes = mono_rgb.axes
-            stereo_axes = stereo_vectors.axes
+            assert_raises_regexp(ValueError,
+                                 "If self.axes and target_format.axes don't "
+                                 "contain the same axes",
+                                 mono_rgb.convert,
+                                 mono_rgb_batch,
+                                 stereo_vectors)
 
-            stereo_indices = numpy.zeros(3, int)
-            stereo_indices[stereo_axes.index('b')] = \
-                mono_indices[mono_axes.index('b')] // 2
+            axis_map = {'b': ('b', 's'),
+                        ('0', '1', 'f'): 'f'}
+            stereo_vector_batch = mono_rgb.convert(mono_rgb_batch,
+                                                   stereo_vectors,
+                                                   axis_map=axis_map)
 
-            stereo_indices[stereo_axes.index('s')] = \
-                mono_indices[mono_axes.index('b')] % 2
+            assert_equal(stereo_vector_batch.shape, tuple(stereo_shape))
 
-            mono_inds_01f = tuple(mono_indices[mono_axes.index(a)]
-                                  for a in ('0', '1', 'f'))
-            mono_shapes_01f = tuple(mono_rgb_batch.shape[mono_axes.index(a)]
-                                    for a in ('0', '1', 'f'))
-            mono_scales_01f = \
-                numpy.cumprod((mono_shapes_01f[1:] + (1, ))[::-1])[::-1]
-            stereo_indices[stereo_axes.index('f')] = \
-                (mono_scales_01f * mono_inds_01f).sum()
+            convert_func = get_convert_func(mono_rgb, stereo_vectors, axis_map)
+            theano_stereo_vector_batch = convert_func(mono_rgb_batch)
 
-            return tuple(stereo_indices)
+            assert stereo_vector_batch.shape == (5, 2, 32 * 32 * 3)
 
-        mono_iterator = numpy.nditer(mono_rgb_batch, flags=['multi_index'])
-        stereo_vector_mask = numpy.zeros(stereo_vector_batch.shape,
-                                         dtype=bool)
+            def mono_indices_to_stereo_indices(mono_indices):
+                mono_axes = mono_rgb.axes
+                stereo_axes = stereo_vectors.axes
 
-        while not mono_iterator.finished:
-            mono_indices = mono_iterator.multi_index
-            assert_equal(mono_iterator[0], mono_rgb_batch[mono_indices])
+                stereo_indices = numpy.zeros(3, int)
+                stereo_indices[stereo_axes.index('b')] = \
+                    mono_indices[mono_axes.index('b')] // 2
 
-            stereo_indices = mono_indices_to_stereo_indices(mono_indices)
-            assert_array_equal(stereo_vector_batch[stereo_indices],
-                               mono_iterator[0])
+                stereo_indices[stereo_axes.index('s')] = \
+                    mono_indices[mono_axes.index('b')] % 2
 
-            assert_array_equal(theano_stereo_vector_batch[stereo_indices],
-                               mono_iterator[0])
+                mono_inds_01f = tuple(mono_indices[mono_axes.index(a)]
+                                      for a in ('0', '1', 'f'))
+                mono_shapes_01f = \
+                    tuple(mono_rgb_batch.shape[mono_axes.index(a)]
+                          for a in ('0', '1', 'f'))
+                mono_scales_01f = \
+                    numpy.cumprod((mono_shapes_01f[1:] + (1, ))[::-1])[::-1]
+                stereo_indices[stereo_axes.index('f')] = \
+                    (mono_scales_01f * mono_inds_01f).sum()
 
-            stereo_vector_mask[stereo_indices] = True
+                return tuple(stereo_indices)
 
-            mono_iterator.iternext()
+            mono_iterator = numpy.nditer(mono_rgb_batch, flags=['multi_index'])
+            stereo_vector_mask = numpy.zeros(stereo_vector_batch.shape,
+                                             dtype=bool)
 
-        assert stereo_vector_mask.all()
+            while not mono_iterator.finished:
+                mono_indices = mono_iterator.multi_index
+                assert_equal(mono_iterator[0], mono_rgb_batch[mono_indices])
+
+                stereo_indices = mono_indices_to_stereo_indices(mono_indices)
+                assert_array_equal(stereo_vector_batch[stereo_indices],
+                                   mono_iterator[0])
+
+                assert_array_equal(theano_stereo_vector_batch[stereo_indices],
+                                   mono_iterator[0])
+
+                stereo_vector_mask[stereo_indices] = True
+
+                mono_iterator.iternext()
+
+            assert stereo_vector_mask.all()
 
     test_expand_and_collapse_axes()
