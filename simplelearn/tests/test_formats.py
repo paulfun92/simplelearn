@@ -276,21 +276,21 @@ def test_format_convert():
 
 def test_denseformat_init():
     assert_raises_regexp(TypeError,
-                         "axes contained non-strings",
+                         "axes contain non-strings",
                          DenseFormat,
                          ('b', 0, 1, 'c'),
                          (-1, 1, 1, 1),
                          'floatX')
 
     assert_raises_regexp(ValueError,
-                         "axes contained duplicate elements",
+                         "axes contain duplicate elements",
                          DenseFormat,
                          ('b', '0', '1', '0'),
                          (-1, 1, 1, 1),
                          'floatX')
 
     assert_raises_regexp(TypeError,
-                         "shape contained non-ints",
+                         "shape contains non-ints",
                          DenseFormat,
                          ('b', '0', '1', 'c'),
                          (-1, 1, 1, 1.),
@@ -375,7 +375,7 @@ def test_denseformat_make_batch():
         numpy.testing.assert_equal(batch, zero_batch)
 
 
-def notest_denseformat_convert_numeric():
+def test_denseformat_convert_to_denseformat():
 
     def make_patterned_batch(batch_format):
         """
@@ -396,24 +396,31 @@ def notest_denseformat_convert_numeric():
 
             return result
 
-        iterator = numpy.nditer(batch, flags=['multi_index'])
+        iterator = numpy.nditer(batch, flags=['multi_index'],
+                                op_flags=['readwrite'])
         while not iterator.finished:
             indices = iterator.multi_index
-            batch[indices] = make_element(indices, batch_format.axes)
+            iterator[0] = make_element(indices, batch_format.axes)
+            # batch[indices] = make_element(indices, batch_format.axes)
+            iterator.iternext()
 
-        assert batch != numpy.zeros(batch.shape)
+        assert (batch != numpy.zeros(batch.shape)).any()
         return batch
 
     # test simple permutations; i.e. no difference in the set of axes, or their
     # corresponding dimension sizes.
-    dense_formats = (DenseFormat(axes=axes, shape=shape, dtype=int)
+    dense_formats = [DenseFormat(axes=axes, shape=shape, dtype=int)
                      for axes, shape
                      in safe_izip(itertools.permutations(('c', '0', '1', 'b')),
-                                  itertools.permutations((2, 3, 4, -1))))
+                                  itertools.permutations((2, 3, 4, -1)))]
 
-    for source, target in itertools.product(dense_formats, repeat=2):
+    patterned_batches = [make_patterned_batch(fmt) for fmt in dense_formats]
+    # pdb.set_trace()
+    # for source, target in itertools.product(dense_formats, repeat=2):
+    for source, source_batch in safe_izip(dense_formats, patterned_batches):
         source_batch = make_patterned_batch(source)
-        target_batch = source.convert(source_batch, target)
-        expected_target_batch = make_patterned_batch(target)
-        pdb.set_trace()
-        assert_allclose(target_batch, expected_target_batch)
+
+        for target, expected_target_batch in safe_izip(dense_formats,
+                                                       patterned_batches):
+            target_batch = source.convert(source_batch, target)
+            assert_allclose(target_batch, expected_target_batch)

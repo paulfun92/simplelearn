@@ -1,6 +1,7 @@
+import itertools
+import numpy
 from simplelearn.utils import safe_izip, flatten
 from nose.tools import assert_raises_regexp, assert_equal
-import numpy
 
 
 def test_safe_izip():
@@ -23,6 +24,13 @@ def test_safe_izip():
     assert_raises_regexp(IndexError,
                          "Can't safe_izip over sequences of different lengths",
                          iterate_over_unequal_lengths)
+
+
+# def test_safe_izip2():
+#     pairs = safe_izip(itertools.permutations(('c', '0', '1', 'b')),
+#                       itertools.permutations((2, 3, 4, -1)))
+#     for pair in pairs:
+#         print pair
 
 
 def test_flatten():

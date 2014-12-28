@@ -49,6 +49,8 @@ class Format(object):
 
     @dtype.setter
     def dtype(self, new_dtype):
+        # pylint: disable=attribute-defined-outside-init
+
         if new_dtype is None or str(new_dtype) == 'floatX':
             self._dtype = new_dtype
         else:
@@ -136,6 +138,8 @@ class Format(object):
 
         result = self._convert(batch, target_format, output)
 
+        target_format.check(result)
+
         if self.is_symbolic(batch) != self.is_symbolic(result):
             def symbolic_or_numeric(batch):
                 return "symbolic" if self.is_symbolic(batch) else "numeric"
@@ -146,8 +150,6 @@ class Format(object):
                             dict(self_type=type(self),
                                  data_type=symbolic_or_numeric(batch),
                                  result_type=symbolic_or_numeric(result)))
-
-        target_format.check(result)
 
         return result
 
@@ -307,15 +309,15 @@ class DenseFormat(Format):
         super(DenseFormat, self).__init__(dtype=dtype)
 
         if not all(isinstance(axis, str) for axis in axes):
-            raise TypeError("axes contained non-strings: %s" %
+            raise TypeError("axes contain non-strings: %s" %
                             str(tuple(axes)))
 
         if len(frozenset(axes)) < len(axes):
-            raise ValueError("axes contained duplicate elements: %s" %
+            raise ValueError("axes contain duplicate elements: %s" %
                              str(tuple(axes)))
 
         if not all(numpy.issubdtype(type(size), 'int') for size in shape):
-            raise TypeError("shape contained non-ints: %s" % str(shape))
+            raise TypeError("shape contains non-ints: %s" % str(shape))
 
         if len(axes) != len(shape):
             raise ValueError("axes and shape's lengths differ (%s vs %s)." %
@@ -444,17 +446,39 @@ class DenseFormat(Format):
         """
         Converts a batch to another format.
 
-        When converting to another DenseFormat, if the axes are the same,
+        Implemented by methods '_convert_to_XXX()' for target format XXX.
+        See those methods' documentation for details.
+        """
+
+        if isinstance(target_format, DenseFormat):
+            return self._convert_to_DenseFormat(batch,
+                                                target_format,
+                                                output_batch,
+                                                **kwargs)
+        else:
+            raise NotImplementedError("Conversion from format %s to format %s "
+                                      "not supported." %
+                                      (type(self), type(target_format)))
+
+    def _convert_to_DenseFormat(self,
+                                batch,
+                                target_format,
+                                output_batch,
+                                **kwargs):
+        """
+        Converts batch in this format to a DenseFormat.
+
+        If the axes of <self> and <target_format> are the same,
         but in a different order, this will transpose the axes for you.
 
         Example 1: same axes, different order
 
-          from = DenseFormat(axes=('a, 'b', 'c'), sizes=(3, 3, 3))
-          to = DenseFormat(axes=('b', 'c', 'a'), sizes=(3, 3, 3))
-          from.format(batch, to)  # transposes axes correctly
+          source = DenseFormat(axes=('a', 'b', 'c'), sizes=(3, 3, 3))
+          target = DenseFormat(axes=('b', 'c', 'a'), sizes=(3, 3, 3))
+          source.format(batch, target)  # transposes batch to target.axes
 
-        If the axes are different, you must supply an "axis_map" dict to
-        clarify which axes of self correspond with which axes of target_format.
+        If the axes are different, you must supply an "axis_map" argument to
+        specify which axes of self correspond with which axes of target_format.
 
         Example 2: same # of axes, different names.
 
@@ -463,91 +487,155 @@ class DenseFormat(Format):
           from.format(batch, to, axis_map={'a': 'd',
                                            'b': 'c'})
 
-        Example 3: different # of axes.
+        You can use axis_map to collapse multiple axes into a single axis:
 
-          images = DenseFormat(axes=('f', '0', '1', 'b'),
-                               sizes=(1, 10, 10, 100))
+        Example 3: stereo RGB to mono RGB
 
-          vectors = DenseFormat(axes=('b', 'f'),
-                                sizes=(100, 100))
+          stereo = DenseFormat(axes=('b', 's', '0', '1', 'f'),
+                               sizes=(-1, 2, 32, 32, 3))
+          mono = DenseFormat(axes=('b', '0', '1', 'f'),
+                             sizes=(-1, 32, 32, 3))
 
-          images.format(batch, vectors, axis_map={'b': 'b',
-                                                  'f': ('0', '1', 'f')}
+          # No need to specify identity mappings like '0':'0' and '1':'1'.
 
-          axis_map always maps from the axis names of the format with
-          fewer axes, to the names of the format with more axes. In this
-          case, it's mapping from vectors' names to images' names, even
-          though we're formatting from images to vectors.
+          mono_batch = stereo.convert(stereo_batch,
+                                      mono,
+                                      axis_map={('b', 's'): 'b'})
 
-          The line "'f': ('0', '1', 'f')" indicates that the image batch's
-          ('f', '0', '1') dimensions will first be transposed to ('0', '1',
-          'f'), before being flattened to a vector with a single dimension 'f'.
+        You can also expand a single axis into multiple axes:
+
+        Example 4: mono RGB back to stereo
+
+          stereo_batch_2 = mono.convert(mono_batch,
+                                        stereo,
+                                        axis_map={'b': ('b', 's')})
+
+        ... or both expand some axes, and collapse others:
+
+        Example 5: mono RGB to stereo flattened image vector
+
+          stereo_vectors = DenseFormat(axes=('b', 's', 'f'),
+                                       sizes=(-1, 2, 32*32*3))
+          stereo_vector_batch = mono.convert(mono_batch,
+                                             stereo_vectors,
+                                             axis_map={'b': ('b', 's'),
+                                                       ('0', '1', 'f') : 'f'})
+
+        When expanding/collapsing a group of axes, the order of the axes in the
+        tuple matters. In example 5 above, ('0', '1', 'f') : 'f' means that
+        the image vectors (output channel 'f') will have row-major ('0'-major)
+        element layout.
 
         Parameters
         ----------
+
         axis_map: dict
-          If mapping from self.axes to target_format.axes is ambiguous,
-          you must supply axis_map. This is a dict that maps
+          A dict mapping strings or tuples to strings or tuples. Maps input
+          batch axes to output batch axes. See examples above for usage.
+
+          Identity mappings (e.g. 'b':'b') may be omitted. If all mappings are
+          identity mappings, the axis_map may be omitted entirely.
         """
 
-        if isinstance(target_format, DenseFormat):
-            if numpy.prod(self.shape) != numpy.prod(target_format.shape):
-                raise ValueError("Total batch size of self and target_format "
-                                 "differ (%d vs %d)." %
-                                 (numpy.prod(self.shape),
-                                  numpy.prod(target_format.shape)))
+        if frozenset(self.axes) != frozenset(target_format.axes) and \
+           'axis_map' not in kwargs:
+            raise ValueError("If self.axes and target_format.axes don't "
+                             "contain the same axes, then you must supply an "
+                             "'axis_map' keyword argument.")
 
-            if frozenset(self.axes) != frozenset(target_format.axes):
-                if 'axis_map' not in kwargs:
-                    raise ValueError("self.axes contain different axes than "
-                                     "target_format.axes. You therefore must "
-                                     "supply an 'axis_map' argument.")
+        if 'axis_map' in kwargs:
+            axis_map = kwargs['axis_map']
+            if not (axis_map is None or isinstance(axis_map, dict)):
+                raise TypeError("Expected axis_map to be None or a dict, not "
+                                "a %s." % type(axis_map))
 
-                axis_map = kwargs['axis_map']
-
-                if len(self.axes) > len(target_format.axes):
-                    more, fewer = (self, target_format)
-                else:
-                    more, fewer = (target_format, self)
-
-                if frozenset(fewer.axes) != frozenset(axis_map.iterkeys()):
-                    raise ValueError("axis_map's keys %s don't correspond to "
-                                     "the axes of the format with fewer "
-                                     "dimensions %s" %
-                                     (frozenset(axis_map.iterkeys()),
-                                      frozenset(fewer.axes)))
-
-                expanded_fewer_axes = flatten(axis_map[x] for x in fewer.axes)
-
-                if self.is_symbolic(batch):
-                    raise NotImplementedError()
-                else:
-
-                    def transpose(batch, from_axes, to_axes):
-                        transposed_indices = tuple(from_axes.index(x)
-                                                   for x in to_axes)
-                        return batch.transpose(transposed_indices)
-
-                    if len(self.axes) > len(target_format.axes):  # more->fewer
-                        result = transpose(batch,
-                                           self.axes,
-                                           expanded_fewer_axes)
-                        result = result.reshape(target_format.shape)
-                    else:  # fewer->more
-                        expanded_fewer_shape = (more.shape[more.axes.index(x)]
-                                                for x in expanded_fewer_axes)
-                        batch = batch.reshape(expanded_fewer_shape)
-                        result = transpose(batch,
-                                           expanded_fewer_axes,
-                                           target_format.axes)
-
-                    if output_batch is not None:
-                        output_batch[...] = result
-                        return output_batch
-                    else:
-                        return result
-
+            if axis_map is None:
+                axis_map = dict()
         else:
-            raise NotImplementedError("Converting from %s to %s not yet "
-                                      "implemented." % (type(self),
-                                                        type(target_format)))
+            axis_map = dict()
+
+        def get_standardized_axis_map(axis_map, source_axes, target_axes):
+            """
+            Returns a copy of target_axes, with any omitted identity mappings
+            (e.g. 'b':'b') added.
+            """
+
+            flat_keys = frozenset(flatten(axis_map.iterkeys()))
+            flat_values = frozenset(flatten(axis_map.itervalues()))
+            source_axes = frozenset(source_axes)
+            target_axes = frozenset(target_axes)
+
+            if not flat_keys.issubset(source_axes):
+                raise ValueError("axes_map's keys %s aren't a subset of the "
+                                 "axes in source format %s." %
+                                 (str(flat_keys), str(source_axes)))
+
+            if not flat_values.issubset(target_axes):
+                raise ValueError("axes_map's values %s aren't a subset of the "
+                                 "axes in target format %s." %
+                                 (str(flat_values), str(target_axes)))
+
+            implicit_keys = source_axes - flat_keys
+            implicit_values = target_axes - flat_values
+
+            if implicit_keys != implicit_values:
+                raise ValueError("Can't infer implicit identity axis "
+                                 "mappings. The axis_map's missing implicit "
+                                 "keys %s don't match its missing implicit "
+                                 "values %s." % (str(implicit_keys),
+                                                 str(implicit_values)))
+
+            result = dict(axis_map)
+
+            # Adds missing identity mappings
+            for implicit_axis in implicit_keys:
+                result[implicit_axis] = implicit_axis
+
+            assert frozenset(flatten(result.iterkeys())) == source_axes
+            assert frozenset(flatten(result.itervalues())) == target_axes
+
+            return result
+
+        def transpose(batch, from_axes, to_axes):
+            assert frozenset(from_axes) == frozenset(to_axes)
+
+            for axes in (from_axes, to_axes):
+                assert all(isinstance(axis, str) for axis in axes)
+
+            return batch.transpose([from_axes.index(a) for a in to_axes])
+
+        axis_map = get_standardized_axis_map(axis_map,
+                                             self.axes,
+                                             target_format.axes)
+
+        grouped_source_axes = tuple(axis_map.iterkeys())
+        ungrouped_source_axes = tuple(flatten(grouped_source_axes))
+        batch = transpose(batch, self.axes, ungrouped_source_axes)
+
+        grouped_target_axes = tuple(axis_map[k] for k in grouped_source_axes)
+        ungrouped_target_axes = tuple(flatten(grouped_target_axes))
+
+        # The sizes of target axes, in the order that they appear in
+        # ungrouped_target_axes
+        ungrouped_target_shape = \
+            tuple(target_format.shape[target_format.axes.index(a)]
+                  for a in ungrouped_target_axes)
+        batch = batch.reshape(ungrouped_target_shape)
+        batch = transpose(batch,
+                          ungrouped_target_axes,
+                          target_format.axes)
+
+        if output_batch is not None:
+            output_batch[...] = batch
+            return output_batch
+        else:
+            return batch
+
+    def _is_equivalent(self, target_format):
+        for fmt in (self, target_format):
+            assert isinstance(fmt.axes, tuple)
+            assert isinstance(fmt.shape, tuple)
+
+        return (self.dtype == target_format.dtype and
+                self.axes == target_format.axes and
+                self.shape == target_format.shape)

@@ -10,10 +10,11 @@ def safe_izip(*iterables):
     sentinel = object()
 
     iterators = tuple(chain(x, (sentinel,)) for x in iterables)
+    # print "start safe_izip"
 
     while iterators:
         items = tuple(map(next, iterators))
-
+        # print items
         if all(item is sentinel for item in items):  # all are sentinels
             raise StopIteration()
         elif any(item is sentinel for item in items):  # some are sentinels
