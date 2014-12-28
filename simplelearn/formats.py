@@ -90,7 +90,7 @@ class Format(object):
         raise NotImplementedError("%s._is_equivalent() not yet implemented." %
                                   type(self))
 
-    def convert(self, batch, target_format, output=None):
+    def convert(self, batch, target_format, output=None, **kwargs):
         """
         Formats a data batch in this format to the target_format.
 
@@ -136,7 +136,7 @@ class Format(object):
             raise ValueError("You can't provide an output argument when "
                              "data is symbolic.")
 
-        result = self._convert(batch, target_format, output)
+        result = self._convert(batch, target_format, output, **kwargs)
 
         target_format.check(result)
 
@@ -153,7 +153,7 @@ class Format(object):
 
         return result
 
-    def _convert(self, batch, target_format, output):
+    def _convert(self, batch, target_format, output, **kwargs):
         """
         Implementation of format(). See that method's description for specs.
 

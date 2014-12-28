@@ -2,16 +2,18 @@
 Tests ../formats.py
 """
 
-import os, pdb
+import os
 import tempfile
 import itertools
 import numpy
-from numpy.testing import assert_allclose
+from numpy.testing import assert_allclose, assert_array_equal
 import theano
 import theano.tensor as T
 from simplelearn.formats import Format, DenseFormat
 from simplelearn.utils import safe_izip
 from nose.tools import assert_raises, assert_raises_regexp, assert_equal
+
+import pdb  # pylint: disable=unused-import
 
 _all_dtypes = tuple(numpy.dtype(t.dtype) for t in theano.scalar.all_types)
 
@@ -330,6 +332,8 @@ def test_denseformat_init():
 def test_denseformat_make_batch():
     batchless_format = DenseFormat(('a', 'c', 'd'), (1, 1, 1), 'floatX')
 
+    # pylint: disable=anomalous-backslash-in-string
+
     assert_raises_regexp(ValueError,
                          "This format has no batch \('b'\) axis",
                          batchless_format.make_batch,
@@ -377,62 +381,148 @@ def test_denseformat_make_batch():
 
 def test_denseformat_convert_to_denseformat():
 
-    def make_patterned_batch(batch_format):
-        """
-        Makes a batch whose elements are a function of the indices and axes.
-        """
+    def test_simple_transpose():
 
-        batch = batch_format.make_batch(batch_size=3, is_symbolic=False)
+        def make_patterned_batch(batch_format):
+            """
+            Returns a batch with patterned values.
 
-        def make_element(indices, axes):
-            indices = numpy.array(indices)
-            axes = numpy.array(tuple(ord(a) for a in axes))
-            result = 0
+            The values are a function of the indices and their corresponding
+            axes' names, so that they are invariant to transposing the axes.
+            """
 
-            for index, axis in safe_izip(indices, axes):
-                index = numpy.mod(index, 10)
-                axis = numpy.mod(int(axis), 5)
-                result += index * axis
+            batch = batch_format.make_batch(batch_size=3, is_symbolic=False)
 
-            return result
+            def make_element(indices, axes):
+                indices = numpy.array(indices)
+                axes = numpy.array(tuple(ord(a) for a in axes))
+                result = 0
 
-        iterator = numpy.nditer(batch, flags=['multi_index'],
-                                op_flags=['readwrite'])
-        while not iterator.finished:
-            indices = iterator.multi_index
-            iterator[0] = make_element(indices, batch_format.axes)
-            # batch[indices] = make_element(indices, batch_format.axes)
-            iterator.iternext()
+                for index, axis in safe_izip(indices, axes):
+                    index = numpy.mod(index, 10)
+                    axis = numpy.mod(int(axis), 5)
+                    result += index * axis
 
-        assert (batch != numpy.zeros(batch.shape)).any()
-        return batch
+                return result
 
-    # test simple permutations; i.e. no difference in the set of axes, or their
-    # corresponding dimension sizes.
-    dense_formats = [DenseFormat(axes=axes, shape=shape, dtype=int)
-                     for axes, shape
-                     in safe_izip(itertools.permutations(('c', '0', '1', 'b')),
-                                  itertools.permutations((2, 3, 4, -1)))]
+            iterator = numpy.nditer(batch, flags=['multi_index'],
+                                    op_flags=['readwrite'])
+            while not iterator.finished:
+                indices = iterator.multi_index
+                iterator[0] = make_element(indices, batch_format.axes)
+                # batch[indices] = make_element(indices, batch_format.axes)
+                iterator.iternext()
 
-    patterned_batches = [make_patterned_batch(fmt) for fmt in dense_formats]
+            assert (batch != numpy.zeros(batch.shape)).any()
+            return batch
 
-    def get_convert_func(source, target):
-        """
-        Returns a theano func that implements source.convert(x, target).
-        """
-        source_batch = source.make_batch(is_symbolic=True)
-        target_batch = source.convert(source_batch, target)
-        return theano.function([source_batch], target_batch)
+        # test simple permutations; i.e. no difference in the set of axes, or
+        # their corresponding dimension sizes.
+        permutations = itertools.permutations
+        dense_formats = [DenseFormat(axes=axes, shape=shape, dtype=int)
+                         for axes, shape
+                         in safe_izip(permutations(('c', '0', '1', 'b')),
+                                      permutations((2, 3, 4, -1)))]
 
-    # for source, target in itertools.product(dense_formats, repeat=2):
-    for source, source_batch in safe_izip(dense_formats, patterned_batches):
-        source_batch = make_patterned_batch(source)
+        patterned_batches = [make_patterned_batch(dense_format)
+                             for dense_format in dense_formats]
 
-        for target, expected_target_batch in safe_izip(dense_formats,
-                                                       patterned_batches):
+        def get_convert_func(source, target):
+            """
+            Returns a theano function f(x): return source.convert(x, target).
+            """
+            source_batch = source.make_batch(is_symbolic=True)
             target_batch = source.convert(source_batch, target)
-            assert_allclose(target_batch, expected_target_batch)
+            return theano.function([source_batch], target_batch)
 
-            convert_func = get_convert_func(source, target)
-            target_batch_2 = convert_func(source_batch)
-            numpy.testing.assert_array_equal(target_batch, target_batch_2)
+        # for source, target in itertools.product(dense_formats, repeat=2):
+        for source, source_batch in safe_izip(dense_formats,
+                                              patterned_batches):
+            source_batch = make_patterned_batch(source)
+
+            for target, expected_target_batch in safe_izip(dense_formats,
+                                                           patterned_batches):
+                target_batch = source.convert(source_batch, target)
+                assert_allclose(target_batch, expected_target_batch)
+
+                output = numpy.zeros(target_batch.shape, target_batch.dtype)
+                returned_output = source.convert(source_batch, target, output)
+                assert output is returned_output
+                assert_allclose(output, expected_target_batch)
+
+                convert_func = get_convert_func(source, target)
+                target_batch_2 = convert_func(source_batch)
+                assert_array_equal(target_batch, target_batch_2)
+
+    # test_simple_transpose()
+
+    def test_expand_and_collapse_axes():
+        mono_rgb = DenseFormat(axes=('b', '0', '1', 'f'),
+                               shape=(-1, 32, 32, 3),
+                               dtype=int)
+
+        stereo_vectors = DenseFormat(axes=('b', 's', 'f'),
+                                     shape=(-1, 2, 32 * 32 * 3),
+                                     dtype=int)
+        mono_rgb_batch = mono_rgb.make_batch(batch_size=10,
+                                             is_symbolic=False)
+
+        assert mono_rgb_batch.shape == (10, 32, 32, 3)
+
+        mono_rgb_batch.flatten()[:] = xrange(mono_rgb_batch.size)
+
+        assert_raises_regexp(ValueError,
+                             "If self.axes and target_format.axes don't "
+                             "contain the same axes",
+                             mono_rgb.convert,
+                             mono_rgb_batch,
+                             stereo_vectors)
+
+        stereo_vector_batch = mono_rgb.convert(mono_rgb_batch,
+                                               stereo_vectors,
+                                               axis_map={'b': ('b', 's'),
+                                                         ('0', '1', 'f'): 'f'})
+
+        assert stereo_vector_batch.shape == (5, 2, 32 * 32 * 3)
+
+        def mono_indices_to_stereo_indices(mono_indices):
+            mono_axes = mono_rgb.axes
+            stereo_axes = stereo_vectors.axes
+
+            stereo_indices = numpy.zeros(3, int)
+            stereo_indices[stereo_axes.index('b')] = \
+                mono_indices[mono_axes.index('b')] // 2
+
+            stereo_indices[stereo_axes.index('s')] = \
+                mono_indices[mono_axes.index('b')] % 2
+
+            mono_inds_01f = tuple(mono_indices[mono_axes.index(a)]
+                                  for a in ('0', '1', 'f'))
+            mono_shapes_01f = tuple(mono_rgb_batch.shape[mono_axes.index(a)]
+                                    for a in ('0', '1', 'f'))
+            mono_scales_01f = \
+                numpy.cumprod((mono_shapes_01f[1:] + (1, ))[::-1])[::-1]
+            stereo_indices[stereo_axes.index('f')] = \
+                (mono_scales_01f * mono_inds_01f).sum()
+
+            return tuple(stereo_indices)
+
+        mono_iterator = numpy.nditer(mono_rgb_batch, flags=['multi_index'])
+        stereo_vector_mask = numpy.zeros(stereo_vector_batch.shape,
+                                         dtype=bool)
+
+        while not mono_iterator.finished:
+            mono_indices = mono_iterator.multi_index
+            assert_equal(mono_iterator[0], mono_rgb_batch[mono_indices])
+
+            stereo_indices = mono_indices_to_stereo_indices(mono_indices)
+            assert_array_equal(stereo_vector_batch[stereo_indices],
+                               mono_iterator[0])
+
+            stereo_vector_mask[stereo_indices] = True
+
+            mono_iterator.iternext()
+
+        assert stereo_vector_mask.all()
+
+    test_expand_and_collapse_axes()
