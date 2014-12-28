@@ -381,6 +381,14 @@ def test_denseformat_make_batch():
 
 def test_denseformat_convert_to_denseformat():
 
+    def get_convert_func(source, target, axis_map=None):
+        """
+        Returns a theano function f(x): return source.convert(x, target).
+        """
+        source_batch = source.make_batch(is_symbolic=True)
+        target_batch = source.convert(source_batch, target, axis_map=axis_map)
+        return theano.function([source_batch], target_batch)
+
     def test_simple_transpose():
 
         def make_patterned_batch(batch_format):
@@ -427,14 +435,6 @@ def test_denseformat_convert_to_denseformat():
         patterned_batches = [make_patterned_batch(dense_format)
                              for dense_format in dense_formats]
 
-        def get_convert_func(source, target):
-            """
-            Returns a theano function f(x): return source.convert(x, target).
-            """
-            source_batch = source.make_batch(is_symbolic=True)
-            target_batch = source.convert(source_batch, target)
-            return theano.function([source_batch], target_batch)
-
         # for source, target in itertools.product(dense_formats, repeat=2):
         for source, source_batch in safe_izip(dense_formats,
                                               patterned_batches):
@@ -454,7 +454,7 @@ def test_denseformat_convert_to_denseformat():
                 target_batch_2 = convert_func(source_batch)
                 assert_array_equal(target_batch, target_batch_2)
 
-    # test_simple_transpose()
+    test_simple_transpose()
 
     def test_expand_and_collapse_axes():
         mono_rgb = DenseFormat(axes=('b', '0', '1', 'f'),
@@ -478,10 +478,14 @@ def test_denseformat_convert_to_denseformat():
                              mono_rgb_batch,
                              stereo_vectors)
 
+        axis_map = {'b': ('b', 's'),
+                    ('0', '1', 'f'): 'f'}
         stereo_vector_batch = mono_rgb.convert(mono_rgb_batch,
                                                stereo_vectors,
-                                               axis_map={'b': ('b', 's'),
-                                                         ('0', '1', 'f'): 'f'})
+                                               axis_map=axis_map)
+
+        convert_func = get_convert_func(mono_rgb, stereo_vectors, axis_map)
+        theano_stereo_vector_batch = convert_func(mono_rgb_batch)
 
         assert stereo_vector_batch.shape == (5, 2, 32 * 32 * 3)
 
@@ -517,6 +521,9 @@ def test_denseformat_convert_to_denseformat():
 
             stereo_indices = mono_indices_to_stereo_indices(mono_indices)
             assert_array_equal(stereo_vector_batch[stereo_indices],
+                               mono_iterator[0])
+
+            assert_array_equal(theano_stereo_vector_batch[stereo_indices],
                                mono_iterator[0])
 
             stereo_vector_mask[stereo_indices] = True
