@@ -415,7 +415,15 @@ def test_denseformat_convert_to_denseformat():
                                   itertools.permutations((2, 3, 4, -1)))]
 
     patterned_batches = [make_patterned_batch(fmt) for fmt in dense_formats]
-    # pdb.set_trace()
+
+    def get_convert_func(source, target):
+        """
+        Returns a theano func that implements source.convert(x, target).
+        """
+        source_batch = source.make_batch(is_symbolic=True)
+        target_batch = source.convert(source_batch, target)
+        return theano.function([source_batch], target_batch)
+
     # for source, target in itertools.product(dense_formats, repeat=2):
     for source, source_batch in safe_izip(dense_formats, patterned_batches):
         source_batch = make_patterned_batch(source)
@@ -424,3 +432,7 @@ def test_denseformat_convert_to_denseformat():
                                                        patterned_batches):
             target_batch = source.convert(source_batch, target)
             assert_allclose(target_batch, expected_target_batch)
+
+            convert_func = get_convert_func(source, target)
+            target_batch_2 = convert_func(source_batch)
+            numpy.testing.assert_array_equal(target_batch, target_batch_2)
