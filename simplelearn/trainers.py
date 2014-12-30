@@ -25,7 +25,33 @@ import theano.tensor as T
 #
 # hmm... not so bad.
 
+class StopTraining(Exception):
+    """
+    An exception thrown to signal the end of training.
+
+    Analogous to the built-in exception StopIteration.
+    """
+    def __init__(self, status, message):
+        if status not in ('ok', 'error'):
+            raise ValueError("Expected StopTraining status to be 'ok' or "
+                             "'error', but got '%s'." % str(status))
+
+        self.status = status
+        super(StopTraining).__init__(message)
+
+
 class GradientBasedParameterUpdater(object):
+    """
+    Support class for gradient-based trainers.
+
+    The update_parameters() method updates a set of parameters, given
+    their gradients.
+
+    Subclasses must override its implementation, _update_parameters().
+    """
+    def __init__(self):
+        pass
+
     def update_parameters(gradients, parameters):
         """
         Updates parameters in-place, based on their gradients.
@@ -38,30 +64,60 @@ class GradientBasedParameterUpdater(object):
         parameters: theano shared variable
           The parameters to be updated in-place.
         """
+
         assert_equal(gradients.shape, parameters.shape)
         assert_equal(gradients.dtype, parameters.dtype)
 
         self._update_parameters(gradients, parameters)
 
     def _update_parameters(gradients, parameters):
-        """
-        Implementation of update_parameters.
-
-        See docs of that method for details.
-        """
-        raise NotImplementedError("%s._update_parameter() not yet implemented."
+        raise NotImplementedError("%s.update_parameters() not yet implemented."
                                   % type(self))
 
 
-class MomentumBasedParameterUpdater(GradientBasedParameterUpdater):
+class SgdParameterUpdater(GradientBasedParameterUpdater):
+    """
+    Implements momentum-based gradient descent.
+
+    The momentum and learning_rate are stored as numpy scalars, meaning you can
+    modify them in-place, for example using a callback called at the end of
+    each epoch.
+    """
 
     def __init__(initial_learning_rate, initial_momentum):
-        self._learning_rate = copy(initial_learning_rate)
-        self._momentum = copy(initial_momentum)
+        def check_arg(arg, name):
+            if not isinstance(arg, float):
+                raise TypeError("Expected %s to be a float, not a %s." %
+                                name, type(arg))
+
+            if arg < 0.0 or arg > 1.0:
+                raise ValueError("Expected %s to be in the range [0.0, 1.0], "
+                                 "but got %g." % (name, arg))
+
+        check_arg(initial_learning_rate, 'initial_learning_rate')
+        check_arg(initial_momentum, 'initial_momentum')
+
+        floatX = numpy.dtype(theano.config.floatX)
+
+        self.learning_rate = numpy.asarray(initial_learning_rate, dtype=floatX)
+        self.momentum = numpy.asarray(initial_momentum, dtype=floatX)
         self._previous_update = None
 
     def _update_parameters(gradients, parameters):
-        new_update = gradients * (-self._learning_rate)
+        """
+        Updates parameters in-place, based on their gradients.
+
+        Parameters
+        ----------
+        gradients: numpy array
+          The gradients of the training cost with respect to parameters.
+
+        parameters: theano shared variable
+          The parameters to be updated in-place.
+        """
+
+        new_update = gradients * (-self.learning_rate)
+
         if self._previous_update is not None:
             new_update = (new_update * (1.0 - self.momentum) +
                           self._previous_update * self.momentum)
@@ -71,6 +127,23 @@ class MomentumBasedParameterUpdater(GradientBasedParameterUpdater):
 
 
 class LinearlyDecayingCallback(object):
+    """
+    Linearly decays a scalar down to some final value over N epochs.
+
+    Parameters
+    ----------
+
+    value: numpy.ndarray scalar
+      A 0-dimensional numpy array, with floating-point dtype. This value
+      will be decayed in-place.
+
+    saturated_value: float
+      Final value of <value>.
+
+    epochs_to_saturation: int
+      <value> should decay to <saturated_value> after this many epochs.
+    """
+
     def __init__(value, saturated_value, epochs_to_saturation):
         if not isinstance(value, numpy.ndarray) or value.ndim != 0:
             raise TypeError("value must be a 0-dimensional numpy array.")
@@ -79,6 +152,11 @@ class LinearlyDecayingCallback(object):
             raise TypeError("value.dtype must be a floating-point dtype, not "
                             "%s." % value.dtype)
 
+        if value < saturated_value:
+            raise ValueError("The value (%g) is expected to be bigger than "
+                             "its saturated_value (%g)." % (value,
+                                                            saturated_value))
+
         self._initial_value = float(value)
         self._saturated_value = saturated_value
         self._epochs_to_saturation = epochs_to_saturation
@@ -86,12 +164,38 @@ class LinearlyDecayingCallback(object):
 
     def __call__(self):
         self._num_epochs_seen += 1
-        alpha = (float(self._num_epochs_seen) /
-                 float(self._epochs_to_saturation))
-        alpha = max(1.0, alpha)
+        assert self._num_epochs_seen >= 0
+
+        alpha = min(1.0, (float(self._num_epochs_seen) /
+                          float(self._epochs_to_saturation)))
 
         value[...] = (self._initial_value * (1.0 - alpha) +
                       self._saturated_value * alpha)
+
+
+class LimitNumEpochsCallback(object):
+    """
+    Throws a StopTraining exception after a fixed number of epochs.
+    """
+
+    def __init__(self, max_num_epochs):
+        if not numpy.issubdtype(max_num_epochs, numpy.integer):
+            raise TypeError("Expected max_num_epochs to be an integer, not a "
+                            "%s." % type(max_num_epochs))
+
+        if max_num_epochs < 0:
+            raise ValueError("max_num_epochs must be non-negative, got %d." %
+                             max_num_epochs)
+
+        self._max_num_epochs = max_num_epochs
+        self._epochs_seen = -1
+
+    def __call__(self):
+        self._epochs_seen += 1
+        if self._epochs_seen >= self.max_num_epochs:
+            raise StopTraining(status='ok',
+                               message=('Reached max # of epochs %d.' %
+                                        self._max_num_epochs))
 
 
 class Sgd(object):
@@ -129,14 +233,13 @@ class Sgd(object):
       These get called once before the initial epoch, then after each epoch.
       They are called in the order in which they're listed.
       At least one of them must halt the training at some point by raising an
-      EndTrainingException.
+      StopTraining.
     """
     def __init__(self,
                  data_iterator,
                  cost_symbol,
                  parameter_symbols,
-                 learning_rates,
-                 momenta,
+                 parameter_updaters,
                  cost_input_symbols,
                  epoch_callbacks):
 
@@ -168,10 +271,10 @@ class Sgd(object):
 
     def train(self):
         """
-        Runs training until an EndTrainingException is raised.
+        Runs training until a StopTraining exception is raised.
 
         Training runs indefinitely until one of self._epoch_callbacks() raises
-        an EndTrainingException.
+        a StopTraining exception.
         """
         try:
             for callback in self._epoch_callbacks:
@@ -185,7 +288,7 @@ class Sgd(object):
                 for callback in self._epoch_callbacks:
                     callback()
 
-        except EndTrainingException, exception:
+        except StopTraining, exception:
             if exception.status = 'ok':
                 return
             else:

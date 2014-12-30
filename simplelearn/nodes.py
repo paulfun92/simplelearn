@@ -52,33 +52,34 @@ class Node(object):
     A model is a directed acyclic graph (DAG) of Nodes.
     """
 
-    def __init__(self):
-        super(Node, self).__init__()
-        self._inputs = None
-        self._output_format = None
+    def __init__(self, output_format, **input_nodes):
+        if not isinstance(output_format, Format):
+            raise TypeError("Expected output_format to be an instance of "
+                            "Format, not %s." % type(output_format))
 
-    def get_output_symbol(self, **kwargs):
-        """
-        Returns the output symbol, defined as a function of the inputs.
+        self.inputs = input_nodes
+        self.output_format = output_format
+        self.output_symbol = self.define_function(**inputs)
 
-        Parameters
-        ----------
+    def _define_function(**input_nodes):
+        raise NotImplementedError()
 
-        kwargs: dict
-          The named inputs. Each input must be a Node. The argument name
-          must match the argument names expected by this Node.
-        """
 
-        raise NotImplementedError("%s.get_output_symbol() not yet implemented."
-                                  % type(self))
+class InputNode(object):
+    """
+    Represents the input to a model.
+    """
 
-    def get_output_format(self):
-        if self._output_format is None:
-            raise RuntimeError("self._output_format not defined.")
+    def __init__(self, format):
+        super(IdentityNode, self).__init__(output_format=format)
+        self.output_symbol = format.get_batch(is_symbolic=True)
 
-        assert isinstance(self._output_format, Format)
+    def _define_function(**input_nodes):
+        if len(input_nodes) > 0:
+            raise ValueError("Unexpected arguments: %s" %
+                             str(tuple(input_nodes.iterkeys())))
 
-        return self._output_format
+        return self.output_symbol
 
 
 class Softmax(Node):
@@ -92,6 +93,8 @@ class Softmax(Node):
         self._output_format = DenseFormat(axes=('b', 'f'),
                                           shape=(-1, output_size),
                                           dtype=output_dtype)
+
+        raise NotImplementedError("This class isn't finished")
 
 
 class Linear(Node):
