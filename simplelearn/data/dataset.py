@@ -2,9 +2,15 @@
 Static dataset.
 """
 
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2014"
+__license__ = "Apache 2.0"
+
 import collections
 import numpy
 from numpy.testing import assert_equal
+from nose.tools import assert_less
 from simplelearn.data import DataSource, DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.nodes import InputNode
@@ -59,8 +65,8 @@ class Dataset(DataSource):
         if iterator_type == 'sequential':
             formats = tuple(d.node.output_format for d in self.data)
             return SequentialIterator(batch_size,
-                                      formats,
                                       tuple(d.tensor for d in self.data),
+                                      formats,
                                       **kwargs)
         else:
             raise NotImplementedError("'%s' iterator type not supported." %
@@ -100,7 +106,7 @@ class SequentialIterator(DataIterator):
                        raise a ValueError in the constructor.
 
         """
-        if not numpy.issubdtype(batch_size, numpy.integer):
+        if not numpy.issubdtype(type(batch_size), numpy.integer):
             raise TypeError("batch_size must be an integer, not a %s." %
                             type(batch_size))
 
@@ -118,6 +124,16 @@ class SequentialIterator(DataIterator):
             raise ValueError("Got empty sequence for 'formats' & "
                              "'tensors' arguments.")
 
+        # for tensor in tensors:
+        #     if not isinstance(fmt, Format):
+        #         raise TypeError("Expected formats to be Formats, but got a "
+        #                         "%s.", type(fmt))
+
+        for fmt in formats:
+            if not isinstance(fmt, Format):
+                raise TypeError("Expected formats to be Formats, but got a "
+                                "%s.", type(fmt))
+
         self._mode = kwargs.get('mode', None)
         if self._mode is None:
             self._mode = 'loop'
@@ -125,8 +141,8 @@ class SequentialIterator(DataIterator):
         mode_values = ('truncate', 'loop', 'divisible')
 
         if self._mode not in mode_values:
-            raise ValueError("'mode' argument must be one of %s." %
-                             str(mode_values))
+            raise ValueError("'mode' argument must be one of %s, not '%s'." %
+                             (str(mode_values), self._mode))
 
         def get_num_samples(tensor, fmt):
             batch_index = fmt.axes.index('b')
@@ -158,7 +174,32 @@ class SequentialIterator(DataIterator):
         num_samples = \
             self._tensors[0].shape[self._formats[0].axes.index('b')]
 
-        assert self._next_batch_start < num_samples
+        assert_less(self._next_batch_start, num_samples - 1)
+
+        if self._next_batch_start + self._batch_size > num_samples:
+            self._epoch += 1
+
+            if self._mode == 'loop':
+                self._next_batch_start = \
+                    numpy.mod(batch_start + self._batch_size,
+                              _end, num_samples)
+                return special_batch
+            else:
+                if self._mode == 'divisible':
+                    assert_equal(batch_end, num_samples)
+                else:
+                    assert_equal(self._mode,
+                                 'truncate',
+                                 "Unrecognized iteration mode '%s'. This "
+                                 "should've been caught in the constructor."
+                                 % self._mode)
+
+                batch_start = 0
+
+        batch_end = batch_start + self._batch_size
+        #result = tuple(
+
+        ####################
 
         num_remaining_samples = num_samples - self._next_batch_start
 
@@ -221,5 +262,8 @@ class SequentialIterator(DataIterator):
         result = tuple(get_range(tensor,
                                  fmt,
                                  self._next_batch_start,
-                                 batch_end))
+                                 batch_end)
+                       for tensor, fmt in
+                       safe_izip(self._tensors, self._formats))
         self._next_batch_start = batch_end
+        return result

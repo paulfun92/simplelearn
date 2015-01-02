@@ -4,3 +4,6 @@ __pycache__/
 
 # emacs backup files
 \#*\#
+
+# generated documentation
+sphinx/_build

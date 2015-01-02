@@ -2,6 +2,11 @@
 Data sources (a dataset is a static data source).
 """
 
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2014"
+__license__ = "Apache 2.0"
+
 
 class DataSource(object):
     """
@@ -71,16 +76,21 @@ class DataIterator(object):
 
         The returned batch is in a collections.namedtuple type.  For example, a
         common one will be collections.namedtuple('DataAndLabel', ('data',
-        'label')). A returned batch can be indexed as a tuple:
+        'label')). A returned batch can be indexed as a tuple::
+
           batch[0]  # data
           batch[1]  # label
 
-        ...or using named fields:
+        ...or using named fields::
+
           batch.data  # data
           batch.label  # label
 
         These field names must match the names returned by the dataset's
         get_input_nodes.
+
+        Returns
+        -------
 
         rval: instance of a collections.namedtuple type.
         """

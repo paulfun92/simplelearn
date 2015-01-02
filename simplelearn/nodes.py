@@ -1,22 +1,16 @@
 """
-A typical workflow for setting up a node B and getting its function is:
-
-1) Set up all Nodes that will serve as inputs to B.
-
-  B.set_inputs(argument_name_0=node_0, argument_name_1=node_1, ...)
-
-2) Get B's output symbol (theano variable) y:
-
-  y = Y.get_output_symbol(batch_size=n)
-
-3) As usual, get an evaluatable function w.r.t. input symbols a1 ... aN
-   by doing:
-
-  y_func = theano.function([a1, ..., aN], y)
+Symbolic functions, which can be composed into a DAG to form a model.
 """
+
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2014"
+__license__ = "Apache 2.0"
+
 
 import numpy
 import theano
+from simplelearn.utils import safe_izip
 from simplelearn.formats import Format, DenseFormat
 
 
@@ -45,9 +39,11 @@ def make_shared_variable(initial_value, name=None):
 class Node(object):
 
     """
-    A Node represents a function that outputs a theano tensor.
+    A Node represents a function.
 
-    It takes input(s) from other nodes, listed in self._inputs.
+    The function's input nodes are in self.inputs
+    The function's output is self.output_symbol.
+    The function's outptu format is self.output_format.
 
     A model is a directed acyclic graph (DAG) of Nodes.
     """
@@ -78,10 +74,10 @@ class InputNode(Node):
     Doesn't have any inputs. This just stores an output_symbol and its Format.
     """
 
-    def __init__(self, format):
-        output_symbol = format.get_batch(is_symbolic=True)
+    def __init__(self, fmt):
+        output_symbol = fmt.make_batch(is_symbolic=True)
         super(InputNode, self).__init__(output_symbol=output_symbol,
-                                        output_format=format)
+                                        output_format=fmt)
 
 
 class Function1dTo1d(Node):
@@ -113,7 +109,8 @@ class Function1dTo1d(Node):
         # Checks that input and output axes contain 'b' and 'f'.
         #
 
-        input_axes = input_node.format.axes
+        input_format = input_node.format
+        input_axes = input_format.axes
         output_axes = output_format.axes
 
         for expected_axis in ('b', 'f'):
@@ -137,8 +134,7 @@ class Function1dTo1d(Node):
         if get_bf_shape(output_format) != bf_shape:
             raise ValueError("Total size of non-batch axes of input and "
                              "output formats don't match (%d vs %d)."
-                             % (bf_shape.shape[0],
-                                get_bf_shape(output_format)[0]))
+                             % (bf_shape[0], get_bf_shape(output_format)[0]))
 
         bf_format = DenseFormat(axes=('b', 'f'),
                                 shape=bf_shape,
@@ -160,7 +156,6 @@ class Function1dTo1d(Node):
         #
 
         input_symbol = input_node.output_symbol
-        input_format = input_node.output_format
 
         # format input to bf_format
         bf_symbol = input_format.convert(input_symbol,
@@ -195,12 +190,14 @@ class Linear(Function1dTo1d):
     def __init__(self, output_format, input_node):
         super(Linear, self).__init__(output_format, input_node)
 
+        get_bf_shape = Function1dTo1d._get_bf_shape
+
         num_input_features = get_bf_shape(input_node.format)[1]
         num_output_features = get_bf_shape(output_format)[1]
 
-        weights_shape = (num_input_features, num_output_features)
-        self.weights = make_shared_variable(numpy.zeros(weights_shape,
-                                                        dtype=output_dtype))
+        weights = numpy.zeros((num_input_features, num_output_features),
+                              dtype=output_format.dtype)
+        self.weights = make_shared_variable(weights)
 
     def _get_function_of_rows(self, rows_symbol):
         """
@@ -213,7 +210,7 @@ class Linear(Function1dTo1d):
         return theano.tensor.dot(rows_symbol, self.weights)
 
 
-class Softmax(FunctionOfFeatures):
+class Softmax(Function1dTo1d):
     def __init__(self, output_format, input_node):
         super(Softmax, self).__init__(output_format, input_node)
 

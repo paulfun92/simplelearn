@@ -1,3 +1,12 @@
+"""
+Training algorithms and callbacks for monitoring their progress.
+"""
+
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2014"
+__license__ = "Apache 2.0"
+
 import theano.tensor as T
 
 
@@ -289,7 +298,7 @@ class Sgd(object):
                     callback()
 
         except StopTraining, exception:
-            if exception.status = 'ok':
+            if exception.status == 'ok':
                 return
             else:
                 raise

@@ -1,13 +1,18 @@
-"""
-Classes that represent different data formats.
+"""Classes that represent different data formats.
 
-Here, "data format" can include things like memory layout, axis order,
-and floating point precision, which don't qualitatively change the data.
+"Data format" includes things that don't qualitatively change the
+data, such as memory layout, axis order, and floating point precision.
 
 Conversion between two formats should be approximately reversible. For
 example, converting from float64 to float32 is lossy but permitted, while
 converting from float to int, or complex to float, is not.
 """
+
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2014"
+__license__ = "Apache 2.0"
+
 
 import numpy
 import theano
@@ -18,8 +23,7 @@ from simplelearn.utils import safe_izip, flatten
 
 
 class Format(object):
-    """
-    Abstract class. Represents the format of a numeric or symbolic data batch.
+    """The format of a numeric or symbolic data batch.
 
     "format" means things like axis order, and optionally, dtype.
 
@@ -58,8 +62,7 @@ class Format(object):
 
     @staticmethod
     def is_symbolic(batch):
-        """
-        Returns True i.f.f, batch is a (Theano) symbol.
+        """Returns True i.f.f, batch is a (Theano) symbol.
 
         Returns False if batch is a (numpy) numeric array.
 
@@ -84,8 +87,7 @@ class Format(object):
             raise TypeError("Unrecognized batch type %s." % type(batch))
 
     def _is_equivalent(self, target_format):
-        """
-        Returns True if converting from self to target_format is a no-op.
+        """Returns True if converting from self to target_format is a no-op.
         """
         raise NotImplementedError("%s._is_equivalent() not yet implemented." %
                                   type(self))
@@ -280,10 +282,9 @@ class Format(object):
 
 
 class DenseFormat(Format):
-    """
-    Format for fixed-sized dense data.
+    """Format for fixed-sized dense data.
 
-    Examples:
+    Example::
 
       # vectors of size 100:
       vector_format = DenseFormat(axes=('b', 'f'),

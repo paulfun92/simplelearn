@@ -53,9 +53,10 @@ def test_iterator():
     def get_batch(sample_index, batch_size):
         batches = []
         for tensor, fmt in safe_izip(tensors, formats):
-            index = (slice(sample_index, sample_index + batch_size) if a == 'b'
-                     else slice(None)
-                     for a in fmt.axes)
+            index = tuple(slice(sample_index, sample_index + batch_size)
+                          if a == 'b'
+                          else slice(None)
+                          for a in fmt.axes)
             batches.append(tensor[index])
 
         return batches
@@ -68,7 +69,7 @@ def test_iterator():
 
     iterators = tuple(dataset.iterator(iterator_type='sequential',
                                        batch_size=batch_size,
-                                       mode=m) for m in ('sequential',
+                                       mode=m) for m in ('truncate',
                                                          'loop',
                                                          'divisible'))
 
