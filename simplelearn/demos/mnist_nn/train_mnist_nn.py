@@ -1,6 +1,7 @@
 from simplelearn.nodes import Linear
 from datasets import Mnist
 
+
 def main():
     training_set = Mnist()
 

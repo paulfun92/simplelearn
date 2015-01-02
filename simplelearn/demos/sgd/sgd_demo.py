@@ -10,6 +10,7 @@ import argparse
 from matplotlib import pyplot
 from simplelearn.nodes import Node, InputNode, make_shared_variable
 from simplelearn.trainers import Sgd, LimitNumEpochsCallback
+from simplelearn.datasets import DatasetIterator
 
 
 class QuadraticCost2D(Node):
@@ -51,6 +52,10 @@ class QuadraticCost2D(Node):
         return self.function
 
 
+# class SingleDatumIterator(DatasetIterator):
+#     pass
+
+
 def get_sgd_trainer():
     cost = QuadraticCost2D()
 
@@ -62,7 +67,7 @@ def get_sgd_trainer():
 
     input_symbol = get_input_shared_variable()
 
-    sgd = Sgd(data_iterator=data_iterator,
+    sgd = Sgd(data_iterator=NullDatasetIterator(),
               cost_symbol=cost.output_symbol,
               parameter_symbols=(input_symbol, ),
               parameter_updaters=updater,
