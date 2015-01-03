@@ -14,8 +14,7 @@ from nose.tools import assert_less, assert_less_equal, assert_greater
 from simplelearn.data import DataSource, DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.nodes import InputNode
-import simplelearn.formats as formats
-from formats import Format
+from simplelearn.formats import Format
 
 
 class Dataset(DataSource):
@@ -125,7 +124,7 @@ class SequentialIterator(DataIterator):
                              "'tensors' arguments.")
 
         for tensor in tensors:
-            if not formats.is_numeric(tensor):
+            if not Format.is_numeric(tensor):
                 raise TypeError("Expected tensors to be numeric arrays, but "
                                 "got a %s." % type(tensor))
 

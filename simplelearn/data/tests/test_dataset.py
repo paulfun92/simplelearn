@@ -25,7 +25,7 @@ def test_sequential_iterator_next():
              'label_vector',
              'label_scalar')
 
-    def make_data(rng, fmt, num_samples):
+    def make_data(fmt, num_samples):
         data = fmt.make_batch(is_symbolic=False, batch_size=num_samples)
         data[...] = numpy.arange(data.size,
                                  dtype=fmt.dtype).reshape(data.shape)
@@ -33,7 +33,7 @@ def test_sequential_iterator_next():
 
     num_samples = 100
 
-    tensors = tuple(make_data(rng, f, num_samples) for f in formats)
+    tensors = tuple(make_data(f, num_samples) for f in formats)
 
     dataset = Dataset(names=names,
                       formats=formats,

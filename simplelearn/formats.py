@@ -104,7 +104,7 @@ class Format(object):
         -------
         rval: bool
         """
-        return not is_symbolic(batch)
+        return not Format.is_symbolic(batch)
 
     def _is_equivalent(self, target_format):
         """
