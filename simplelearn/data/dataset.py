@@ -10,7 +10,10 @@ __license__ = "Apache 2.0"
 import collections
 import numpy
 from numpy.testing import assert_equal
-from nose.tools import assert_less, assert_less_equal, assert_greater
+from nose.tools import (assert_less,
+                        assert_greater,
+                        assert_less_equal,
+                        assert_not_equal)
 from simplelearn.data import DataSource, DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.nodes import InputNode
@@ -168,7 +171,7 @@ class SequentialIterator(DataIterator):
                               batch_size,
                               numpy.mod(num_samples, batch_size)))
 
-        self._epoch = 0
+        self._epoch = -1
         self._next_batch_start = 0
         self._batch_size = batch_size
         self._formats = formats
@@ -181,6 +184,10 @@ class SequentialIterator(DataIterator):
     def next(self):
         num_samples = \
             self._tensors[0].shape[self._formats[0].axes.index('b')]
+
+        if self._mode == 'truncate':
+            num_samples = num_samples - numpy.mod(num_samples,
+                                                  self._batch_size)
 
         assert_less(self._next_batch_start, num_samples)
 
@@ -206,7 +213,12 @@ class SequentialIterator(DataIterator):
                              (num_samples,
                               self._batch_size,
                               type(self)))
-            self._epoch += 1
+
+            assert_not_equal(self._mode,
+                             'truncated',
+                             "Truncated number of samples %d wasn't divisible "
+                             "by batch size %d. It must've been coded wrong." %
+                             (num_samples, self._batch_size))
 
             if self._mode == 'loop':
                 batch = self.Batch(*(fmt.make_batch(is_symbolic=False,
@@ -236,10 +248,10 @@ class SequentialIterator(DataIterator):
                                   0,
                                   self._batch_size - chunk_size)
 
-                self._next_batch_start = chunk_size
+                self._next_batch_start = self._batch_size - chunk_size
                 return batch
-            elif self._mode == 'truncate':
-                self._next_batch_start = 0
+            # elif self._mode == 'truncate':
+            #     self._next_batch_start = 0
             else:
                 raise ValueError("Unrecognized iteration mode '%s'. This "
                                  "should've been caught in %s's "
@@ -254,11 +266,14 @@ class SequentialIterator(DataIterator):
                            for tensor, fmt
                            in safe_izip(self._tensors, self._formats))
 
+        # If _mode != 'loop', this could be "if self._next_batch_start == 0"
+        if self._next_batch_start < self._batch_size:
+            self._epoch += 1
+
         self._next_batch_start += self._batch_size
         assert_less_equal(self._next_batch_start, num_samples)
 
         if self._next_batch_start == num_samples:
             self._next_batch_start = 0
-            self._epoch += 1
 
         return self.Batch(*subbatches)
