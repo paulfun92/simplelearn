@@ -9,29 +9,23 @@ from simplelearn.data.dataset import Dataset
 
 
 def test_sequential_iterator_next():
-    # formats = (DenseFormat(axes=('f', '0', '1', 'b'),  # mono RGB
-    #                        shape=(3, 32, 32, -1),
-    #                        dtype='float32'),
-    #            DenseFormat(axes=('f', 'b', 's', '0', '1'),  # stereo grayscale
-    #                        shape=(1, -1, 2, 8, 8),
-    #                        dtype='int32'),
-    #            DenseFormat(axes=('b', 'f'),  # 5-D label
-    #                        shape=(-1, 5),
-    #                        dtype='int32'),
-    #            DenseFormat(axes=('b',),   # scalar label
-    #                        shape=(-1,),
-    #                        dtype='int'))
-
-    # names = ('mono_RGB',
-    #          'stereo_grayscale',
-    #          'label_vector',
-    #          'label_scalar')
-
     formats = (DenseFormat(axes=('b',),   # scalar label
                            shape=(-1,),
-                           dtype='int'), )
+                           dtype='int'),
+               DenseFormat(axes=('b', 'f'),  # 5-D label
+                           shape=(-1, 5),
+                           dtype='int32'),
+               DenseFormat(axes=('f', '0', '1', 'b'),  # mono RGB
+                           shape=(3, 32, 32, -1),
+                           dtype='float32'),
+               DenseFormat(axes=('f', 'b', 's', '0', '1'),  # stereo grayscale
+                           shape=(1, -1, 2, 8, 8),
+                           dtype='int32'))
 
-    names = ('label_scalar', )
+    names = ('label_scalar',
+             'label_vector',
+             'mono_RGB',
+             'stereo_grayscale')
 
     max_epochs = 3
 
@@ -129,84 +123,50 @@ def test_sequential_iterator_next():
         if expected_epoch == max_epochs:
             break
 
-
     #
-    # Tests ''
+    # Tests 'divisible' mode
     #
-        # row_index = numpy.mod(sample_index, num_samples)
-        # if row_index < batch_size:
-        #     expected_epoch += 1
 
-        # if row_index + batch_size > num_samples:
+    sample_index = 0
+    assert_raises_regexp(ValueError,
+                         ("# of samples %d is not divisible by batch_size" %
+                          num_samples),
+                         dataset.iterator,
+                         iterator_type='sequential',
+                         batch_size=batch_size,
+                         mode='divisible')
 
-        #     expected_batch = tuple(fmt.make_batch(is_symbolic=False)
-        #                            for fmt in formats)
+    def crop_tensors(tensors, num_samples):
+        result = []
+        for tensor, fmt in safe_izip(tensors, formats):
+            selector = tuple(slice(0, num_samples)
+                             if axis == 'b'
+                             else slice(None)
+                             for axis in fmt.axes)
+            result.append(tensor[selector])
 
-        #     chunk_size = num_samples - row_index
-        #     expected_chunk = get_batch(row_index, chunk_size)
-        #     for b, c, f in safe_izip(expected_batch, expected_chunk, formats):
-        #         b[f.axes.index('b')]
+        return tuple(result)
 
-        #     for (iterator_subbatch,
-        #          expected_subchunk) for safe_izip(iterator_batch,
-        #                                           expected_chunk):
-        #         assert_equal(iterator_subbatch[:
-        # else:
-        #     expected_batch = get_batch(row_index, batch_size)
+    cropped_tensors = crop_tensors(tensors, truncated_num_samples)
+    cropped_dataset = Dataset(names=names,
+                              formats=formats,
+                              tensors=cropped_tensors)
 
-        # sample_index += batch_size
-        # assert_equal(truncated_iterator.epoch(),
-        #              expected_epoch,
-        #              "sample_index: %d, batch_number: %d" %
-        #              (sample_index, batch_number))
+    iterator = cropped_dataset.iterator(iterator_type='sequential',
+                                        batch_size=batch_size,
+                                        mode='divisible')
 
-        # assert_equal(iterator_batch,
-        #              expected_batch,
-        #              "'truncated' iterator yielded unexpected batch %d." %
-        #              batch_number)
+    for batch_number, iterator_batch in enumerate(iterator):
+        row_index = sample_index % truncated_num_samples
+        expected_batch = get_batch(row_index, batch_size, cropped_tensors)
+        assert_equal(iterator_batch, expected_batch)
 
-        # if epoch == max_epochs:
-        #     break
+        if row_index == 0:  # sample_index % num_samples < batch_size:
+            expected_epoch += 1
 
+        expected_epoch = sample_index // truncated_num_samples
+        assert_equal(iterator.epoch(), expected_epoch)
+        sample_index += batch_size
 
-    ################################
-
-
-
-    # iterators = tuple(dataset.iterator(iterator_type='sequential',
-    #                                    batch_size=batch_size,
-    #                                    mode=m) for m in ('truncate',
-    #                                                      'loop',
-    #                                                      'divisible'))
-
-    # # pylint: disable=star-args
-    # for truncate_batch, loop_batch, divisible_batch in safe_izip(*iterators):
-    #     expected_truncated_batch = get_batch(
-    #     expected_loop_batch = get_batch(numpy.mod(sample_index % num_samples),
-    #                                          batch_size)
-    #     for (iterator_batch,
-    #          iterator_name) in safe_izip((truncate_batch,
-    #                                       loop_batch,
-    #                                       divisible_batch),
-    #                                      ('truncate',
-    #                                       'loop',
-    #                                       'divisible')):
-    #         assert_equal(iterator_batch,
-    #                      expected_batch,
-    #                      "iterator %s yielded unexpected batch %d." %
-    #                      (iterator_name, batch_number))
-
-    #     sample_index += batch_size
-    #     if sample_index == num_samples:
-    #         epoch += 1
-    #         sample_index = 0
-    #     else:
-    #         assert_less(sample_index, num_samples)
-
-    #     for iterator in iterators:
-    #         assert_equal(iterator.epoch(), epoch)
-
-    #     batch_number += 1
-
-    #     if epoch == 3:
-    #         break
+        if expected_epoch == max_epochs:
+            break
