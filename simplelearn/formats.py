@@ -558,7 +558,7 @@ class DenseFormat(Format):
         def get_standardized_axis_map(axis_map, source_axes, target_axes):
             """
             Returns a copy of target_axes, with any omitted identity mappings
-            (e.g. 'b':'b') added.
+            (e.g. 'b':'b') added back in.
             """
 
             flat_keys = frozenset(flatten(axis_map.iterkeys()))
@@ -630,10 +630,14 @@ class DenseFormat(Format):
             output_batch[...] = batch
             return output_batch
         else:
-            return batch
+            if self.is_symbolic(batch):
+                return theano.tensor.cast(batch, str(target_format.dtype))
+            else:
+                return numpy.cast[target_format.dtype](batch)
 
     def _is_equivalent(self, target_format):
         for fmt in (self, target_format):
+            assert isinstance(fmt.dtype, numpy.dtype)
             assert isinstance(fmt.axes, tuple)
             assert isinstance(fmt.shape, tuple)
 

@@ -11,7 +11,7 @@ def test_iterator():
                            shape=(3, 32, 32, -1),
                            dtype='float32'),
                DenseFormat(axes=('f', 'b', 's', '0', '1'),  # stereo grayscale
-                           shape=(1, -1, 2, 32, 32),
+                           shape=(1, -1, 2, 8, 8),
                            dtype='int32'),
                DenseFormat(axes=('b', 'f'),  # 5-D label
                            shape=(-1, 5),
@@ -22,14 +22,17 @@ def test_iterator():
 
     rng = numpy.random.RandomState(3233)
 
-    def make_data(rng, fmt, batch_size):
-        data = fmt.make_batch(is_symbolic=False, batch_size=batch_size)
-        if numpy.issubdtype(fmt.dtype, numpy.floating):
-            data[...] = rng.uniform(low=-2, high=2, size=data.shape)
-        elif numpy.issubdtype(fmt.dtype, numpy.integer):
-            data[...] = rng.randint(low=-127, high=128, size=data.shape)
-        else:
-            raise RuntimeError("This line should never be reached.")
+    def make_data(rng, fmt, num_samples):
+        data = fmt.make_batch(is_symbolic=False, batch_size=num_samples)
+        data[...] = numpy.arange(data.size,
+                                 dtype=fmt.dtype).reshape(data.shape)
+
+        # if numpy.issubdtype(fmt.dtype, numpy.floating):
+        #     data[...] = rng.uniform(low=-2, high=2, size=data.shape)
+        # elif numpy.issubdtype(fmt.dtype, numpy.integer):
+        #     data[...] = rng.randint(low=-127, high=128, size=data.shape)
+        # else:
+        #     raise RuntimeError("This line should never be reached.")
         return data
 
     num_samples = 100
