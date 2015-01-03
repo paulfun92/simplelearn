@@ -34,6 +34,25 @@ import theano.tensor as T
 #
 # hmm... not so bad.
 
+class ComputeAverageOverEpoch(object):
+    """
+    Monitors the average value of some f(x_i), over an epoch of data.
+
+    The average value is passed to sub-callbacks. For example, these can log
+    the value, or raise a StopTraining exception.
+    """
+    def __init__(self, function, data_iterator, callbacks):
+        self._function = function
+        self._iterator = data_iterator
+        self._callbacks = callbacks
+
+    def __call__(self):
+        epoch = data_iterator.epoch()
+        if epoch == -1:
+            epoch = 0
+
+
+
 class StopTraining(Exception):
     """
     An exception thrown to signal the end of training.
@@ -51,12 +70,11 @@ class StopTraining(Exception):
 
 class GradientBasedParameterUpdater(object):
     """
-    Support class for gradient-based trainers.
+    Updates parameters using their gradients.
 
-    The update_parameters() method updates a set of parameters, given
-    their gradients.
+    This is a support class for gradient-based optimizers such as Sgd.
 
-    Subclasses must override its implementation, _update_parameters().
+    Subclasses must override _update_parameters().
     """
     def __init__(self):
         pass

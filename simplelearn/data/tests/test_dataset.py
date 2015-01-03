@@ -76,6 +76,8 @@ def test_sequential_iterator_next():
                                 batch_size=batch_size,
                                 mode='truncate')
 
+    assert_equal(iterator.epoch(), -1)
+
     for batch_number, iterator_batch in enumerate(iterator):
         row_index = numpy.mod(sample_index, truncated_num_samples)
         expected_batch = get_batch(row_index, batch_size, tensors)
@@ -102,6 +104,7 @@ def test_sequential_iterator_next():
     iterator = dataset.iterator(iterator_type='sequential',
                                 batch_size=batch_size,
                                 mode='loop')
+    assert_equal(iterator.epoch(), -1)
 
     looped_tensors = []
     for tensor, fmt in safe_izip(tensors, formats):
@@ -155,6 +158,7 @@ def test_sequential_iterator_next():
     iterator = cropped_dataset.iterator(iterator_type='sequential',
                                         batch_size=batch_size,
                                         mode='divisible')
+    assert_equal(iterator.epoch(), -1)
 
     for batch_number, iterator_batch in enumerate(iterator):
         row_index = sample_index % truncated_num_samples

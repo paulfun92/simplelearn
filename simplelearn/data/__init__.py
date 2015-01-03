@@ -34,12 +34,20 @@ class DataIterator(object):
     Yields data batches from a data source.
     """
 
+    def __init__(self):
+        # Used for ensuring that _epoch() is implemented correctly
+        # (i.e. that epochs start at -1, and increase by at most one when
+        # next() is called).
+        self._next_was_called = False
+
     def epoch(self):
         """
-        Returns the current epoch number, starting at 0.
+        Returns the epoch number of the last yielded batch.
+
+        If no batches have been yielded yet, this returns -1.
 
         An epoch is defined as a loop through a "representative sample" of the
-        data distribution. For example:
+        data distribution. For example::
 
           * For many fixed-sized datasets, the N'th epoch is simply the N'th
             loop through the entire dataset.
@@ -50,21 +58,23 @@ class DataIterator(object):
         Epochs need not be of fixed length.
 
         Incrementing the epoch number serves only to trigger
-        simplelearn.Trainer's epoch callbacks. Such callback functions can be
-        costly, so epochs shouldn't generally be frequent. Example epoch
-        callbacks include:
+        simplelearn.Trainer's epoch callbacks. These can include costly
+        functions such as computing average error over a validation set, so in
+        general epochs shouldn't be frequent.
 
-        * Computing validation set error to see if the training has converged.
-        * Reshuffling the training set iteration order.
-        * Redefining the training set to bias sampling towards examples that
-          the model misclassed in the previous epoch.
+        Example epoch callbacks include::
+
+          * Computing the average error over a validation dataset.
+          * Reshuffling the training set iteration order.
+          * Redefining the training set to bias sampling towards examples that
+            the model misclassed in the previous epoch.
 
         Returns
         -------
         rval: int
           The epoch number, starting at 0.
         """
-        raise NotImplementedError("%s.epoch() not yet implemented." %
+        raise NotImplementedError("%s._epoch() not yet implemented." %
                                   type(self))
 
     def __iter__(self):
@@ -94,5 +104,40 @@ class DataIterator(object):
 
         rval: instance of a collections.namedtuple type.
         """
-        raise NotImplementedError("%s.next() not yet implemented." %
+        prev_epoch = self.epoch()
+        if not numpy.issubdtype(type(prev_epoch), numpy.integer):
+            raise TypeError("Expected epoch() to return an integer, not a %s."
+                            % type(prev_epoch))
+
+        if not self._next_was_called:
+            if prev_epoch != -1:
+                raise ValueError("%s implemented incorrectly: "
+                                 "Expected epoch() to return -1 before "
+                                 "yielding first batch, but got %d." %
+                                 prev_epoch)
+
+        result = self._next()
+
+        curr_epoch = self.epoch()
+        if not self._next_was_called:
+            if curr_epoch != 0:
+                raise VaueError("%s implemented incorrecty: "
+                                "Expected epoch() to return 0 after "
+                                "first call to next(), but got %d."
+                                % curr_epoch)
+
+        if (curr_epoch - prev_epoch) not in (0, 1):
+            raise ValueError("%s implemented incorrectly: Expected epoch() "
+                             "to increase by 0 or 1 when calling next(), but "
+                             "it went from %d to %d."
+                             % (prev_epoch, curr_epoch))
+
+        self._next_was_called = True
+        return result
+
+    def _next(self):
+        """
+        Implements next(). See that method's docs for details.
+        """
+        raise NotImplementedError("%s._next() not yet implemented." %
                                   type(self))
