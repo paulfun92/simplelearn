@@ -23,7 +23,8 @@ from simplelearn.utils import safe_izip, flatten
 
 
 class Format(object):
-    """The format of a numeric or symbolic data batch.
+    """
+    The format of a numeric or symbolic data batch.
 
     "format" means things like axis order, and optionally, dtype.
 
@@ -62,9 +63,10 @@ class Format(object):
 
     @staticmethod
     def is_symbolic(batch):
-        """Returns True i.f.f, batch is a (Theano) symbol.
+        """
+        Returns True i.f.f, batch is a (Theano) symbol.
 
-        Returns False if batch is a (numpy) numeric array.
+        Returns False i.f.f. batch is a (numpy) numeric array.
 
         Raises a TypeError if data is some other type.
 
@@ -74,8 +76,7 @@ class Format(object):
 
         Returns
         -------
-        rval: str
-           "symbolic", "numeric", or "unrecognized".
+        rval: bool
         """
 
         if isinstance(batch, theano.gof.Variable):
@@ -86,8 +87,28 @@ class Format(object):
         else:
             raise TypeError("Unrecognized batch type %s." % type(batch))
 
+    @staticmethod
+    def is_numeric(batch):
+        """
+        Returns True i.f.f. batch is a (numpy) numeric array.
+
+        Returns False i.f.f. batch is a (Theano) symbol.
+
+        Raises a TypeError if data is some other type.
+
+        Parameters
+        ----------
+        data: numpy.ndarray, numpy.memmap, or theano.gof.Variable
+
+        Returns
+        -------
+        rval: bool
+        """
+        return not is_symbolic(batch)
+
     def _is_equivalent(self, target_format):
-        """Returns True if converting from self to target_format is a no-op.
+        """
+        Returns True if converting from self to target_format is a no-op.
         """
         raise NotImplementedError("%s._is_equivalent() not yet implemented." %
                                   type(self))

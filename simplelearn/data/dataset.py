@@ -14,7 +14,8 @@ from nose.tools import assert_less, assert_less_equal, assert_greater
 from simplelearn.data import DataSource, DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.nodes import InputNode
-from simplelearn.formats import Format
+import simplelearn.formats as formats
+from formats import Format
 
 
 class Dataset(DataSource):
@@ -123,10 +124,10 @@ class SequentialIterator(DataIterator):
             raise ValueError("Got empty sequence for 'formats' & "
                              "'tensors' arguments.")
 
-        # for tensor in tensors:
-        #     if not isinstance(fmt, Format):
-        #         raise TypeError("Expected formats to be Formats, but got a "
-        #                         "%s.", type(fmt))
+        for tensor in tensors:
+            if not formats.is_numeric(tensor):
+                raise TypeError("Expected tensors to be numeric arrays, but "
+                                "got a %s." % type(tensor))
 
         for fmt in formats:
             if not isinstance(fmt, Format):
@@ -197,8 +198,6 @@ class SequentialIterator(DataIterator):
             assert_equal(result.shape[fmt.axes.index('b')], end - start)
             return result
 
-        # print "num_samples %d" % num_samples
-
         if self._next_batch_start + self._batch_size > num_samples:
             assert_not_equal(self._mode,
                              'divisible',
@@ -243,31 +242,10 @@ class SequentialIterator(DataIterator):
             elif self._mode == 'truncate':
                 self._next_batch_start = 0
             else:
-                # if self._mode == 'divisible':
-                #     assert_equal(self._next_batch_start + self._batch_size,
-                #                  num_samples,
-                #                  "Number of samples %d wasn't divisible by "
-                #                  "batch size %d. This should've been caught "
-                #                  "in the %s constructor." %
-                #                  (num_samples,
-                #                   self._batch_size,
-                #                   type(self)))
-                # elif self._mode == 'truncate':
-                #     if self._next_batch_start + self._batch_size > num_samples:
-                #         self._next_batch_start = 0
-                #         self._epoch += 1
-                #         assert_less(self._next_batch_start + self._batch_size,
-                #                     num_samples)
-                # else:
                 raise ValueError("Unrecognized iteration mode '%s'. This "
                                  "should've been caught in %s's "
                                  "constructor."
                                  % (self._mode, type(self)))
-
-        # print "getting samples %d to %d" % (self._next_batch_start,
-        #                                     self._next_batch_start +
-        #                                     self._batch_size)
-        # expected_subbatch = self._tensors[0][self._next_batch_start:self._next_batch_start + self._batch_size]
 
         subbatches = tuple(get_range(tensor,
                                      fmt,
@@ -276,15 +254,6 @@ class SequentialIterator(DataIterator):
                                      self._batch_size)
                            for tensor, fmt
                            in safe_izip(self._tensors, self._formats))
-        # subbatches = (get_range(tensor,
-        #                         fmt,
-        #                         self._next_batch_start,
-        #                         self._next_batch_start +
-        #                         self._batch_size)
-        #               for tensor, fmt
-        #               in safe_izip(self._tensors, self._formats))
-
-        # assert_equal(subbatches[0], expected_subbatch)
 
         self._next_batch_start += self._batch_size
         assert_less_equal(self._next_batch_start, num_samples)
