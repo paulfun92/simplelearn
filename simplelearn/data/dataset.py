@@ -10,7 +10,7 @@ __license__ = "Apache 2.0"
 import collections
 import numpy
 from numpy.testing import assert_equal
-from nose.tools import assert_less
+from nose.tools import assert_less, assert_less_equal, assert_greater
 from simplelearn.data import DataSource, DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.nodes import InputNode
@@ -149,9 +149,17 @@ class SequentialIterator(DataIterator):
 
         sample_counts = tuple(get_num_samples(t, f)
                               for t, f in safe_izip(tensors, formats))
-        assert all(sc == sample_counts[0] for sc in sample_counts[1:])
+        if not all(sc == sample_counts[0] for sc in sample_counts[1:]):
+            raise ValueError("Expected all tensors to have the same number of "
+                             "samples, but got %s." % str(sample_counts))
 
         num_samples = sample_counts[0]
+
+        if num_samples < batch_size:
+            raise ValueError("# of samples %d must be greater than "
+                             "batch_size %d." %
+                             (num_samples, batch_size))
+
         if self._mode == 'divisible' and \
            numpy.mod(num_samples, batch_size) != 0:
             raise ValueError("# of samples %d is not divisible by "
@@ -174,30 +182,44 @@ class SequentialIterator(DataIterator):
         num_samples = \
             self._tensors[0].shape[self._formats[0].axes.index('b')]
 
-        assert_less(self._next_batch_start, num_samples - 1)
+        assert_less(self._next_batch_start, num_samples)
 
         def get_range(tensor, fmt, start, end):
             """
             Returns a tuple of batches from batch index = start to end.
             """
+            assert_less_equal(start, end)
+            assert 'b' in fmt.axes
             index = tuple(slice(start, end) if axis == 'b'
                           else slice(None)
                           for axis in fmt.axes)
-            return tensor[index]
+            result = tensor[index]
+            assert_equal(result.shape[fmt.axes.index('b')], end - start)
+            return result
+
+        # print "num_samples %d" % num_samples
 
         if self._next_batch_start + self._batch_size > num_samples:
+            assert_not_equal(self._mode,
+                             'divisible',
+                             "Number of samples %d wasn't divisible by "
+                             "batch size %d. This should've been caught "
+                             "in the %s constructor." %
+                             (num_samples,
+                              self._batch_size,
+                              type(self)))
             self._epoch += 1
 
             if self._mode == 'loop':
-                self._next_batch_start = \
-                    numpy.mod(self._next_batch_start + self._batch_size,
-                              num_samples)
-                batch = self.Batch(fmt.make_batch(is_symbolic=False,
-                                                  batch_size=self._batch_size)
-                                   for fmt in self._formats)
+                batch = self.Batch(*(fmt.make_batch(is_symbolic=False,
+                                                    batch_size=self._batch_size)
+                                     for fmt in self._formats))
                 chunk_size = num_samples - self._next_batch_start
+                assert_greater(chunk_size, 0)
 
-                for subbatch, tensor, fmt in safe_izip(batch, self._tensors):
+                for subbatch, tensor, fmt in safe_izip(batch,
+                                                       self._tensors,
+                                                       self._formats):
                     get_range(subbatch,
                               fmt,
                               0,
@@ -218,29 +240,57 @@ class SequentialIterator(DataIterator):
 
                 self._next_batch_start = chunk_size
                 return batch
-            else:
-                if self._mode == 'divisible':
-                    raise RuntimeError("Number of samples %d wasn't divisible "
-                                       "by batch size %d. This should've been "
-                                       "caught in the %s constructor." %
-                                       (num_samples,
-                                        self._batch_size,
-                                        type(self)))
-                else:
-                    assert_equal(self._mode,
-                                 'truncate',
-                                 "Unrecognized iteration mode '%s'. This "
-                                 "should've been caught in the constructor."
-                                 % self._mode)
-
+            elif self._mode == 'truncate':
                 self._next_batch_start = 0
+            else:
+                # if self._mode == 'divisible':
+                #     assert_equal(self._next_batch_start + self._batch_size,
+                #                  num_samples,
+                #                  "Number of samples %d wasn't divisible by "
+                #                  "batch size %d. This should've been caught "
+                #                  "in the %s constructor." %
+                #                  (num_samples,
+                #                   self._batch_size,
+                #                   type(self)))
+                # elif self._mode == 'truncate':
+                #     if self._next_batch_start + self._batch_size > num_samples:
+                #         self._next_batch_start = 0
+                #         self._epoch += 1
+                #         assert_less(self._next_batch_start + self._batch_size,
+                #                     num_samples)
+                # else:
+                raise ValueError("Unrecognized iteration mode '%s'. This "
+                                 "should've been caught in %s's "
+                                 "constructor."
+                                 % (self._mode, type(self)))
 
-        subbatches = (get_range(tensor,
-                                fmt,
-                                self._next_batch_start,
-                                self._next_batch_start +
-                                self._batch_size)
-                      for tensor, fmt
-                      in safe_izip(self._tensors, self._formats))
+        # print "getting samples %d to %d" % (self._next_batch_start,
+        #                                     self._next_batch_start +
+        #                                     self._batch_size)
+        # expected_subbatch = self._tensors[0][self._next_batch_start:self._next_batch_start + self._batch_size]
 
-        return self.Batch(*tuple(subbatches))
+        subbatches = tuple(get_range(tensor,
+                                     fmt,
+                                     self._next_batch_start,
+                                     self._next_batch_start +
+                                     self._batch_size)
+                           for tensor, fmt
+                           in safe_izip(self._tensors, self._formats))
+        # subbatches = (get_range(tensor,
+        #                         fmt,
+        #                         self._next_batch_start,
+        #                         self._next_batch_start +
+        #                         self._batch_size)
+        #               for tensor, fmt
+        #               in safe_izip(self._tensors, self._formats))
+
+        # assert_equal(subbatches[0], expected_subbatch)
+
+        self._next_batch_start += self._batch_size
+        assert_less_equal(self._next_batch_start, num_samples)
+
+        if self._next_batch_start == num_samples:
+            self._next_batch_start = 0
+            self._epoch += 1
+
+        return self.Batch(*subbatches)

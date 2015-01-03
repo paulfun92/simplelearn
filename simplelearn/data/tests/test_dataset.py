@@ -1,12 +1,12 @@
 import numpy
-from nose.tools import assert_raises_regexp
+from nose.tools import assert_raises_regexp, assert_less
 from numpy.testing import assert_equal
 from simplelearn.utils import safe_izip
 from simplelearn.formats import DenseFormat
 from simplelearn.data.dataset import Dataset
 
 
-def test_iterator():
+def test_sequential_iterator_next():
     formats = (DenseFormat(axes=('f', '0', '1', 'b'),  # mono RGB
                            shape=(3, 32, 32, -1),
                            dtype='float32'),
@@ -20,29 +20,22 @@ def test_iterator():
                            shape=(-1,),
                            dtype='int'))
 
-    rng = numpy.random.RandomState(3233)
+    names = ('mono_RGB',
+             'stereo_grayscale',
+             'label_vector',
+             'label_scalar')
 
     def make_data(rng, fmt, num_samples):
         data = fmt.make_batch(is_symbolic=False, batch_size=num_samples)
         data[...] = numpy.arange(data.size,
                                  dtype=fmt.dtype).reshape(data.shape)
-
-        # if numpy.issubdtype(fmt.dtype, numpy.floating):
-        #     data[...] = rng.uniform(low=-2, high=2, size=data.shape)
-        # elif numpy.issubdtype(fmt.dtype, numpy.integer):
-        #     data[...] = rng.randint(low=-127, high=128, size=data.shape)
-        # else:
-        #     raise RuntimeError("This line should never be reached.")
         return data
 
     num_samples = 100
 
     tensors = tuple(make_data(rng, f, num_samples) for f in formats)
 
-    dataset = Dataset(names=('mono_RGB',
-                             'stereo_grayscale',
-                             'label_vector',
-                             'label_scalar'),
+    dataset = Dataset(names=names,
                       formats=formats,
                       tensors=tensors)
 
@@ -62,11 +55,12 @@ def test_iterator():
                           for a in fmt.axes)
             batches.append(tensor[index])
 
-        return batches
+        return tuple(batches)
 
     batch_size = 10
     sample_index = 0
     epoch = 0
+    batch_number = 0
 
     assert_equal(numpy.mod(num_samples, batch_size), 0)
 
@@ -77,18 +71,31 @@ def test_iterator():
                                                          'divisible'))
 
     # pylint: disable=star-args
-    for sequential_batch, loop_batch, divisible_batch in safe_izip(*iterators):
-        batch = get_batch(sample_index, batch_size)
-        for b in sequential_batch, loop_batch, divisible_batch:
-            assert_equal(batch, tuple(b))
+    for truncate_batch, loop_batch, divisible_batch in safe_izip(*iterators):
+        expected_batch = get_batch(sample_index, batch_size)
+        for (iterator_batch,
+             iterator_name) in safe_izip((truncate_batch,
+                                          loop_batch,
+                                          divisible_batch),
+                                         ('truncate',
+                                          'loop',
+                                          'divisible')):
+            assert_equal(iterator_batch,
+                         expected_batch,
+                         "iterator %s yielded unexpected batch %d." %
+                         (iterator_name, batch_number))
 
         sample_index += batch_size
         if sample_index == num_samples:
             epoch += 1
             sample_index = 0
+        else:
+            assert_less(sample_index, num_samples)
 
         for iterator in iterators:
             assert_equal(iterator.epoch(), epoch)
+
+        batch_number += 1
 
         if epoch == 3:
             break
