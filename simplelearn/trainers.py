@@ -47,10 +47,12 @@ class ComputeAverageOverEpoch(object):
         self._callbacks = callbacks
 
     def __call__(self):
-        epoch = data_iterator.epoch()
+        epoch = self._iterator.epoch()
         if epoch == -1:
             epoch = 0
 
+        while self._iterator.epoch() == epoch:
+            batch = epoch
 
 
 class StopTraining(Exception):

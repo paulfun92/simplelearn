@@ -118,10 +118,15 @@ class DataIterator(object):
 
         result = self._next()
 
+        if not isinstance(result, tuple) or \
+           not all(Format.is_numeric(r) for r in result):
+            raise TypeError("%s implemented incorrectly: Must return a tuple "
+                            "of numeric arrays.")
+
         curr_epoch = self.epoch()
         if not self._next_was_called:
             if curr_epoch != 0:
-                raise VaueError("%s implemented incorrecty: "
+                raise VaueError("%s implemented incorrectly: "
                                 "Expected epoch() to return 0 after "
                                 "first call to next(), but got %d."
                                 % curr_epoch)

@@ -1,5 +1,5 @@
 * Get sgd_demo.py working
-** Finish testing Dataset interface
+** DONE Finish testing Dataset interface
 ** Create monitor that monitors cost and raises a StopTraining exception if it fails to increase for N epochs.
 *** class: ComputesAverageOverEpoch
 **** __init__ args: (cost)function, validation_iter, callbacks
