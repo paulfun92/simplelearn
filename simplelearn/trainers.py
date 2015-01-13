@@ -34,7 +34,7 @@ import theano.tensor as T
 #
 # hmm... not so bad.
 
-class ComputeAverageOverEpoch(object):
+class ComputesAverageOverEpoch(object):
     """
     Monitors the average value of some f(x_i), over an epoch of data.
 
@@ -232,71 +232,89 @@ class Sgd(object):
     """
     A trainer that performs stochastic gradient descent.
 
-    At each iteration this updates the parametrs Pi as:
-
-      Pi -= dC/dPi * Li
-
-    where C is the cost, and Li is Pi's learning rate (see constructor
-    parameters below).
-
-    Parameters
-    ----------
-    data_iterator: simplelearn.datasets.Iterator
-      Provides the next training datum (list of arguments to cost) when polled.
-
-    cost_symbol: theano.gof.Variable
-      The cost to be reduced. Get as cost_node.get_output_symbol().
-
-    parameter_symbols: sequence of shared Theano variables
-      What this trainer modifies to lower the cost. These are typically model
-      weights, though they could also be inputs (e.g. for optimizing input
-      images).
-
-    learning_rates: sequence of floats
-      The learning rates of parameter_symbols.
-
-    cost_input_symbols: sequence of theano.gof.Variables
-      These are the inputs to cost.
-
-    epoch_callbacks: sequence of callables.
-      These get called once before the initial epoch, then after each epoch.
-      They are called in the order in which they're listed.
-      At least one of them must halt the training at some point by raising an
-      StopTraining.
+    At each iteration this computes the gradients of each parameter with
+    respect to the cost function, then updates the parameter value using
+    the gradients. How this update is performed (e.g. learning rate,
+    momentum value & type, etc) is up to the GradientBasedParameterUpdater
+    objects passed into the constructor.
     """
+
     def __init__(self,
                  data_iterator,
                  cost_symbol,
                  parameter_symbols,
                  parameter_updaters,
-                 cost_input_symbols,
-                 epoch_callbacks):
+                 cost_input_symbols):
+        """
+        Parameters
+        ----------
 
-        gradient_symbols = [T.grad(cost_symbol, p) for p in parameter_symbols]
+        data_iterator: simplelearn.datasets.Iterator
+          Provides the next training datum (list of arguments to cost) when
+          polled.
+
+        cost_symbol: theano.gof.Variable
+          The cost to be reduced. Get as cost_node.get_output_symbol().
+
+        parameter_symbols: sequence of shared Theano variables
+          What this trainer modifies to lower the cost. These are typically
+          model weights, though they could also be inputs (e.g. for optimizing
+          input images).
+
+        parameter_updaters: sequence of GradientBasedParameterUpdaters.
+          One of these per symbol in parameter_symbols.
+
+        cost_input_symbols: sequence of theano.gof.Variables
+          These are the inputs to cost.
+        """
+
+        #
+        # sanity-checks the arguments.
+        #
+
+        if not isinstance(data_iterator, DataIterator):
+            raise TypeError("Expected data_iterator to be a DataIterator, but "
+                            "got a %s." % type(data_iterator))
+
+        if not isinstance(cost_symbol, theano.gof.Variable):
+            raise TypeError("Expected cost_symbol to be a theano symbol, but "
+                            "got a %s." type(cost_symbol))
+
+        for parameter_symbol in parameter_symbols:
+            if not isinstance(parameter_symbol, theano.gof.Variable):
+                raise TypeError("Expected parameter_symbols to be theano "
+                                "symbols, but got a %s." %
+                                type(parameter_symbol))
+
+        assert_equal(len(parameter_symbols), len(parameter_updaters))
+
+        for updater in parameter_updaters:
+            if not all(isinstance(updater, GradientBasedParameterUpdater)):
+                raise TypeError("Expected all elements of parameter_updaters "
+                                "to be GradientBasedParameterUpdater "
+                                "instances, but got a %s." % type(updater))
+
+        for cost_input_symbol in parameter_symbols:
+            if not isinstance(cost_input_symbol, theano.gof.Variable):
+                raise TypeError("Expected cost_input_symbols to be theano "
+                                "symbols, but got a %s." %
+                                type(cost_input_symbol))
 
         # Parameters to update
         self._parameter_symbols = tuple(parameter_symbols)
-        for p in self.parameter_symbols:
-            if not isinstance(p, theano.gof.Variable):
-                raise TypeError("Expected all parameter_symbols to be "
-                                "theano.gof.Variables, but found a %s." %
-                                type(p))
 
         # a list of gradient functions, one for each parameter
+        gradient_symbols = [T.grad(cost_symbol, p) for p in parameter_symbols]
         self._gradient_functions = tuple(T.function(cost_input_symbols, g)
                                          for g in gradient_symbols)
-        self._learning_rates = tuple(learning_rates)
-        self._momenta = tuple(momenta)
 
-        num_params = tuple(len(x) for x in (self._parameter_symbols,
-                                            self._learning_rates,
-                                            self._momenta))
-        if not (num_params[0] == num_params[1:]).all():
-            raise ValueError("Expected parameter_symbols, learning_rates, and "
-                             "momenta arguments to have the same length, not "
-                             "%d, %d, and %d" % num_params)
+        # a list of parameter updaters.
+        self._parameter_updaters = parameter_updaters
 
-        self._epoch_callbacks = tuple(epoch_callbacks)
+        # These get called once before any training, and after each epoch
+        # thereafter. One of them must halt the training at some point by
+        # throwing a StopTraining exception.
+        self.epoch_callbacks = []
 
     def train(self):
         """
@@ -305,17 +323,45 @@ class Sgd(object):
         Training runs indefinitely until one of self._epoch_callbacks() raises
         a StopTraining exception.
         """
+
+        if len(self.epoch_callbacks) == 0:
+            raise RuntimeError("self.epoch_callbacks is empty, so this will "
+                               "iterate through the training data forever. "
+                               "Please add a callback that will throw a "
+                               "StopTraining exception at some point.")
         try:
-            for callback in self._epoch_callbacks:
+            for callback in self.epoch_callbacks:
                 callback()
 
             while True:
+                epoch_of_prev_batch = self._data_iterator.epoch()
+
+                # gets batch of data
                 cost_arguments = self._data_iterator.get_next_batch()
+
+                epoch_of_curr_batch = self._data_iterator.epoch()
+
+                assert epoch_of_curr_batch in (epoch_of_prev_batch,
+                                               epoch_of_prev_batch + 1)
+
+                # calls epoch callbacks, if we've iterated through an epoch
+                if epoch_of_curr_batch > epoch_of_prev_batch:
+                    for callback in self._epoch_callbacks:
+                        callback()
+
+                # computes gradients of cost w.r.t. parameters
                 gradients = [g(cost_arguments)
                              for g in self._gradient_functions]
 
-                for callback in self._epoch_callbacks:
-                    callback()
+                # Updates parameters using their gradients.
+                for (parameter,
+                     gradient,
+                     updater) in safe_izip(self._parameters,
+                                           gradients,
+                                           self._parameter_updaters):
+                    updater.update_parameters(gradients=gradient,
+                                              parameters=parameter)
+
 
         except StopTraining, exception:
             if exception.status == 'ok':
