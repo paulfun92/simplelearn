@@ -66,6 +66,11 @@ class Node(object):
         self.output_format = output_format
         self.output_symbol = output_symbol
 
+    # def compile_function(self):
+    #     inputs = tuple(x.make_batch(is_symbolic=True)
+    #                    for x in self.inputs)
+    #     return theano.function(inputs, self.output_symbol)
+
 
 class InputNode(Node):
     """

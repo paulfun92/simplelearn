@@ -1,5 +1,5 @@
 """
-Training algorithms and callbacks for monitoring their progress.
+Training algorithms, and callbacks for monitoring their progress.
 """
 
 __author__ = "Matthew Koichi Grimes"
@@ -7,7 +7,14 @@ __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2014"
 __license__ = "Apache 2.0"
 
+import numpy
+import theano
 import theano.tensor as T
+from nose.tools import assert_equal
+from simplelearn.data import DataIterator
+
+# pylint: disable=too-few-public-methods
+
 
 
 # Sketch:
@@ -36,23 +43,62 @@ import theano.tensor as T
 
 class ComputesAverageOverEpoch(object):
     """
-    Monitors the average value of some f(x_i), over an epoch of data.
+    Epoch callback. Computes the average of a function over an epoch of data.
 
-    The average value is passed to sub-callbacks. For example, these can log
-    the value, or raise a StopTraining exception.
+    On call, this loops over a data iterator, computing f(x) for each
+    datum x, where f is given in the constructor. After an epoch's worth
+    of data, this sums all the f(x)'s, divides by the number of samples,
+    and passes the result to any interested callbacks.
     """
-    def __init__(self, function, data_iterator, callbacks):
-        self._function = function
+    def __init__(self, function_node, data_iterator, callbacks):
+        """
+        Parameters
+        ----------
+
+        function_node: Node
+          A Node whose inputs are a DataSource's output nodes.
+
+        data_iterator: DataIterator
+          Iterates over the DataSource connected to function_node.
+
+        callbacks: sequence
+          A sequence of callables. Call signature must be f(x), where x
+          is a numeric batch of outputs from function_node.
+        """
+        # self._function_node = function_node
+        self._function_batch_axis = function_node.output_format.axes.index('b')
+
+        input_symbols = tuple(x.make_batch() for x in function_node.inputs)
+        self._function = theano.function(input_symbols,
+                                         function_node.output_symbol)
         self._iterator = data_iterator
         self._callbacks = callbacks
 
     def __call__(self):
-        epoch = self._iterator.epoch()
-        if epoch == -1:
-            epoch = 0
+        if self._iterator.epoch() == -1:
+            self._iterator.next()
 
-        while self._iterator.epoch() == epoch:
-            batch = epoch
+        current_epoch = self._iterator.epoch()
+        count = 0
+        total = None
+
+        while self._iterator.epoch() == current_epoch:
+            output_batch = self._function(self._iterator.batch())
+            batch_total = output_batch.sum(axis=self._function_batch_axis,
+                                           keepdims=True)
+            if total is None:
+                total = batch_total
+            else:
+                total += batch_total
+
+            count += output_batch.shape[self._function_batch_axis]
+
+            self._iterator.next()
+
+        average = total / count
+
+        for callback in self._callbacks:
+            callback(average)
 
 
 class StopTraining(Exception):
@@ -78,10 +124,8 @@ class GradientBasedParameterUpdater(object):
 
     Subclasses must override _update_parameters().
     """
-    def __init__(self):
-        pass
 
-    def update_parameters(gradients, parameters):
+    def update_parameters(self, gradients, parameters):
         """
         Updates parameters in-place, based on their gradients.
 
@@ -99,7 +143,7 @@ class GradientBasedParameterUpdater(object):
 
         self._update_parameters(gradients, parameters)
 
-    def _update_parameters(gradients, parameters):
+    def _update_parameters(self, gradients, parameters):
         raise NotImplementedError("%s.update_parameters() not yet implemented."
                                   % type(self))
 
@@ -113,7 +157,7 @@ class SgdParameterUpdater(GradientBasedParameterUpdater):
     each epoch.
     """
 
-    def __init__(initial_learning_rate, initial_momentum):
+    def __init__(self, initial_learning_rate, initial_momentum):
         def check_arg(arg, name):
             if not isinstance(arg, float):
                 raise TypeError("Expected %s to be a float, not a %s." %
@@ -132,7 +176,7 @@ class SgdParameterUpdater(GradientBasedParameterUpdater):
         self.momentum = numpy.asarray(initial_momentum, dtype=floatX)
         self._previous_update = None
 
-    def _update_parameters(gradients, parameters):
+    def _update_parameters(self, gradients, parameters):
         """
         Updates parameters in-place, based on their gradients.
 
@@ -173,7 +217,7 @@ class LinearlyDecayingCallback(object):
       <value> should decay to <saturated_value> after this many epochs.
     """
 
-    def __init__(value, saturated_value, epochs_to_saturation):
+    def __init__(self, value, saturated_value, epochs_to_saturation):
         if not isinstance(value, numpy.ndarray) or value.ndim != 0:
             raise TypeError("value must be a 0-dimensional numpy array.")
 
@@ -186,6 +230,7 @@ class LinearlyDecayingCallback(object):
                              "its saturated_value (%g)." % (value,
                                                             saturated_value))
 
+        self.value = value
         self._initial_value = float(value)
         self._saturated_value = saturated_value
         self._epochs_to_saturation = epochs_to_saturation
@@ -198,8 +243,8 @@ class LinearlyDecayingCallback(object):
         alpha = min(1.0, (float(self._num_epochs_seen) /
                           float(self._epochs_to_saturation)))
 
-        value[...] = (self._initial_value * (1.0 - alpha) +
-                      self._saturated_value * alpha)
+        self.value[...] = (self._initial_value * (1.0 - alpha) +
+                           self._saturated_value * alpha)
 
 
 class LimitNumEpochsCallback(object):
@@ -278,7 +323,7 @@ class Sgd(object):
 
         if not isinstance(cost_symbol, theano.gof.Variable):
             raise TypeError("Expected cost_symbol to be a theano symbol, but "
-                            "got a %s." type(cost_symbol))
+                            "got a %s." % type(cost_symbol))
 
         for parameter_symbol in parameter_symbols:
             if not isinstance(parameter_symbol, theano.gof.Variable):
@@ -300,6 +345,8 @@ class Sgd(object):
                                 "symbols, but got a %s." %
                                 type(cost_input_symbol))
 
+        self._data_iterator = data_iterator
+
         # Parameters to update
         self._parameter_symbols = tuple(parameter_symbols)
 
@@ -320,7 +367,7 @@ class Sgd(object):
         """
         Runs training until a StopTraining exception is raised.
 
-        Training runs indefinitely until one of self._epoch_callbacks() raises
+        Training runs indefinitely until one of self.epoch_callbacks raises
         a StopTraining exception.
         """
 
@@ -346,7 +393,7 @@ class Sgd(object):
 
                 # calls epoch callbacks, if we've iterated through an epoch
                 if epoch_of_curr_batch > epoch_of_prev_batch:
-                    for callback in self._epoch_callbacks:
+                    for callback in self.epoch_callbacks:
                         callback()
 
                 # computes gradients of cost w.r.t. parameters
@@ -361,7 +408,6 @@ class Sgd(object):
                                            self._parameter_updaters):
                     updater.update_parameters(gradients=gradient,
                                               parameters=parameter)
-
 
         except StopTraining, exception:
             if exception.status == 'ok':

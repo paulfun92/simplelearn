@@ -35,6 +35,8 @@ class DataIterator(object):
     """
 
     def __init__(self):
+        self._batch = None
+
         # Used for ensuring that _epoch() is implemented correctly
         # (i.e. that epochs start at -1, and increase by at most one when
         # next() is called).
@@ -77,6 +79,9 @@ class DataIterator(object):
         raise NotImplementedError("%s._epoch() not yet implemented." %
                                   type(self))
 
+    def batch(self):
+        return self._batch
+
     def __iter__(self):
         return self
 
@@ -116,7 +121,7 @@ class DataIterator(object):
                                  "yielding first batch, but got %d." %
                                  prev_epoch)
 
-        result = self._next()
+        self._batch = self._next()
 
         if not isinstance(result, tuple) or \
            not all(Format.is_numeric(r) for r in result):
@@ -138,7 +143,7 @@ class DataIterator(object):
                              % (prev_epoch, curr_epoch))
 
         self._next_was_called = True
-        return result
+        return self.batch()
 
     def _next(self):
         """
