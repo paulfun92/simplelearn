@@ -50,26 +50,24 @@ class Dataset(DataSource):
 
             fmt.check(tensor)
 
-        DataTuple = collections.namedtuple('DataTuple', names)
-        NodeAndTensor = collections.namedtuple('NodeAndTensor',
-                                               ('node', 'tensor'))
-
-        self.data = DataTuple(*tuple(NodeAndTensor(InputNode(fmt), tensor)
-                                     for fmt, tensor
-                                     in safe_izip(formats, tensors)))
+        self._names = names
+        self._nodes = tuple(InputNode(fmt) for fmt in formats)
+        self._tensors = tensors
 
     def iterator(self, iterator_type, batch_size, **kwargs):
         if iterator_type == 'sequential':
-            tensors = tuple(d.tensor for d in self.data)
-            formats = tuple(d.node.output_format for d in self.data)
+            formats = tuple(node.output_format for node in self._nodes)
             return SequentialIterator(batch_size,
-                                      names=self.data._fields,
-                                      tensors=tensors,
+                                      names=self._names,
+                                      tensors=self._tensors,
                                       formats=formats,
                                       **kwargs)
         else:
             raise NotImplementedError("'%s' iterator type not supported." %
                                       iterator_type)
+
+    def get_input_nodes(self):
+        return self._nodes
 
 
 class SequentialIterator(DataIterator):
@@ -77,7 +75,7 @@ class SequentialIterator(DataIterator):
     Iterates through samples in a Dataset in memory order.
     """
 
-    def __init__(self, batch_size, names, tensors, formats, **kwargs):
+    def __init__(self, batch_size, names, formats, tensors, **kwargs):
         """
         Parameters
         ----------
@@ -86,28 +84,33 @@ class SequentialIterator(DataIterator):
         names: sequence of strings
           tensors' names.
 
-        tensors: sequence of numpy tensors
-          All must have the same number of samples.
-
         formats: sequence of Formats
           tensors' formats. All must have a 'b' (batch) axis.
 
-        mode: str (optional)
+        tensors: sequence of numpy tensors
+          All must have the same number of samples.
+
+        loop_style: str (optional)
           How to handle the case where the number of samples in the dataset
           isn't divisible by the batch_size.
 
-          Choose one of 'loop', 'truncate', or 'divisible' (default='loop'):
+          Choose one of 'wrap', 'truncate', or 'divisible' (default='wrap'):
 
-          'loop': Loop off the end (the final batch consists of the last few
-                  samples, followed by the first few samples).
+          'wrap': Wrap off the end of the data, back to the beginning. The
+                  final batch of the epoch consists of the last few samples,
+                  followed by the first few samples.
 
           'truncate': Skip the last few samples if there aren't enough to make
                       a batch_size'd batch.
 
           'divisible': If the number of samples isn't divisible by batch_size,
                        raise a ValueError in the constructor.
-
         """
+
+        #
+        # Sanity-checks arguments
+        #
+
         if not numpy.issubdtype(type(batch_size), numpy.integer):
             raise TypeError("batch_size must be an integer, not a %s." %
                             type(batch_size))
@@ -116,35 +119,40 @@ class SequentialIterator(DataIterator):
             raise ValueError("batch_size must be positive, not %d." %
                              batch_size)
 
-        if len(formats) != len(tensors):
-            raise ValueError("Expected equal # of formats and tensors, "
-                             "not %d formats and %d tensors." %
-                             (len(formats), len(tensors)))
+        if len(names) != len(formats) or len(names) != len(tensors):
+            raise ValueError("Expected equal # of names, formats and tensors, "
+                             "not %d names, %d formats, and %d tensors." %
+                             (len(names), len(formats), len(tensors)))
 
         if len(formats) == 0:
-            assert_equal(len(tensors), 0)
-            raise ValueError("Got empty sequence for 'formats' & "
+            raise ValueError("Got empty sequences for 'names', 'formats' & "
                              "'tensors' arguments.")
 
-        for tensor in tensors:
-            if not Format.is_numeric(tensor):
-                raise TypeError("Expected tensors to be numeric arrays, but "
-                                "got a %s." % type(tensor))
+        for name in names:
+            if not isinstance(name, str):
+                raise TypeError("Expected names to be strings, but got a %s."
+                                % type(name))
 
         for fmt in formats:
             if not isinstance(fmt, Format):
                 raise TypeError("Expected formats to be Formats, but got a "
                                 "%s.", type(fmt))
 
-        self._mode = kwargs.get('mode', None)
-        if self._mode is None:
-            self._mode = 'loop'
+        for tensor in tensors:
+            if not Format.is_numeric(tensor):
+                raise TypeError("Expected tensors to be numeric arrays, but "
+                                "got a %s." % type(tensor))
 
-        mode_values = ('truncate', 'loop', 'divisible')
+        self._loop_style = kwargs.get('loop_style', None)
+        if self._loop_style is None:
+            self._loop_style = 'wrap'
 
-        if self._mode not in mode_values:
-            raise ValueError("'mode' argument must be one of %s, not '%s'." %
-                             (str(mode_values), self._mode))
+        loop_style_values = ('truncate', 'wrap', 'divisible')
+
+        if self._loop_style not in loop_style_values:
+            raise ValueError("'loop_style' argument must be one of %s, not "
+                             "'%s'." % (str(loop_style_values),
+                                        self._loop_style))
 
         def get_num_samples(tensor, fmt):
             batch_index = fmt.axes.index('b')
@@ -163,7 +171,7 @@ class SequentialIterator(DataIterator):
                              "batch_size %d." %
                              (num_samples, batch_size))
 
-        if self._mode == 'divisible' and \
+        if self._loop_style == 'divisible' and \
            numpy.mod(num_samples, batch_size) != 0:
             raise ValueError("# of samples %d is not divisible by "
                              "batch_size %d (remainder = %d)." %
@@ -171,21 +179,27 @@ class SequentialIterator(DataIterator):
                               batch_size,
                               numpy.mod(num_samples, batch_size)))
 
-        self._epoch = -1
         self._next_batch_start = 0
         self._batch_size = batch_size
+        self._names = names
         self._formats = formats
         self._tensors = tensors
         self.Batch = collections.namedtuple('Batch', names)
 
-    def epoch(self):
-        return self._epoch
+    def next_is_new_epoch(self):
+        num_samples = self._tensors[0].shape[self._formats[0].axes.index('b')]
+        assert_less(self._next_batch_start, num_samples)
+
+        if self._loop_style == 'wrap':
+            return self._next_batch_start < self._batch_size
+        else:
+            return self._next_batch_start == 0
 
     def next(self):
         num_samples = \
             self._tensors[0].shape[self._formats[0].axes.index('b')]
 
-        if self._mode == 'truncate':
+        if self._loop_style == 'truncate':
             num_samples = num_samples - numpy.mod(num_samples,
                                                   self._batch_size)
 
@@ -205,7 +219,7 @@ class SequentialIterator(DataIterator):
             return result
 
         if self._next_batch_start + self._batch_size > num_samples:
-            assert_not_equal(self._mode,
+            assert_not_equal(self._loop_style,
                              'divisible',
                              "Number of samples %d wasn't divisible by "
                              "batch size %d. This should've been caught "
@@ -214,16 +228,18 @@ class SequentialIterator(DataIterator):
                               self._batch_size,
                               type(self)))
 
-            assert_not_equal(self._mode,
+            assert_not_equal(self._loop_style,
                              'truncated',
                              "Truncated number of samples %d wasn't divisible "
                              "by batch size %d. It must've been coded wrong." %
                              (num_samples, self._batch_size))
 
-            if self._mode == 'loop':
-                batch = self.Batch(*(fmt.make_batch(is_symbolic=False,
-                                                    batch_size=self._batch_size)
-                                     for fmt in self._formats))
+            if self._loop_style == 'wrap':
+                batch = \
+                    self.Batch(*(fmt.make_batch(is_symbolic=False,
+                                                batch_size=self._batch_size)
+                                 for fmt in self._formats))
+
                 chunk_size = num_samples - self._next_batch_start
                 assert_greater(chunk_size, 0)
 
@@ -250,13 +266,11 @@ class SequentialIterator(DataIterator):
 
                 self._next_batch_start = self._batch_size - chunk_size
                 return batch
-            # elif self._mode == 'truncate':
-            #     self._next_batch_start = 0
             else:
-                raise ValueError("Unrecognized iteration mode '%s'. This "
+                raise ValueError("Unrecognized loop_style '%s'. This "
                                  "should've been caught in %s's "
                                  "constructor."
-                                 % (self._mode, type(self)))
+                                 % (self._loop_style, type(self)))
 
         subbatches = tuple(get_range(tensor,
                                      fmt,
@@ -265,10 +279,6 @@ class SequentialIterator(DataIterator):
                                      self._batch_size)
                            for tensor, fmt
                            in safe_izip(self._tensors, self._formats))
-
-        # If _mode != 'loop', this could be "if self._next_batch_start == 0"
-        if self._next_batch_start < self._batch_size:
-            self._epoch += 1
 
         self._next_batch_start += self._batch_size
         assert_less_equal(self._next_batch_start, num_samples)

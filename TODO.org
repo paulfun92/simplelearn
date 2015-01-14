@@ -15,3 +15,23 @@
 ** Finish sgd demo
 *** Create dummy dataset that repeatedly yields the input shared variable's numeric value for each epoch.
 *** Use Sgd with DummyDataset, QuadraticCost, CostMonitor
+
+
+Brainstorm:
+
+* Epoch events should be fired after the last datum of the epoch is yielded, not on the first datum of the next epoch.
+** Can't do this by yielding epoch numbers!
+** This could eliminate the present need for batch() and even epoch() methods.
+** Alternatives to epoch numbers:
+*** boolean DataIterator.epoch_done() method
+**** In trainer, get datum, if iterator.epoch_done(), call epoch callbacks.
+*** iterator.next() yields data, epoch_done, where data is always a tuple.
+**** Similar to above, but no need for creating a named iterator variable when looping
+*** register epoch callbacks with iterator itself
+**** This would necessarily trigger during the next() call that yields the final datum in an epoch
+**** This is bad: the callbacks should happen after processing the final datum in train().
+* DataIterator should have the Nodes, so it can be the sole interface for data consumers.
+** The name DataIterator in this case bothers me.
+** This will be necessary anyway if (if) the iterator ever is to yield a different number of variables than the original dataset. For example, an iterator that yields left and right stereo images as separate variables.
+*** This won't be necessary in the forseeable future. If node L operates on left images and node R operates on right images, they can both take a stereo image as input, and just use their respective parts of it.
+** For now, let it be.

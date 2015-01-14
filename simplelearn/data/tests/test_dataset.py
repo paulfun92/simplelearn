@@ -7,6 +7,8 @@ from simplelearn.utils import safe_izip
 from simplelearn.formats import DenseFormat
 from simplelearn.data.dataset import Dataset
 
+import pdb
+
 
 def test_sequential_iterator_next():
     formats = (DenseFormat(axes=('b',),   # scalar label
@@ -48,7 +50,7 @@ def test_sequential_iterator_next():
                          dataset.iterator,
                          iterator_type='sequential',
                          batch_size=11,
-                         mode='divisible')
+                         loop_style='divisible')
 
     def get_batch(sample_index, batch_size, tensors):
         batches = []
@@ -66,7 +68,7 @@ def test_sequential_iterator_next():
     batch_size = 10
 
     #
-    # Tests 'truncate' mode
+    # Tests 'truncate' loop_style
     #
 
     sample_index = 0
@@ -74,37 +76,37 @@ def test_sequential_iterator_next():
 
     iterator = dataset.iterator(iterator_type='sequential',
                                 batch_size=batch_size,
-                                mode='truncate')
+                                loop_style='truncate')
 
-    assert_equal(iterator.epoch(), -1)
+    assert iterator.next_is_new_epoch()
 
+    epoch = 0
     for batch_number, iterator_batch in enumerate(iterator):
         row_index = numpy.mod(sample_index, truncated_num_samples)
         expected_batch = get_batch(row_index, batch_size, tensors)
-        expected_epoch = sample_index // truncated_num_samples
         sample_index += batch_size
-        assert_equal(iterator.epoch(),
-                     expected_epoch,
-                     "sample_index: %d, batch_number: %d" %
-                     (sample_index, batch_number))
+        assert_equal(iterator.next_is_new_epoch(),
+                     sample_index % truncated_num_samples == 0)
 
         assert_equal(iterator_batch,
                      expected_batch,
                      "'truncated' iterator yielded unexpected batch %d." %
                      batch_number)
 
-        if expected_epoch == max_epochs:
-            break
+        if iterator.next_is_new_epoch():
+            epoch += 1
+            if epoch == max_epochs:
+                break
 
     #
-    # Tests 'loop' mode
+    # Tests 'wrap' loop_style
     #
 
     sample_index = 0
     iterator = dataset.iterator(iterator_type='sequential',
                                 batch_size=batch_size,
-                                mode='loop')
-    assert_equal(iterator.epoch(), -1)
+                                loop_style='wrap')
+    assert iterator.next_is_new_epoch()
 
     looped_tensors = []
     for tensor, fmt in safe_izip(tensors, formats):
@@ -112,22 +114,23 @@ def test_sequential_iterator_next():
         tile_pattern[fmt.axes.index('b')] = max_epochs + 1
         looped_tensors.append(numpy.tile(tensor, tile_pattern))
 
-    expected_epoch = -1
+    epoch=0
     for batch_number, iterator_batch in enumerate(iterator):
         expected_batch = get_batch(sample_index, batch_size, looped_tensors)
         assert_equal(iterator_batch, expected_batch)
 
-        if sample_index % num_samples < batch_size:
-            expected_epoch += 1
-
-        assert_equal(iterator.epoch(), expected_epoch)
         sample_index += batch_size
 
-        if expected_epoch == max_epochs:
-            break
+        assert_equal(iterator.next_is_new_epoch(),
+                     sample_index % num_samples < batch_size)
+
+        if iterator.next_is_new_epoch():
+            epoch += 1
+            if epoch == max_epochs:
+                break
 
     #
-    # Tests 'divisible' mode
+    # Tests 'divisible' loop_style
     #
 
     sample_index = 0
@@ -137,7 +140,7 @@ def test_sequential_iterator_next():
                          dataset.iterator,
                          iterator_type='sequential',
                          batch_size=batch_size,
-                         mode='divisible')
+                         loop_style='divisible')
 
     def crop_tensors(tensors, num_samples):
         result = []
@@ -157,20 +160,23 @@ def test_sequential_iterator_next():
 
     iterator = cropped_dataset.iterator(iterator_type='sequential',
                                         batch_size=batch_size,
-                                        mode='divisible')
-    assert_equal(iterator.epoch(), -1)
+                                        loop_style='divisible')
 
+    assert iterator.next_is_new_epoch()
+
+    epoch = 0
     for batch_number, iterator_batch in enumerate(iterator):
         row_index = sample_index % truncated_num_samples
         expected_batch = get_batch(row_index, batch_size, cropped_tensors)
         assert_equal(iterator_batch, expected_batch)
 
-        if row_index == 0:  # sample_index % num_samples < batch_size:
-            expected_epoch += 1
-
-        expected_epoch = sample_index // truncated_num_samples
-        assert_equal(iterator.epoch(), expected_epoch)
         sample_index += batch_size
 
-        if expected_epoch == max_epochs:
-            break
+        assert_equal(sample_index % truncated_num_samples == 0,
+                     iterator.next_is_new_epoch())
+
+        if iterator.next_is_new_epoch():
+            epoch += 1
+
+            if epoch == max_epochs:
+                break
