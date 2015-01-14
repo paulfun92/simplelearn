@@ -1,8 +1,10 @@
+import numpy
+from numpy.testing import assert_allclose
+
 from simplelearn.training import ComputesAverageOverEpoch
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
-from numpy.testing import assert_allclose
-
+from simplelearn.data.dataset import Dataset
 
 class L2Norm(Node):
 
@@ -20,8 +22,9 @@ class L2Norm(Node):
 
 
 def test_computes_average_over_epoch():
-    tensor = rng.uniform(3, 10)
-    fmt = DenseFormat(axes=('b', 'f'), shape=(-1, 10))
+    rng = numpy.random.RandomState(3851)
+    tensor = rng.uniform(-1.0, 1.0, size=(3, 10))
+    fmt = DenseFormat(axes=('b', 'f'), shape=(-1, 10), dtype=tensor.dtype)
     dataset = Dataset(names=('x', ), formats=(fmt, ), tensors=(tensor, ))
 
     l2norm_node = L2Norm(*dataset.get_input_nodes())
