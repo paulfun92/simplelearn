@@ -35,52 +35,8 @@ class DataIterator(object):
     """
 
     def __init__(self):
-        # self._batch = None
-
-        # Used for ensuring that _epoch() is implemented correctly
-        # (i.e. that epochs start at -1, and increase by at most one when
-        # next() is called).
+        # Used for ensuring that next_is_new_epoch() is implemented correctly.
         self._next_was_called = False
-
-    # def epoch_of_next(self):
-    #     """
-    #     Returns the epoch number of the next batch to be yielded by next().
-
-    #     Starts at 0.
-
-    #     An epoch is defined as a loop through a "representative sample" of the
-    #     data distribution. For example::
-
-    #       * For many fixed-sized datasets, the N'th epoch is simply the N'th
-    #         loop through the entire dataset.
-    #       * If sampling randomly, you might trigger an epoch every S samples
-    #         (where S is the dataset size), even if you might've skipped a few
-    #         of the samples on any particular epoch.
-
-    #     Epochs need not be of fixed length.
-
-    #     Incrementing the epoch number serves only to trigger
-    #     simplelearn.Trainer's epoch callbacks. These can include costly
-    #     functions such as computing average error over a validation set, so in
-    #     general epochs shouldn't be frequent.
-
-    #     Example epoch callbacks include::
-
-    #       * Computing the average error over a validation dataset.
-    #       * Reshuffling the training set iteration order.
-    #       * Redefining the training set to bias sampling towards examples that
-    #         the model misclassed in the previous epoch.
-
-    #     Returns
-    #     -------
-    #     rval: int
-    #       The epoch number, starting at 0.
-    #     """
-    #     raise NotImplementedError("%s._epoch() not yet implemented." %
-    #                               type(self))
-
-    # def batch(self):
-    #     return self._batch
 
     def __iter__(self):
         return self
@@ -89,8 +45,7 @@ class DataIterator(object):
         """
         Returns True if next() will return a datum in a new epoch.
 
-        This method could've been titled "epoch_finished", except it's
-        true even for a fresh iterator that hasn't yielded any data yet.
+        The first epoch counts as a new epoch.
         """
         raise NotImplementedError("%s.next_is_new_epoch() not yet implemented."
                                   % type(self))
@@ -120,22 +75,12 @@ class DataIterator(object):
         rval: instance of a collections.namedtuple type.
         """
 
-        # prev_epoch = self.epoch()
-        # if not numpy.issubdtype(type(prev_epoch), numpy.integer):
-        #     raise TypeError("Expected epoch() to return an integer, not a %s."
-        #                     % type(prev_epoch))
-
         if not self._next_was_called:
             if not next_is_new_epoch():
                 raise ValueError("%s.next_is_new_epoch() implemented "
                                  "incorrectly: if next() hasn't yet been "
                                  "called, next_is_new_epoch() must return "
                                  "True. (It returned False.)")
-            # if prev_epoch != -1:
-            #     raise ValueError("%s implemented incorrectly: "
-            #                      "Expected epoch() to return -1 before "
-            #                      "yielding first batch, but got %d." %
-            #                      prev_epoch)
 
         self._batch = self._next()
 
@@ -144,20 +89,6 @@ class DataIterator(object):
             raise TypeError("%s._next() implemented incorrectly: It must "
                             "return a tuple of numeric arrays, but got "
                             "something else.")
-
-        # curr_epoch = self.epoch()
-        # if not self._next_was_called:
-        #     if curr_epoch != 0:
-        #         raise VaueError("%s implemented incorrectly: "
-        #                         "Expected epoch() to return 0 after "
-        #                         "first call to next(), but got %d."
-        #                         % curr_epoch)
-
-        # if (curr_epoch - prev_epoch) not in (0, 1):
-        #     raise ValueError("%s implemented incorrectly: Expected epoch() "
-        #                      "to increase by 0 or 1 when calling next(), but "
-        #                      "it went from %d to %d."
-        #                      % (prev_epoch, curr_epoch))
 
         self._next_was_called = True
         return self.batch()

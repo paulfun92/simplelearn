@@ -30,8 +30,8 @@ Brainstorm:
 *** register epoch callbacks with iterator itself
 **** This would necessarily trigger during the next() call that yields the final datum in an epoch
 **** This is bad: the callbacks should happen after processing the final datum in train().
-* DataIterator should have the Nodes, so it can be the sole interface for data consumers.
+* (For now, let this be.) DataIterator should have the Nodes, so it can be the sole interface for data consumers.
 ** The name DataIterator in this case bothers me.
 ** This will be necessary anyway if (if) the iterator ever is to yield a different number of variables than the original dataset. For example, an iterator that yields left and right stereo images as separate variables.
 *** This won't be necessary in the forseeable future. If node L operates on left images and node R operates on right images, they can both take a stereo image as input, and just use their respective parts of it.
-** For now, let it be.
+* For now, let it be.

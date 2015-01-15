@@ -7,11 +7,13 @@ __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2014"
 __license__ = "Apache 2.0"
 
+import collections
 import numpy
 import theano
 import theano.tensor as T
 from nose.tools import assert_equal
 from simplelearn.data import DataIterator
+from simplelearn.nodes import Node
 
 # pylint: disable=too-few-public-methods
 
@@ -65,35 +67,41 @@ class ComputesAverageOverEpoch(object):
           A sequence of callables. Call signature must be f(x), where x
           is a numeric batch of outputs from function_node.
         """
-        # self._function_node = function_node
+        if not isinstance(function_node, Node):
+            raise TypeError("Expected function_node to be a Node, but got a "
+                            "%s." % type(function_node))
+
+        if not data_iterator.next_is_new_epoch():
+            raise ValueError("iterator doesn't point to the beginning of an "
+                             "epoch.")
+
+        if not isinstance(callbacks, collections.Sequence):
+            raise TypeError("callbacks argument must be a sequence.")
+
         self._function_batch_axis = function_node.output_format.axes.index('b')
 
-        input_symbols = tuple(x.make_batch() for x in function_node.inputs)
+        input_symbols = tuple(input_node.output_symbol
+                              for input_node in function_node.inputs)
         self._function = theano.function(input_symbols,
                                          function_node.output_symbol)
         self._iterator = data_iterator
         self._callbacks = callbacks
 
     def __call__(self):
-        if self._iterator.epoch() == -1:
-            self._iterator.next()
+        if not self._iterator.next_is_new_epoch():
+            raise ValueError("self._iterator doesn't point to a fresh epoch.")
 
-        current_epoch = self._iterator.epoch()
         count = 0
         total = None
 
-        while self._iterator.epoch() == current_epoch:
-            output_batch = self._function(self._iterator.batch())
-            batch_total = output_batch.sum(axis=self._function_batch_axis,
-                                           keepdims=True)
-            if total is None:
-                total = batch_total
-            else:
-                total += batch_total
+        batch = self._function(*self._iterator.next())
+        count += batch.shape[self._function_batch_axis]
+        total = batch.sum(axis=self._function_batch_axis)
 
-            count += output_batch.shape[self._function_batch_axis]
-
-            self._iterator.next()
+        while not self._iterator.next_is_new_epoch():
+            batch = self._function(*self._iterator.next())
+            count += batch.shape[self._function_batch_axis]
+            total += batch.sum(axis=self._function_batch_axis)
 
         average = total / count
 
