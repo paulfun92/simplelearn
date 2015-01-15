@@ -124,6 +124,64 @@ class StopTraining(Exception):
         super(StopTraining).__init__(message)
 
 
+class StopsOnStagnation(object):
+    """
+    A callback to give ComputesAverageOverEpoch.
+
+    Stops the training when the average f(x_i) over epoch x stops decreasing.
+    """
+
+    def __init__(self, name, num_epochs, min_decrease=0.0):
+        """
+        Parameters
+        ----------
+
+        name: str
+          Name of the quantity being monitored.
+        """
+
+        #
+        # Sanity-checks args.
+        #
+
+        if not numpy.issubdtype(type(num_epochs), numpy.integer):
+            raise TypeError("num_epochs must be an integer, but got a %s."
+                            % type(num_epochs))
+
+        if num_epochs < 1:
+            raise ValueError("num_epochs must be at least 1, but got %d." %
+                             num_epochs)
+
+        if not numpy.issubdtype(type(min_decrease), numpy.floating):
+            raise TypeError("Expected a floating-point value for "
+                            "min_decrease, but got a %s." % type(min_decrease))
+
+        if min_decrease < 0.0:
+            raise ValueError("Expected min_decrease to be non-negative, but "
+                             "got %g." % min_decrease)
+
+        #
+        # Sets members
+        #
+
+        self._max_epochs_since_min = num_epochs
+        self._epochs_since_min = 0
+        self._min_decrease = min_decrease
+        self._min_value = numpy.inf
+
+    def __call__(self, average_over_epoch):
+        if average_over_epoch < self._min_value:
+            self._min_value = average_over_epoch
+            self._epochs_since_min = 0
+        else:
+            self._epochs_since_min += 1
+
+        if self._epochs_since_min >= self._max_epochs_since_min:
+            raise StopTraining(status='ok',
+                               message=("%s didn't decrease for %d epochs." %
+                                        (self._name, self._epochs_since_min)))
+
+
 class GradientBasedParameterUpdater(object):
     """
     Updates parameters using their gradients.

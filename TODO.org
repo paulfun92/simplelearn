@@ -1,13 +1,13 @@
 * Get sgd_demo.py working
 ** DONE Finish testing Dataset interface
 ** Create monitor that monitors cost and raises a StopTraining exception if it fails to increase for N epochs.
-*** class: ComputesAverageOverEpoch
-**** __init__ args: (cost)function, validation_iter, callbacks
-**** __call__(self): compute average value of self._function(*self._data_iterator.next()) over an epoch, pass result to each of self._callbacks
-*** class: StopsOnStagnation
+*** NEXT: class: StopsOnStagnation
 **** __call__(self, cost):
 ***** if cost + self._margin < prev_cost, self._counter = 0 else self._counter += 1
 ***** if self._counter >= self._max_stagnant_epochs: raise StopTraining("%s stagnant for %d epochs." % (self._cost_name, self._max_stagnant_epochs))
+*** DONE class: ComputesAverageOverEpoch
+**** __init__ args: (cost)function, validation_iter, callbacks
+**** __call__(self): compute average value of self._function(*self._data_iterator.next()) over an epoch, pass result to each of self._callbacks
 *** Give ComputesAverageOverEpoch(cost_function, dummy_dataset.iterator(), (StopsOnStagnation('cost'), lambda x : validation_costs.append(x))) to Sgd as epoch callback.
 **** __iter__ args: cost func, validation_iter, margin
 **** __call__(self): sum total cost until validation_iter's epoch increments, divide by # of samples (not batches), see if it decreased more than margin relative to previous avg sum, if so, set counter to 0; if not, increment counter.
