@@ -3,7 +3,9 @@ from numpy.testing import assert_allclose
 from nose.tools import assert_equal
 import theano.tensor as T
 
-from simplelearn.training import ComputesAverageOverEpoch
+from simplelearn.training import (ComputesAverageOverEpoch,
+                                  StopsOnStagnation,
+                                  StopTraining)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
 from simplelearn.data.dataset import Dataset
@@ -32,7 +34,7 @@ def test_computes_average_over_epoch():
     fmt = DenseFormat(axes=('b', 'f'), shape=(-1, 10), dtype=tensor.dtype)
     dataset = Dataset(names=('x', ), formats=(fmt, ), tensors=(tensor, ))
 
-    l2norm_node = L2Norm(*dataset.get_input_nodes())
+    l2norm_node = L2Norm(*dataset.make_input_nodes())
     averages = []
 
     l2norms = numpy.sqrt((tensor * tensor).sum(axis=1))
@@ -46,5 +48,35 @@ def test_computes_average_over_epoch():
 
     for ii in range(2):
         averager()
-        assert_equal(len(averages), ii)
+        assert_equal(len(averages), ii + 1)
         assert_allclose(averages[ii], expected_average)
+
+
+def test_stops_on_stagnation():
+
+    def get_values(stepsize, kink_index):
+        descending_values = (numpy.arange(kink_index) * (-stepsize)) + 100.
+        flat_values = numpy.zeros(kink_index)
+        flat_values[:] = descending_values[-1]
+        return numpy.concatenate((descending_values, flat_values))
+
+    threshold = .1
+    kink_index = 20
+    values = get_values(threshold + .0001, kink_index)
+
+    num_epochs = 5
+    assert num_epochs < kink_index
+
+    index = 0
+    stops_on_stagnation = StopsOnStagnation("hockey stick",
+                                            num_epochs,
+                                            threshold)
+
+    try:
+        for value in values:
+            stops_on_stagnation(value)
+            index += 1
+    except StopTraining, st:
+        assert_equal(index, kink_index + num_epochs)
+        assert_equal(st.status, 'ok')
+        assert "didn't decrease for" in st.message

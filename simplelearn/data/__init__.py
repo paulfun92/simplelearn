@@ -17,7 +17,7 @@ class DataSource(object):
         raise NotImplementedError("%s.iterator() not yet implemented." %
                                   type(self))
 
-    def get_input_nodes(self):
+    def make_input_nodes(self):
         """
         Returns
         -------
@@ -25,7 +25,7 @@ class DataSource(object):
           A named tuple of InputNodes. The names must correspond to the names
           used by iterators' next() method (e.g. 'model_input', 'label').
         """
-        raise NotImplementedError("%s.get_input_nodes() not yet implemented."
+        raise NotImplementedError("%s.make_input_nodes() not yet implemented."
                                   % type(self))
 
 
@@ -67,7 +67,7 @@ class DataIterator(object):
           batch.label  # label
 
         These field names must match the names returned by the dataset's
-        get_input_nodes.
+        make_input_nodes.
 
         Returns
         -------

@@ -121,7 +121,7 @@ class StopTraining(Exception):
                              "'error', but got '%s'." % str(status))
 
         self.status = status
-        super(StopTraining).__init__(message)
+        super(StopTraining, self).__init__(message)
 
 
 class StopsOnStagnation(object):
@@ -144,6 +144,10 @@ class StopsOnStagnation(object):
         # Sanity-checks args.
         #
 
+        if not isinstance(name, str):
+            raise TypeError("name must be a str, but got a %s." %
+                            type(name))
+
         if not numpy.issubdtype(type(num_epochs), numpy.integer):
             raise TypeError("num_epochs must be an integer, but got a %s."
                             % type(num_epochs))
@@ -164,6 +168,7 @@ class StopsOnStagnation(object):
         # Sets members
         #
 
+        self._name = name
         self._max_epochs_since_min = num_epochs
         self._epochs_since_min = 0
         self._min_decrease = min_decrease
@@ -176,7 +181,7 @@ class StopsOnStagnation(object):
         else:
             self._epochs_since_min += 1
 
-        if self._epochs_since_min >= self._max_epochs_since_min:
+        if self._epochs_since_min > self._max_epochs_since_min:
             raise StopTraining(status='ok',
                                message=("%s didn't decrease for %d epochs." %
                                         (self._name, self._epochs_since_min)))

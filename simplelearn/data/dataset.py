@@ -51,23 +51,24 @@ class Dataset(DataSource):
             fmt.check(tensor)
 
         self._names = names
-        self._nodes = tuple(InputNode(fmt) for fmt in formats)
+        self._formats = formats
         self._tensors = tensors
 
     def iterator(self, iterator_type, batch_size, **kwargs):
         if iterator_type == 'sequential':
-            formats = tuple(node.output_format for node in self._nodes)
             return SequentialIterator(batch_size,
                                       names=self._names,
                                       tensors=self._tensors,
-                                      formats=formats,
+                                      formats=self._formats,
                                       **kwargs)
         else:
             raise NotImplementedError("'%s' iterator type not supported." %
                                       iterator_type)
 
-    def get_input_nodes(self):
-        return self._nodes
+    def make_input_nodes(self):
+        NamedTupleOfNodes = collections.namedtuple('NamedNodes', self._names)
+        nodes = tuple(InputNode(fmt) for fmt in self._formats)
+        return NamedTupleOfNodes(*nodes)
 
 
 class SequentialIterator(DataIterator):
