@@ -14,7 +14,7 @@ import theano.tensor as T
 from nose.tools import assert_equal
 from simplelearn.data import DataIterator
 from simplelearn.nodes import Node
-
+from simplelearn.utils import safe_izip
 # pylint: disable=too-few-public-methods
 
 
@@ -187,110 +187,213 @@ class StopsOnStagnation(object):
                                         (self._name, self._epochs_since_min)))
 
 
-class GradientBasedParameterUpdater(object):
+class SgdParameterUpdater(object):
     """
-    Updates parameters using their gradients.
+    Defines how to update parameters.
 
-    This is a support class for gradient-based optimizers such as Sgd.
+    self.updates is a dictionary with (var: new_var) pairs.
+    These are theano expressions; the value of var will be replaced with
+    new_var after each batch update.
 
-    Subclasses must override _update_parameters().
+    self.updates contains the update for not just a parameter, but also
+    internal state, such as the as the momentum-averaged update direction.
     """
 
-    def update_parameters(self, gradients, parameters):
+    def __init__(self,
+                 parameter,
+                 gradient,
+                 learning_rate,
+                 momentum,
+                 use_nesterov):
         """
-        Updates parameters in-place, based on their gradients.
-
         Parameters
         ----------
-        gradients: numpy array
-          The gradients of the training cost with respect to parameters.
+        parameter: A theano symbol
+          A parameter being optimized by an Sgd trainer.
 
-        parameters: theano shared variable
-          The parameters to be updated in-place.
+        gradient: A theano symbol
+          The gradient of the loss function w.r.t. the above parameter.
+
+        learing_rate: float
+          The initial value of the learning rate.
+
+        momentum: float
+          A parameter affecting how smeared the update direction is over
+          multiple batches. Use 0.0 for momentum-less SGD.
+
+        use_nesterov: bool
+          If true, use Nesterov momentum. (See "Advances in Optimizing
+          Recurrent Networks", Yoshua Bengio, et al.)
         """
 
-        assert_equal(gradients.shape, parameters.shape)
-        assert_equal(gradients.dtype, parameters.dtype)
+        #
+        # sanity-check args
+        #
 
-        self._update_parameters(gradients, parameters)
+        for symbol, name in safe_izip((parameter, gradient),
+                                      ("parameter", "gradient")):
+            if not Format.is_symbolic(symbol):
+                raise TypeError("Expected %s to be a theano symbol, but got a "
+                                "%s." % (name, type(symbol)))
 
-    def _update_parameters(self, gradients, parameters):
-        raise NotImplementedError("%s.update_parameters() not yet implemented."
-                                  % type(self))
+        for scalar, name in safe_izip((learning_rate, momentum),
+                                      ("learning_rate", "momentum")):
+            if scalar < 0:
+                raise ValueError("%s must be non-negative; not %g." %
+                                 (name, scalar))
+
+        if not isinstance(use_nesterov, bool):
+            raise TypeError("Expected use_nesterov to be a boolean, but got a "
+                            "%s." % type(use_nesterov))
+
+        def make_shared_floatX(numeric_var, name):
+            return theano.shared(numpy.asarray(numeric_var),
+                                 dtype=theano.config.floatX)
+
+        #
+        # define updates, set members
+        #
+
+        def concat(str0, str1):
+            if str0 is None or str1 is None:
+                return None
+            else:
+                return str0 + str1
+
+        def make_name(var_name, suffix):
+            return (None if var_name is None
+                    else var_name + ' learning rate')
+
+        self.learning_rate = theano.shared(learning_rate,
+                                           name=concat(parameter.name,
+                                                       ' learning rate'))
+
+        self.momentum = theano.shared(momentum)
+        self.momentum.name = concat(parameter.name, ' momentum')
+
+        self._velocity = theano.shared(0.0 * parameter.get_value())
+        self._velocity.name = concat(parameter.name, ' velocity')
+
+        new_velocity = (self._momentum * self._velocity -
+                        self._learning_rate * gradient)
+        new_velocity.name = concat('new ', self._velocity.name)
+
+        step = (self.momentum * new_velocity - self._learning_rate * gradient
+                if use_nesterov
+                else new_velocity)
+
+        new_parameter = parameter + step
+        new_parameter.name = concat('new ', parameter.name)
+
+        self.updates = {parameter: new_parameter,
+                        self._velocity: new_velocity}
+
+# class GradientBasedParameterUpdater(object):
+#     """
+#     Updates parameters using their gradients.
+
+#     This is a support class for gradient-based optimizers such as Sgd.
+
+#     Subclasses must override _update_parameters().
+#     """
+
+#     def update_parameters(self, gradients, parameters):
+#         """
+#         Updates parameters in-place, based on their gradients.
+
+#         Parameters
+#         ----------
+#         gradients: numpy array
+#           The gradients of the training cost with respect to parameters.
+
+#         parameters: theano shared variable
+#           The parameters to be updated in-place.
+#         """
+
+#         assert_equal(gradients.shape, parameters.shape)
+#         assert_equal(gradients.dtype, parameters.dtype)
+
+#         self._update_parameters(gradients, parameters)
+
+#     def _update_parameters(self, gradients, parameters):
+#         raise NotImplementedError("%s.update_parameters() not yet implemented."
+#                                   % type(self))
 
 
-class SgdParameterUpdater(GradientBasedParameterUpdater):
+# class SgdParameterUpdater(GradientBasedParameterUpdater):
+#     """
+#     Optimizes parameters Implements momentum-based gradient descent.
+
+#     The momentum and learning_rate are stored as numpy scalars, meaning you can
+#     modify them in-place, for example using a callback called at the end of
+#     each epoch.
+#     """
+
+#     def __init__(self, initial_learning_rate, initial_momentum):
+#         def check_arg(arg, name):
+#             if not isinstance(arg, float):
+#                 raise TypeError("Expected %s to be a float, not a %s." %
+#                                 name, type(arg))
+
+#             if arg < 0.0 or arg > 1.0:
+#                 raise ValueError("Expected %s to be in the range [0.0, 1.0], "
+#                                  "but got %g." % (name, arg))
+
+#         check_arg(initial_learning_rate, 'initial_learning_rate')
+#         check_arg(initial_momentum, 'initial_momentum')
+
+#         floatX = numpy.dtype(theano.config.floatX)
+
+#         self.learning_rate = numpy.asarray(initial_learning_rate, dtype=floatX)
+#         self.momentum = numpy.asarray(initial_momentum, dtype=floatX)
+#         self._previous_update = None
+
+#     def _update_parameters(self, gradients, parameters):
+#         """
+#         Updates parameters in-place, based on their gradients.
+
+#         Parameters
+#         ----------
+#         gradients: numpy array
+#           The gradients of the training cost with respect to parameters.
+
+#         parameters: theano shared variable
+#           The parameters to be updated in-place.
+#         """
+
+#         new_update = gradients * (-self.learning_rate)
+
+#         if self._previous_update is not None:
+#             new_update = (new_update * (1.0 - self.momentum) +
+#                           self._previous_update * self.momentum)
+
+#         parameters += new_update
+#         self._previous_update = new_update
+
+
+class LinearlyScalesOverEpochs(object):
     """
-    Implements momentum-based gradient descent.
-
-    The momentum and learning_rate are stored as numpy scalars, meaning you can
-    modify them in-place, for example using a callback called at the end of
-    each epoch.
-    """
-
-    def __init__(self, initial_learning_rate, initial_momentum):
-        def check_arg(arg, name):
-            if not isinstance(arg, float):
-                raise TypeError("Expected %s to be a float, not a %s." %
-                                name, type(arg))
-
-            if arg < 0.0 or arg > 1.0:
-                raise ValueError("Expected %s to be in the range [0.0, 1.0], "
-                                 "but got %g." % (name, arg))
-
-        check_arg(initial_learning_rate, 'initial_learning_rate')
-        check_arg(initial_momentum, 'initial_momentum')
-
-        floatX = numpy.dtype(theano.config.floatX)
-
-        self.learning_rate = numpy.asarray(initial_learning_rate, dtype=floatX)
-        self.momentum = numpy.asarray(initial_momentum, dtype=floatX)
-        self._previous_update = None
-
-    def _update_parameters(self, gradients, parameters):
-        """
-        Updates parameters in-place, based on their gradients.
-
-        Parameters
-        ----------
-        gradients: numpy array
-          The gradients of the training cost with respect to parameters.
-
-        parameters: theano shared variable
-          The parameters to be updated in-place.
-        """
-
-        new_update = gradients * (-self.learning_rate)
-
-        if self._previous_update is not None:
-            new_update = (new_update * (1.0 - self.momentum) +
-                          self._previous_update * self.momentum)
-
-        parameters += new_update
-        self._previous_update = new_update
-
-
-class LinearlyDecayingCallback(object):
-    """
-    Linearly decays a scalar down to some final value over N epochs.
+    An epoch callback that linearly scales a theano shared variable over time.
 
     Parameters
     ----------
 
-    value: numpy.ndarray scalar
-      A 0-dimensional numpy array, with floating-point dtype. This value
-      will be decayed in-place.
+    shared_value: a Theano shared variable
+      This value will be scaled in-place by a factor self._scale.
 
-    saturated_value: float
-      Final value of <value>.
+    final_scale: float
+      Final value of self._scale.
 
     epochs_to_saturation: int
-      <value> should decay to <saturated_value> after this many epochs.
+      self._scale should decay to final_value after this many epochs.
     """
 
-    def __init__(self, value, saturated_value, epochs_to_saturation):
-        if not isinstance(value, numpy.ndarray) or value.ndim != 0:
-            raise TypeError("value must be a 0-dimensional numpy array.")
+    SharedVariable = theano.tensor.sharedvar.TensorSharedVariable
+
+    def __init__(self, shared_value, final_scale, epochs_to_saturation):
+        if not isinstance(shared_value, shared_variable):
+            raise TypeError("value must be a shared variable, not a %s." %
+                            type(shared_value))
 
         if not numpy.issubdtype(value.dtype, numpy.floating):
             raise TypeError("value.dtype must be a floating-point dtype, not "
@@ -301,30 +404,32 @@ class LinearlyDecayingCallback(object):
                              "its saturated_value (%g)." % (value,
                                                             saturated_value))
 
-        self.value = value
-        self._initial_value = float(value)
-        self._saturated_value = saturated_value
+        self.shared_value = shared_value
+        self._initial_value = self.shared_value.get_value()
+
+        self._final_scale = final_scale
         self._epochs_to_saturation = epochs_to_saturation
-        self._num_epochs_seen = -1
+
+        self._num_epochs_seen = 0
 
     def __call__(self):
-        self._num_epochs_seen += 1
         assert self._num_epochs_seen >= 0
 
-        alpha = min(1.0, (float(self._num_epochs_seen) /
-                          float(self._epochs_to_saturation)))
+        # interpolation parameter
+        alpha = min(1.0,
+                    float(self._num_epochs_seen) / self._epochs_to_saturation)
 
-        self.value[...] = (self._initial_value * (1.0 - alpha) +
-                           self._saturated_value * alpha)
+        scale = (1.0 - alpha) + alpha * self._final_scale
+        self.shared_value.set_value(self._scale * self._initial_value)
 
 
-class LimitNumEpochsCallback(object):
+class LimitsNumEpochs(object):
     """
     Throws a StopTraining exception after a fixed number of epochs.
     """
 
     def __init__(self, max_num_epochs):
-        if not numpy.issubdtype(max_num_epochs, numpy.integer):
+        if not numpy.issubdtype(type(max_num_epochs), numpy.integer):
             raise TypeError("Expected max_num_epochs to be an integer, not a "
                             "%s." % type(max_num_epochs))
 
@@ -337,7 +442,7 @@ class LimitNumEpochsCallback(object):
 
     def __call__(self):
         self._epochs_seen += 1
-        if self._epochs_seen >= self.max_num_epochs:
+        if self._epochs_seen >= self._max_num_epochs:
             raise StopTraining(status='ok',
                                message=('Reached max # of epochs %d.' %
                                         self._max_num_epochs))
@@ -359,7 +464,6 @@ class Sgd(object):
                  data_iterator,
                  cost_symbol,
                  parameter_symbols,
-                 parameter_updaters,
                  cost_input_symbols):
         """
         Parameters
@@ -377,8 +481,8 @@ class Sgd(object):
           model weights, though they could also be inputs (e.g. for optimizing
           input images).
 
-        parameter_updaters: sequence of GradientBasedParameterUpdaters.
-          One of these per symbol in parameter_symbols.
+        # parameter_updaters: sequence of GradientBasedParameterUpdaters.
+        #   One of these per symbol in parameter_symbols.
 
         cost_input_symbols: sequence of theano.gof.Variables
           These are the inputs to cost.

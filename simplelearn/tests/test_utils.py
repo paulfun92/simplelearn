@@ -26,13 +26,6 @@ def test_safe_izip():
                          iterate_over_unequal_lengths)
 
 
-# def test_safe_izip2():
-#     pairs = safe_izip(itertools.permutations(('c', '0', '1', 'b')),
-#                       itertools.permutations((2, 3, 4, -1)))
-#     for pair in pairs:
-#         print pair
-
-
 def test_flatten():
     nested_list = [xrange(3),
                    3,

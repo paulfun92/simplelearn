@@ -8,7 +8,7 @@ point as it's optimized using various values of momentum.
 
 import argparse
 from matplotlib import pyplot
-from simplelearn.nodes import Node, InputNode, make_shared_variable
+from simplelearn.nodes import Node, InputNode
 from simplelearn.trainers import Sgd, LimitNumEpochsCallback
 from simplelearn.datasets import DatasetIterator
 
@@ -63,7 +63,7 @@ def get_sgd_trainer():
         input_format = cost.inputs['input'].output_format
         numeric_batch = input_format.make_batch(is_symbolic=False,
                                                 batch_size=1)
-        return make_shared_variable(numeric_batch, 'input batch')
+        return theano.shared(numeric_batch, name='input batch')
 
     input_symbol = get_input_shared_variable()
 

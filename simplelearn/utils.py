@@ -9,18 +9,22 @@ __license__ = "Apache 2.0"
 
 
 import collections
-from itertools import izip_longest, takewhile, chain
+from itertools import chain
 
 
 def safe_izip(*iterables):
+    """
+    Like izip, except this raises an IndexError if not all the arguments
+    have the same length.
+    """
+
     sentinel = object()
 
     iterators = tuple(chain(x, (sentinel,)) for x in iterables)
-    # print "start safe_izip"
 
     while iterators:
-        items = tuple(map(next, iterators))
-        # print items
+        items = tuple(next(iterator) for iterator in iterators)
+
         if all(item is sentinel for item in items):  # all are sentinels
             raise StopIteration()
         elif any(item is sentinel for item in items):  # some are sentinels

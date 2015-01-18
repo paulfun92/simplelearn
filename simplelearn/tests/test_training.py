@@ -1,11 +1,12 @@
 import numpy
 from numpy.testing import assert_allclose
-from nose.tools import assert_equal
 import theano.tensor as T
+from nose.tools import assert_equal, assert_raises_regexp
 
 from simplelearn.training import (ComputesAverageOverEpoch,
                                   StopsOnStagnation,
-                                  StopTraining)
+                                  StopTraining,
+                                  LimitsNumEpochs)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
 from simplelearn.data.dataset import Dataset
@@ -80,3 +81,13 @@ def test_stops_on_stagnation():
         assert_equal(index, kink_index + num_epochs)
         assert_equal(st.status, 'ok')
         assert "didn't decrease for" in st.message
+
+
+def test_limits_num_epochs():
+    limits_num_epochs = LimitsNumEpochs(5)
+    for index in range(4):
+        limits_num_epochs()
+
+    assert_raises_regexp(StopTraining,
+                         "Reached max \# of epochs",
+                         limits_num_epochs())

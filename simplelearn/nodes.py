@@ -14,26 +14,26 @@ from simplelearn.utils import safe_izip
 from simplelearn.formats import Format, DenseFormat
 
 
-def make_shared_variable(initial_value, name=None):
-    """
-    Creates a shared variable, initializing its contents with initial_value.
+# def make_shared_variable(initial_value, name=None):
+#     """
+#     Creates a shared variable, initializing its contents with initial_value.
 
-    Parameters
-    ----------
-    initial_value: numpy array
-      Determines shape, dtype, and initial value of the return value.
+#     Parameters
+#     ----------
+#     initial_value: numpy array
+#       Determines shape, dtype, and initial value of the return value.
 
-    name: str or None
-      If provided, the return value's name will be set to this.
+#     name: str or None
+#       If provided, the return value's name will be set to this.
 
-    Returns
-    -------
-    rval: theano shared variable.
-    """
-    # pylint: disable=protected-access
-    return theano.shared(theano._asarray(initial_value,
-                                         dtype=initial_value.dtype),
-                         name=name)
+#     Returns
+#     -------
+#     rval: theano shared variable.
+#     """
+#     # pylint: disable=protected-access
+#     return theano.shared(theano._asarray(initial_value,
+#                                          dtype=initial_value.dtype),
+#                          name=name)
 
 
 class Node(object):
@@ -202,7 +202,8 @@ class Linear(Function1dTo1d):
 
         weights = numpy.zeros((num_input_features, num_output_features),
                               dtype=output_format.dtype)
-        self.weights = make_shared_variable(weights)
+        self.weights = theano.shared(weights)
+        # self.weights = make_shared_variable(weights)
 
     def _get_function_of_rows(self, rows_symbol):
         """
