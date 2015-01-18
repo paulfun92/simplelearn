@@ -388,21 +388,19 @@ class LinearlyScalesOverEpochs(object):
       self._scale should decay to final_value after this many epochs.
     """
 
-    SharedVariable = theano.tensor.sharedvar.TensorSharedVariable
-
     def __init__(self, shared_value, final_scale, epochs_to_saturation):
-        if not isinstance(shared_value, shared_variable):
-            raise TypeError("value must be a shared variable, not a %s." %
-                            type(shared_value))
+        if not isinstance(shared_value,
+                          theano.tensor.sharedvar.SharedVariable):
+            raise TypeError("shared_value must be a theano SharedVariable, "
+                            "not a %s." % type(shared_value))
 
-        if not numpy.issubdtype(value.dtype, numpy.floating):
-            raise TypeError("value.dtype must be a floating-point dtype, not "
-                            "%s." % value.dtype)
+        if not numpy.issubdtype(type(final_scale), numpy.floating):
+            raise TypeError("final_scale must be a floating-point type, not "
+                            "%s." % type(final_scale))
 
-        if value < saturated_value:
-            raise ValueError("The value (%g) is expected to be bigger than "
-                             "its saturated_value (%g)." % (value,
-                                                            saturated_value))
+        if not numpy.issubdtype(type(epochs_to_saturation), numpy.integer):
+            raise TypeError("epochs_to_saturation must be an integer, not "
+                            "a %s." % type(epochs_to_saturation))
 
         self.shared_value = shared_value
         self._initial_value = self.shared_value.get_value()
@@ -415,12 +413,16 @@ class LinearlyScalesOverEpochs(object):
     def __call__(self):
         assert self._num_epochs_seen >= 0
 
+        self._num_epochs_seen += 1
+
         # interpolation parameter
         alpha = min(1.0,
                     float(self._num_epochs_seen) / self._epochs_to_saturation)
 
         scale = (1.0 - alpha) + alpha * self._final_scale
-        self.shared_value.set_value(self._scale * self._initial_value)
+
+        self.shared_value.set_value(scale * self._initial_value)
+
 
 
 class LimitsNumEpochs(object):

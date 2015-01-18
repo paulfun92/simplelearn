@@ -1,12 +1,14 @@
 import numpy
 from numpy.testing import assert_allclose
+import theano
 import theano.tensor as T
 from nose.tools import assert_equal, assert_raises_regexp
 
 from simplelearn.training import (ComputesAverageOverEpoch,
                                   StopsOnStagnation,
                                   StopTraining,
-                                  LimitsNumEpochs)
+                                  LimitsNumEpochs,
+                                  LinearlyScalesOverEpochs)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
 from simplelearn.data.dataset import Dataset
@@ -91,3 +93,29 @@ def test_limits_num_epochs():
     assert_raises_regexp(StopTraining,
                          "Reached max \# of epochs",
                          limits_num_epochs())
+
+
+def test_linearly_scales_over_epochs():
+    initial_value = 5.6
+    final_scale = .012
+    epochs_to_saturation = 23
+
+    shared_variable = theano.shared(initial_value)
+    assert_allclose(shared_variable.get_value(), initial_value)
+
+    callback = LinearlyScalesOverEpochs(shared_variable,
+                                        final_scale,
+                                        epochs_to_saturation)
+
+    expected_values = numpy.linspace(1.0,
+                                     final_scale,
+                                     epochs_to_saturation + 1) * initial_value
+    flat_values = numpy.zeros(7)
+    flat_values[:] = expected_values[-1]
+
+    expected_values = numpy.concatenate((expected_values, flat_values))
+
+    for expected_value in expected_values:
+        assert_allclose(shared_variable.get_value(),
+                        expected_value)
+        callback()
