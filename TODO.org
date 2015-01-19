@@ -1,3 +1,5 @@
+Next: flesh out sgd to contain a list of updaters, and build the theano function (with updates) on train().
+
 * Get sgd_demo.py working
 ** DONE Finish testing Dataset interface
 ** Create monitor that monitors cost and raises a StopTraining exception if it fails to increase for N epochs.
@@ -19,7 +21,24 @@
 
 Brainstorm:
 
-* Epoch events should be fired after the last datum of the epoch is yielded, not on the first datum of the next epoch.
+ComputeAverageOverEpoch:
+* Would like to make it work both for training and testing data
+** Option: use a different monitor for computing the average of an epoch of training data.
+*** An updater can monitor the training cost. (how does Pylearn2 do it?
+** (bad) Option: give the training set monitor a fresh iterator, just like the testing set
+*** Bad: for random iterators, there's no guarantee that this measures the training set error over the same data as what the model was trained on.
+** (bad) Option: Overload ComputeAverageOverEpoch.__call__()
+*** If it's called without arguments, compute average of f(x) over iterator passed in through constructor.
+*** If it's called with (input_tuple), then compute f(*input_tuple)?
+*** Messy as hell: assumes that f is a function of input_tuple
+
+
+* (For now, let this be.) DataIterator should have the Nodes, so it can be the sole interface for data consumers.
+** The name DataIterator in this case bothers me.
+** This will be necessary anyway if (if) the iterator ever is to yield a different number of variables than the original dataset. For example, an iterator that yields left and right stereo images as separate variables.
+*** This won't be necessary in the forseeable future. If node L operates on left images and node R operates on right images, they can both take a stereo image as input, and just use their respective parts of it.
+** For now, let it be.
+* DONE Epoch events should be fired after the last datum of the epoch is yielded, not on the first datum of the next epoch.
 ** Can't do this by yielding epoch numbers!
 ** This could eliminate the present need for batch() and even epoch() methods.
 ** Alternatives to epoch numbers:
@@ -30,8 +49,3 @@ Brainstorm:
 *** register epoch callbacks with iterator itself
 **** This would necessarily trigger during the next() call that yields the final datum in an epoch
 **** This is bad: the callbacks should happen after processing the final datum in train().
-* (For now, let this be.) DataIterator should have the Nodes, so it can be the sole interface for data consumers.
-** The name DataIterator in this case bothers me.
-** This will be necessary anyway if (if) the iterator ever is to yield a different number of variables than the original dataset. For example, an iterator that yields left and right stereo images as separate variables.
-*** This won't be necessary in the forseeable future. If node L operates on left images and node R operates on right images, they can both take a stereo image as input, and just use their respective parts of it.
-* For now, let it be.

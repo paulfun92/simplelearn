@@ -371,6 +371,32 @@ class SgdParameterUpdater(object):
 #         self._previous_update = new_update
 
 
+
+class LimitsNumEpochs(object):
+    """
+    Throws a StopTraining exception after a fixed number of epochs.
+    """
+
+    def __init__(self, max_num_epochs):
+        if not numpy.issubdtype(type(max_num_epochs), numpy.integer):
+            raise TypeError("Expected max_num_epochs to be an integer, not a "
+                            "%s." % type(max_num_epochs))
+
+        if max_num_epochs < 0:
+            raise ValueError("max_num_epochs must be non-negative, got %d." %
+                             max_num_epochs)
+
+        self._max_num_epochs = max_num_epochs
+        self._epochs_seen = -1
+
+    def __call__(self):
+        self._epochs_seen += 1
+        if self._epochs_seen >= self._max_num_epochs:
+            raise StopTraining(status='ok',
+                               message=('Reached max # of epochs %d.' %
+                                        self._max_num_epochs))
+
+
 class LinearlyScalesOverEpochs(object):
     """
     An epoch callback that linearly scales a theano shared variable over time.
@@ -423,31 +449,6 @@ class LinearlyScalesOverEpochs(object):
 
         self.shared_value.set_value(scale * self._initial_value)
 
-
-
-class LimitsNumEpochs(object):
-    """
-    Throws a StopTraining exception after a fixed number of epochs.
-    """
-
-    def __init__(self, max_num_epochs):
-        if not numpy.issubdtype(type(max_num_epochs), numpy.integer):
-            raise TypeError("Expected max_num_epochs to be an integer, not a "
-                            "%s." % type(max_num_epochs))
-
-        if max_num_epochs < 0:
-            raise ValueError("max_num_epochs must be non-negative, got %d." %
-                             max_num_epochs)
-
-        self._max_num_epochs = max_num_epochs
-        self._epochs_seen = -1
-
-    def __call__(self):
-        self._epochs_seen += 1
-        if self._epochs_seen >= self._max_num_epochs:
-            raise StopTraining(status='ok',
-                               message=('Reached max # of epochs %d.' %
-                                        self._max_num_epochs))
 
 
 class Sgd(object):
