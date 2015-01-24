@@ -4,17 +4,23 @@ Training algorithms, and callbacks for monitoring their progress.
 
 __author__ = "Matthew Koichi Grimes"
 __email__ = "mkg@alum.mit.edu"
-__copyright__ = "Copyright 2014"
+__copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
 import collections
 import numpy
 import theano
 import theano.tensor as T
-from nose.tools import assert_equal
+from nose.tools import (assert_true,
+                        assert_equal,
+                        assert_greater,
+                        assert_is_instance,
+                        assert_in)
 from simplelearn.data import DataIterator
 from simplelearn.nodes import Node
-from simplelearn.utils import safe_izip
+from simplelearn.utils import safe_izip, check_is_subdtype
+from simplelearn.formats import Format, DenseFormat
+
 # pylint: disable=too-few-public-methods
 
 
@@ -43,70 +49,248 @@ from simplelearn.utils import safe_izip
 #
 # hmm... not so bad.
 
-class ComputesAverageOverEpoch(object):
+class EpochCallback(object):
+    def on_epoch(self):
+        raise NotImplementedError("%s.on_epoch() not yet implemented." %
+                                  type(self))
+
+
+class LimitsNumEpochs(EpochCallback):
     """
-    Epoch callback. Computes the average of a function over an epoch of data.
-
-    On call, this loops over a data iterator, computing f(x) for each
-    datum x, where f is given in the constructor. After an epoch's worth
-    of data, this sums all the f(x)'s, divides by the number of samples,
-    and passes the result to any interested callbacks.
+    Throws a StopTraining exception after a fixed number of epochs.
     """
-    def __init__(self, function_node, data_iterator, callbacks):
-        """
-        Parameters
-        ----------
 
-        function_node: Node
-          A Node whose inputs are a DataSource's output nodes.
+    def __init__(self, max_num_epochs):
+        if not numpy.issubdtype(type(max_num_epochs), numpy.integer):
+            raise TypeError("Expected max_num_epochs to be an integer, not a "
+                            "%s." % type(max_num_epochs))
 
-        data_iterator: DataIterator
-          Iterates over the DataSource connected to function_node.
+        if max_num_epochs < 0:
+            raise ValueError("max_num_epochs must be non-negative, got %d." %
+                             max_num_epochs)
 
-        callbacks: sequence
-          A sequence of callables. Call signature must be f(x), where x
-          is a numeric batch of outputs from function_node.
-        """
-        if not isinstance(function_node, Node):
-            raise TypeError("Expected function_node to be a Node, but got a "
-                            "%s." % type(function_node))
+        self._max_num_epochs = max_num_epochs
+        self._epochs_seen = -1
 
-        if not data_iterator.next_is_new_epoch():
-            raise ValueError("iterator doesn't point to the beginning of an "
-                             "epoch.")
+    def on_epoch(self):
+        self._epochs_seen += 1
 
-        if not isinstance(callbacks, collections.Sequence):
-            raise TypeError("callbacks argument must be a sequence.")
+        assert self._epochs_seen >= 0
 
-        self._function_batch_axis = function_node.output_format.axes.index('b')
+        if self._epochs_seen >= self._max_num_epochs:
+            raise StopTraining(status='ok',
+                               message=('Reached max # of epochs %d.' %
+                                        self._max_num_epochs))
 
-        input_symbols = tuple(input_node.output_symbol
-                              for input_node in function_node.inputs)
-        self._function = theano.function(input_symbols,
-                                         function_node.output_symbol)
-        self._iterator = data_iterator
-        self._callbacks = callbacks
 
-    def __call__(self):
-        if not self._iterator.next_is_new_epoch():
-            raise ValueError("self._iterator doesn't point to a fresh epoch.")
+class LinearlyScalesOverEpochs(EpochCallback):
+    """
+    An epoch callback that linearly scales a theano shared variable over time.
 
-        count = 0
-        total = None
+    Parameters
+    ----------
 
-        batch = self._function(*self._iterator.next())
-        count += batch.shape[self._function_batch_axis]
-        total = batch.sum(axis=self._function_batch_axis)
+    shared_value: a Theano shared variable
+      This value will be scaled in-place by a factor S that decreases from 1.0
+      to final_scale over <epochs_to_saturation> epochs.
 
-        while not self._iterator.next_is_new_epoch():
-            batch = self._function(*self._iterator.next())
-            count += batch.shape[self._function_batch_axis]
-            total += batch.sum(axis=self._function_batch_axis)
+    final_scale: float
+      Final value of S.
 
-        average = total / count
+    epochs_to_saturation: int
+      self._scale should decay to final_value after this many epochs.
+    """
 
-        for callback in self._callbacks:
-            callback(average)
+    def __init__(self, shared_value, final_scale, epochs_to_saturation):
+        check_arg_type(shared_value,
+                       "shared_value",
+                       theano.tensor.sharedvar.SharedVariable)
+
+        check_arg_dtype(final_scale, "final_scale", numpy.floating)
+
+        check_arg_dtype(epochs_to_saturation,
+                        "epochs_to_saturation",
+                        numpy.integer)
+
+        self.shared_value = shared_value
+        self._initial_value = self.shared_value.get_value()
+
+        self._final_scale = final_scale
+        self._epochs_to_saturation = epochs_to_saturation
+
+        self._num_epochs_seen = -1
+
+    def on_epoch(self):
+        self._num_epochs_seen += 1
+
+        assert self._num_epochs_seen >= 0
+
+        # interpolation parameter
+        alpha = min(1.0,
+                    float(self._num_epochs_seen) / self._epochs_to_saturation)
+
+        scale = (1.0 - alpha) + alpha * self._final_scale
+
+        self.shared_value.set_value(scale * self._initial_value)
+
+
+class TrainingMonitor(EpochCallback):
+    """
+    Monitors some function of an input batch during training.
+    """
+
+    def __init__(self, value_to_monitor, format):
+        check_arg_type(value_to_monitor,
+                       'value_to_monitor',
+                       theano.gof.Variable)
+
+        check_arg_type(format, 'format', Format)
+
+        if 'b' not in format.axes:
+            raise ValueError("format.axes doesn't contain batch axis 'b': %s" %
+                             str(format.axes))
+
+        self.value_to_monitor = value_to_monitor
+        self._format = format
+
+    def on_batch(self, input_batch, monitored_value_batch):
+        self._format.check(monitored_value_batch)
+        self._on_batch(input_batch, monitored_value_batch)
+
+    def _on_batch(self, input_batch, monitored_value_batch):
+        raise NotImplementedError("%s._on_batch() not yet implemented." %
+                                  type(self))
+
+
+class AverageMonitor(TrainingMonitor):
+    def __init__(self, value_to_monitor, format=None):
+        if format is None:
+            if value_to_monitor.ndim != 1:
+                raise ValueError("Must supply a format when monitoring "
+                                 "multidimensional values (ndim is %d)."
+                                 % value_to_monitor.ndim)
+            format = DenseFormat(axes=('b',),
+                                 shape=(),
+                                 dtype=value_to_monitor.dtype)
+
+        super(AverageMonitor, self).__init__(value_to_monitor, format)
+        self._total = format.make_batch(batch_size=1)
+        self._count = 0
+        self.average = None
+
+    def _on_batch(self, input_batch, monitored_value_batch):
+        batch_axis = self._format.axes.index('b')
+        self.total += numpy.sum(monitored_value_batch, axis=batch_axis)
+
+    def on_epoch(self):
+        if self._count != 0:
+            self.average = self._total / self._count
+
+        self.total[...] = 0.0
+        self._count = 0
+
+
+class MaxMonitor(TrainingMonitor):
+    """
+    Keeps track of the N largest values of some f(x), along with inputs x.
+
+    The list of values gets cleared after each epoch.
+    """
+
+    def __init__(self, value_to_monitor, top_n=1):
+        fmt = DenseFormat(shape=(), axes=('b',), dtype=value_to_monitor.dtype)
+        super(AverageMonitor, self).__init__(value_to_monitor, fmt)
+
+        assert_not_equal(value_to_monitor.ndim, 1)
+        # if value_to_monitor.ndim != 1:
+        #     raise ValueError("Expected value_to_monitor.ndim to be 1 but got "
+        #                      "%d." % value_to_monitor.ndim)
+
+        assert_greater(top_n, 0)
+        # if top_n < 1:
+        #     raise ValueError("Expected top_n to be 1 or greater, but got %d."
+        #                      % top_n)
+
+        self.maxes = fmt.make_batch(is_symbolic=False, batch_size=0)
+        self._top_n = top_n
+
+    def _on_batch(self, input_batch, monitored_value_batch):
+        batch_axis = self._format.axes.index('b')
+        batch_max = numpy.max(monitored_value_batch, axis=batch_axis)
+
+        indices = numpy.searchsorted(self.maxes, batch_max)
+        assert len(indices) == 1
+
+        if len(self.maxes) < self.top_n or indices[0] > 0:
+            self.maxes = numpy.insert(self.maxes, indices, (batch_max, ))
+            if len(self.maxes) == self.top_n:
+                self.maxes = self.maxes[1:]
+
+        assert len(self.maxes) <= self._top_n
+
+    def on_epoch(self):
+        self.maxes = format.make_batch(is_symbolic=False, batch_size=0)
+
+
+# class ComputesAverageOverEpoch_old(object):
+#     """
+#     Epoch callback. Computes the average of a function over an epoch of data.
+
+#     On call, this loops over a data iterator, computing f(x) for each
+#     datum x, where f is given in the constructor. After an epoch's worth
+#     of data, this sums all the f(x)'s, divides by the number of samples,
+#     and passes the result to any interested callbacks.
+#     """
+#     def __init__(self, function_node, data_iterator, callbacks):
+#         """
+#         Parameters
+#         ----------
+
+#         function_node: Node
+#           A Node whose inputs are a DataSource's output nodes.
+
+#         data_iterator: DataIterator
+#           Iterates over the DataSource connected to function_node.
+
+#         callbacks: sequence
+#           A sequence of callables. Call signature must be f(x), where x
+#           is a numeric batch of outputs from function_node.
+#         """
+
+#         assert_is_instance(function_node, Node)
+#         assert_true(data_iterator.next_is_new_epoch(),
+#                     "iterator doesn't point to the beginning of an epoch.")
+#         assert_is_isntance(callbacks, collections.Sequence)
+
+#         self._function_batch_axis = function_node.output_format.axes.index('b')
+
+#         input_symbols = tuple(input_node.output_symbol
+#                               for input_node in function_node.inputs)
+#         self._function = theano.function(input_symbols,
+#                                          function_node.output_symbol)
+#         self._iterator = data_iterator
+#         self._callbacks = callbacks
+
+#     def __call__(self):
+#         if not self._iterator.next_is_new_epoch():
+#             raise ValueError("self._iterator doesn't point to a fresh epoch.")
+
+#         count = 0
+#         total = None
+
+#         batch = self._function(*self._iterator.next())
+#         count += batch.shape[self._function_batch_axis]
+#         total = batch.sum(axis=self._function_batch_axis)
+
+#         while not self._iterator.next_is_new_epoch():
+#             batch = self._function(*self._iterator.next())
+#             count += batch.shape[self._function_batch_axis]
+#             total += batch.sum(axis=self._function_batch_axis)
+
+#         average = total / count
+
+#         for callback in self._callbacks:
+#             callback(average)
 
 
 class StopTraining(Exception):
@@ -124,59 +308,42 @@ class StopTraining(Exception):
         super(StopTraining, self).__init__(message)
 
 
-class StopsOnStagnation(object):
+class StopsOnStagnation(AverageMonitor):
     """
-    A callback to give ComputesAverageOverEpoch.
-
-    Stops the training when the average f(x_i) over epoch x stops decreasing.
+    Halts training if the average of f(x) over an epoch stops decreasing.
     """
 
-    def __init__(self, name, num_epochs, min_decrease=0.0):
-        """
+    def __init__(self, value_to_monitor, num_epochs, min_decrease=0.0):
+        '''
         Parameters
         ----------
+        value_to_monitor: theano expression
+          Some f(x) (x is the data iterator output batch).
 
-        name: str
-          Name of the quantity being monitored.
-        """
+        num_epochs: int
+          maximum number of epochs to wait for average f to decrease.
 
-        #
-        # Sanity-checks args.
-        #
+        min_decrease: float
+          minimum decrease in avg f needed for it to count as a decrease.
+        '''
 
-        if not isinstance(name, str):
-            raise TypeError("name must be a str, but got a %s." %
-                            type(name))
+        check_is_subdtype(num_epochs, 'num_epochs', numpy.integer)
+        check_greater(num_epochs, 0)
+        check_is_subdtype(min_decrease, numpy.floating)
+        check_greater_equal(min_decrease, 0.0)
 
-        if not numpy.issubdtype(type(num_epochs), numpy.integer):
-            raise TypeError("num_epochs must be an integer, but got a %s."
-                            % type(num_epochs))
+        super(StopsOnStagnation, self).__init__(value_to_monitor)
 
-        if num_epochs < 1:
-            raise ValueError("num_epochs must be at least 1, but got %d." %
-                             num_epochs)
-
-        if not numpy.issubdtype(type(min_decrease), numpy.floating):
-            raise TypeError("Expected a floating-point value for "
-                            "min_decrease, but got a %s." % type(min_decrease))
-
-        if min_decrease < 0.0:
-            raise ValueError("Expected min_decrease to be non-negative, but "
-                             "got %g." % min_decrease)
-
-        #
-        # Sets members
-        #
-
-        self._name = name
         self._max_epochs_since_min = num_epochs
         self._epochs_since_min = 0
         self._min_decrease = min_decrease
         self._min_value = numpy.inf
 
-    def __call__(self, average_over_epoch):
-        if average_over_epoch < self._min_value:
-            self._min_value = average_over_epoch
+    def on_epoch(self):
+        super(StopsOnStagnation, self).on_epoch()
+
+        if self._min_value - self.average > self._min_decrease:
+            self._min_value = self.average
             self._epochs_since_min = 0
         else:
             self._epochs_since_min += 1
@@ -187,24 +354,97 @@ class StopsOnStagnation(object):
                                         (self._name, self._epochs_since_min)))
 
 
+# class StopsOnStagnation_old(object):
+#     """
+#     A callback to give ComputesAverageOverEpoch.
+
+#     Stops the training when the average f(x_i) over epoch x stops decreasing.
+#     """
+
+#     def __init__(self, name, num_epochs, min_decrease=0.0):
+#         """
+#         Parameters
+#         ----------
+
+#         name: str
+#           Name of the quantity being monitored.
+#         """
+
+#         #
+#         # Sanity-checks args.
+#         #
+
+#         assert_is_instance(name, str)
+#         check_is_subdtype(num_epochs, 'num_epochs', numpy.integer)
+
+#         check_greater(num_epochs, 0)
+
+#         if not numpy.issubdtype(type(min_decrease), numpy.floating):
+#             raise TypeError("Expected a floating-point value for "
+#                             "min_decrease, but got a %s." % type(min_decrease))
+
+#         if min_decrease < 0.0:
+#             raise ValueError("Expected min_decrease to be non-negative, but "
+#                              "got %g." % min_decrease)
+
+#         #
+#         # Sets members
+#         #
+
+#         self._name = name
+#         self._max_epochs_since_min = num_epochs
+#         self._epochs_since_min = 0
+#         self._min_decrease = min_decrease
+#         self._min_value = numpy.inf
+
+#     def __call__(self, average_over_epoch):
+#         if average_over_epoch < self._min_value:
+#             self._min_value = average_over_epoch
+#             self._epochs_since_min = 0
+#         else:
+#             self._epochs_since_min += 1
+
+#         if self._epochs_since_min > self._max_epochs_since_min:
+#             raise StopTraining(status='ok',
+#                                message=("%s didn't decrease for %d epochs." %
+#                                         (self._name, self._epochs_since_min)))
+
+
 class SgdParameterUpdater(object):
     """
     Defines how to update parameters.
 
-    self.updates is a dictionary with (var: new_var) pairs.
-    These are theano expressions; the value of var will be replaced with
-    new_var after each batch update.
+    fields
+    ------
+    learning_rate: theano.tensor.SharedScalarVariable
+      Call set_value() on this to change the learning rate.
 
-    self.updates contains the update for not just a parameter, but also
-    internal state, such as the as the momentum-averaged update direction.
+    momentum:  theano.tensor.SharedScalarVariable
+      Call set_value() on this to change the momentum.
+
+    updates: dict
+      A dictionary with (var: new_var) pairs, where var and new_var are
+      Theano expressions. At each training update, var's value will be
+      replaced with new_var.
+
+      This contains the update for not just a parameter, but also the internal
+      state, such as the as the momentum-averaged update direction.
     """
 
     def __init__(self,
                  parameter,
-                 gradient,
+                 gradient,  # see (*) below
                  learning_rate,
                  momentum,
                  use_nesterov):
+
+        # (*): We pass in the gradient, rather than the cost, since there are
+        # different ways to generate the gradient expression, and we want to
+        # allow the user to choose different ones, rather than generating the
+        # gradient here ourselves. In particular, the 'consider_constant'
+        # argument to theano.gradient.grad() could be of interest to the user.
+        # (It's a list of symbols to consider constant, and thus not
+        # backpropagate through.)
         """
         Parameters
         ----------
@@ -230,25 +470,11 @@ class SgdParameterUpdater(object):
         # sanity-check args
         #
 
-        for symbol, name in safe_izip((parameter, gradient),
-                                      ("parameter", "gradient")):
-            if not Format.is_symbolic(symbol):
-                raise TypeError("Expected %s to be a theano symbol, but got a "
-                                "%s." % (name, type(symbol)))
-
-        for scalar, name in safe_izip((learning_rate, momentum),
-                                      ("learning_rate", "momentum")):
-            if scalar < 0:
-                raise ValueError("%s must be non-negative; not %g." %
-                                 (name, scalar))
-
-        if not isinstance(use_nesterov, bool):
-            raise TypeError("Expected use_nesterov to be a boolean, but got a "
-                            "%s." % type(use_nesterov))
-
-        def make_shared_floatX(numeric_var, name):
-            return theano.shared(numpy.asarray(numeric_var),
-                                 dtype=theano.config.floatX)
+        assert_is_instance(parameter, theano.tensor.sharedvar.SharedVariable)
+        assert_is_instance(gradient, theano.gof.Variable)
+        assert_greater_equal(learning_rate, 0)
+        assert_greater_equal(momentum, 0)
+        assert_is_instance(use_nesterov, bool)
 
         #
         # define updates, set members
@@ -264,15 +490,20 @@ class SgdParameterUpdater(object):
             return (None if var_name is None
                     else var_name + ' learning rate')
 
-        self.learning_rate = theano.shared(learning_rate,
-                                           name=concat(parameter.name,
+        def make_shared_floatX(numeric_var, name):
+            return theano.shared(numpy.asarray(numeric_var),
+                                 dtype=theano.config.floatX)
+
+        self.learning_rate = make_shared_floatX(learning_rate,
+                                                concat(parameter.name,
                                                        ' learning rate'))
 
-        self.momentum = theano.shared(momentum)
-        self.momentum.name = concat(parameter.name, ' momentum')
+        self.momentum = make_shared_floatX(momentum,
+                                           concat(parameter.name, ' momentum'))
 
-        self._velocity = theano.shared(0.0 * parameter.get_value())
-        self._velocity.name = concat(parameter.name, ' velocity')
+        self._velocity = make_shared_floatX(0.0 * parameter.get_value(),
+                                            concat(parameter.name,
+                                                   ' velocity'))
 
         new_velocity = (self._momentum * self._velocity -
                         self._learning_rate * gradient)
@@ -371,90 +602,12 @@ class SgdParameterUpdater(object):
 #         self._previous_update = new_update
 
 
-
-class LimitsNumEpochs(object):
-    """
-    Throws a StopTraining exception after a fixed number of epochs.
-    """
-
-    def __init__(self, max_num_epochs):
-        if not numpy.issubdtype(type(max_num_epochs), numpy.integer):
-            raise TypeError("Expected max_num_epochs to be an integer, not a "
-                            "%s." % type(max_num_epochs))
-
-        if max_num_epochs < 0:
-            raise ValueError("max_num_epochs must be non-negative, got %d." %
-                             max_num_epochs)
-
-        self._max_num_epochs = max_num_epochs
-        self._epochs_seen = -1
-
-    def __call__(self):
-        self._epochs_seen += 1
-        if self._epochs_seen >= self._max_num_epochs:
-            raise StopTraining(status='ok',
-                               message=('Reached max # of epochs %d.' %
-                                        self._max_num_epochs))
-
-
-class LinearlyScalesOverEpochs(object):
-    """
-    An epoch callback that linearly scales a theano shared variable over time.
-
-    Parameters
-    ----------
-
-    shared_value: a Theano shared variable
-      This value will be scaled in-place by a factor self._scale.
-
-    final_scale: float
-      Final value of self._scale.
-
-    epochs_to_saturation: int
-      self._scale should decay to final_value after this many epochs.
-    """
-
-    def __init__(self, shared_value, final_scale, epochs_to_saturation):
-        if not isinstance(shared_value,
-                          theano.tensor.sharedvar.SharedVariable):
-            raise TypeError("shared_value must be a theano SharedVariable, "
-                            "not a %s." % type(shared_value))
-
-        if not numpy.issubdtype(type(final_scale), numpy.floating):
-            raise TypeError("final_scale must be a floating-point type, not "
-                            "%s." % type(final_scale))
-
-        if not numpy.issubdtype(type(epochs_to_saturation), numpy.integer):
-            raise TypeError("epochs_to_saturation must be an integer, not "
-                            "a %s." % type(epochs_to_saturation))
-
-        self.shared_value = shared_value
-        self._initial_value = self.shared_value.get_value()
-
-        self._final_scale = final_scale
-        self._epochs_to_saturation = epochs_to_saturation
-
-        self._num_epochs_seen = 0
-
-    def __call__(self):
-        assert self._num_epochs_seen >= 0
-
-        self._num_epochs_seen += 1
-
-        # interpolation parameter
-        alpha = min(1.0,
-                    float(self._num_epochs_seen) / self._epochs_to_saturation)
-
-        scale = (1.0 - alpha) + alpha * self._final_scale
-
-        self.shared_value.set_value(scale * self._initial_value)
-
-
-
 class Sgd(object):
 
     """
-    A trainer that performs stochastic gradient descent.
+    Uses stochastic gradient descent to optimize a cost w.r.t. parameters.
+
+    The parameters and the inputs may be the same.
 
     At each iteration this computes the gradients of each parameter with
     respect to the cost function, then updates the parameter value using
@@ -464,82 +617,103 @@ class Sgd(object):
     """
 
     def __init__(self,
-                 data_iterator,
-                 cost_symbol,
-                 parameter_symbols,
-                 cost_input_symbols):
+                 cost,
+                 inputs,
+                 parameters,
+                 parameter_updaters,
+                 input_iterator,
+                 monitors,
+                 epoch_callbacks):
+
         """
         Parameters
         ----------
 
-        data_iterator: simplelearn.datasets.Iterator
-          Provides the next training datum (list of arguments to cost) when
-          polled.
-
-        cost_symbol: theano.gof.Variable
+        cost: theano.gof.Variable
           The cost to be reduced. Get as cost_node.get_output_symbol().
 
-        parameter_symbols: sequence of shared Theano variables
+        inputs: sequence of theano.gof.Variables
+          The inputs to the cost (e.g. [images, labels]), in the order yielded
+          by the input_iterator.
+
+        input_iterator: simplelearn.datasets.Iterator
+          Yields training data (inputs' values).
+
+        parameters: sequence of theano.tensor.sharedvar.SharedVariables
           What this trainer modifies to lower the cost. These are typically
           model weights, though they could also be inputs (e.g. for optimizing
           input images).
 
-        # parameter_updaters: sequence of GradientBasedParameterUpdaters.
-        #   One of these per symbol in parameter_symbols.
+        parameter_updaters: sequence of SgdParameterUpdaters
+          updaters for the corresponding elements in <parameters>.
 
-        cost_input_symbols: sequence of theano.gof.Variables
+        inputs: sequence of theano.gof.Variables
           These are the inputs to cost.
+
+        monitors: (optional) sequence of TrainingMonitors.
+          These are also used as epoch callbacks.
+
+        epoch_callbacks: sequence of EpochCallbacks
+          One of these must throw a StopTraining exception for the training to
+          halt.
         """
 
         #
         # sanity-checks the arguments.
         #
 
-        if not isinstance(data_iterator, DataIterator):
-            raise TypeError("Expected data_iterator to be a DataIterator, but "
-                            "got a %s." % type(data_iterator))
+        assert_is_instance(cost, theano.gof.Variable)
 
-        if not isinstance(cost_symbol, theano.gof.Variable):
-            raise TypeError("Expected cost_symbol to be a theano symbol, but "
-                            "got a %s." % type(cost_symbol))
+        for input_symbol in inputs:
+            assert_is_instance(input_symbol, theano.gof.Variable)
 
-        for parameter_symbol in parameter_symbols:
-            if not isinstance(parameter_symbol, theano.gof.Variable):
-                raise TypeError("Expected parameter_symbols to be theano "
-                                "symbols, but got a %s." %
-                                type(parameter_symbol))
+        for parameter, updater in safe_izip(parameters, parameter_updaters):
+            assert_is_instance(parameter,
+                               theano.tensor.sharedvar.SharedVariable)
 
-        assert_equal(len(parameter_symbols), len(parameter_updaters))
+            assert_is_instance(updater, GradientBasedParameterUpdater)
 
-        for updater in parameter_updaters:
-            if not all(isinstance(updater, GradientBasedParameterUpdater)):
-                raise TypeError("Expected all elements of parameter_updaters "
-                                "to be GradientBasedParameterUpdater "
-                                "instances, but got a %s." % type(updater))
+            assert_in(parameter, updater.updates)
 
-        for cost_input_symbol in parameter_symbols:
-            if not isinstance(cost_input_symbol, theano.gof.Variable):
-                raise TypeError("Expected cost_input_symbols to be theano "
-                                "symbols, but got a %s." %
-                                type(cost_input_symbol))
+        assert_is_instance(input_iterator, DataIterator)
 
-        self._data_iterator = data_iterator
+        assert_true(input_iterator.next_is_new_epoch())
 
-        # Parameters to update
-        self._parameter_symbols = tuple(parameter_symbols)
+        for monitor in monitors:
+            assert_is_instance(monitor, TrainingMonitor)
 
-        # a list of gradient functions, one for each parameter
-        gradient_symbols = [T.grad(cost_symbol, p) for p in parameter_symbols]
-        self._gradient_functions = tuple(T.function(cost_input_symbols, g)
-                                         for g in gradient_symbols)
+        for epoch_callback in epoch_callbacks:
+            assert_is_instance(epoch_callback, EpochCallback)
 
-        # a list of parameter updaters.
-        self._parameter_updaters = parameter_updaters
+        #
+        # Sets members
+        #
+
+        self._input_iterator = input_iterator
+        self._parameters = tuple(parameters)
+        self._parameter_updaters = tuple(parameter_updaters)
+        self._monitors = tuple(monitors)
+
+        def compile_update_function():
+            outputs = [cost, ] + [m.monitored_value for m in monitors]
+            updates = {}
+            for updater in updaters:
+                updates.update(updater.updates)
+
+            return theano.function(inputs, outputs, updates=updates)
+
+        self._update_function = compile_update_function()
+
+        repeated_callbacks = frozenset(monitors).intersection(epoch_callbacks)
+        assert_equal(len(repeated_callbacks),
+                     0,
+                     "There were duplicate entries between monitors and "
+                     "epoch_callbacks: " % str(repeated_callbacks))
 
         # These get called once before any training, and after each epoch
         # thereafter. One of them must halt the training at some point by
         # throwing a StopTraining exception.
-        self.epoch_callbacks = []
+        self._epoch_callbacks = tuple(epoch_callbacks)
 
     def train(self):
         """
@@ -549,43 +723,35 @@ class Sgd(object):
         a StopTraining exception.
         """
 
-        if len(self.epoch_callbacks) == 0:
-            raise RuntimeError("self.epoch_callbacks is empty, so this will "
+        if len(self._epoch_callbacks) + len(self._monitors) == 0:
+            raise RuntimeError("self._monitors and self._epoch_callbacks are "
+                               "both empty, so this will "
                                "iterate through the training data forever. "
-                               "Please add a callback that will throw a "
+                               "Please add an EpochCallback or "
+                               "TrainingMonitor that will throw a "
                                "StopTraining exception at some point.")
         try:
-            for callback in self.epoch_callbacks:
-                callback()
+            all_callbacks = self._monitors + self._epoch_callbacks
+            for callback in all_callbacks:
+                callback.on_epoch()
 
             while True:
-                epoch_of_prev_batch = self._data_iterator.epoch()
 
                 # gets batch of data
-                cost_arguments = self._data_iterator.get_next_batch()
+                cost_arguments = self._input_iterator.get_next_batch()
 
-                epoch_of_curr_batch = self._data_iterator.epoch()
+                # fprop-bprop, updates parameters
+                outputs = self.update_function(*cost_arguments)
 
-                assert epoch_of_curr_batch in (epoch_of_prev_batch,
-                                               epoch_of_prev_batch + 1)
+                # updates monitors
+                for monitor, monitored_value in safe_izip(self._monitors,
+                                                          outputs[1:]):
+                    monitor.on_batch(monitored_value)
 
                 # calls epoch callbacks, if we've iterated through an epoch
-                if epoch_of_curr_batch > epoch_of_prev_batch:
-                    for callback in self.epoch_callbacks:
+                if self._input_iterator.next_is_new_epoch():
+                    for callback in all_callbacks():
                         callback()
-
-                # computes gradients of cost w.r.t. parameters
-                gradients = [g(cost_arguments)
-                             for g in self._gradient_functions]
-
-                # Updates parameters using their gradients.
-                for (parameter,
-                     gradient,
-                     updater) in safe_izip(self._parameters,
-                                           gradients,
-                                           self._parameter_updaters):
-                    updater.update_parameters(gradients=gradient,
-                                              parameters=parameter)
 
         except StopTraining, exception:
             if exception.status == 'ok':

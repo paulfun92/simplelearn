@@ -4,11 +4,12 @@ Utility functions used throughout simplelearn
 
 __author__ = "Matthew Koichi Grimes"
 __email__ = "mkg@alum.mit.edu"
-__copyright__ = "Copyright 2014"
+__copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
 
 import collections
+import numpy
 from itertools import chain
 
 
@@ -30,7 +31,6 @@ def safe_izip(*iterables):
         elif any(item is sentinel for item in items):  # some are sentinels
             raise IndexError("Can't safe_izip over sequences of different "
                              "lengths.")
-
         else:
             yield items
 
@@ -47,3 +47,19 @@ def flatten(iterable):
                 yield sub_element
         else:
             yield element
+
+
+def check_is_subdtype(arg, name, expected_dtype):
+    """
+    Throws a TypeError if arg is not a sub-dtype of expected_type.
+
+    For example, this:
+
+      check_is_subdtype(1.0, "some_float", numpy.integer)
+
+    Throws a TypeError with message "Expected some_float to be a
+    <type 'numpy.integer'>, but got a <type 'float'>."
+    """
+    if not numpy.issubdtype(type(arg), expected_dtype):
+        raise TypeError("Expected %s to be a %s, but got a %s."
+                        % (name, expected_type, type(arg)))

@@ -1,5 +1,12 @@
 Next: flesh out sgd to contain a list of updaters, and build the theano function (with updates) on train().
 
+Sgd._function = theano.function(inputs=input_nodes' inputs,
+                                outputs=monitored_values,
+                                updates=updates)
+* inputs: maybe taken from dataset.make_input_nodes
+monitored_values: a list of expressions that are the actual outputs of the theano.function.
+updates: a dictionary of values and their replacements, that are the "updates" arguments to theano.function
+
 * Get sgd_demo.py working
 ** DONE Finish testing Dataset interface
 ** Create monitor that monitors cost and raises a StopTraining exception if it fails to increase for N epochs.
