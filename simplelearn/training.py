@@ -7,19 +7,19 @@ __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
-import collections
+from collections import OrderedDict
 import numpy
 import theano
-import theano.tensor as T
 from nose.tools import (assert_true,
                         assert_equal,
                         assert_greater,
+                        assert_greater_equal,
                         assert_is_instance,
                         assert_in)
 from simplelearn.data import DataIterator
-from simplelearn.nodes import Node
 from simplelearn.utils import safe_izip, check_is_subdtype
 from simplelearn.formats import Format, DenseFormat
+import pdb
 
 # pylint: disable=too-few-public-methods
 
@@ -102,15 +102,14 @@ class LinearlyScalesOverEpochs(EpochCallback):
     """
 
     def __init__(self, shared_value, final_scale, epochs_to_saturation):
-        check_arg_type(shared_value,
-                       "shared_value",
-                       theano.tensor.sharedvar.SharedVariable)
+        assert_is_instance(shared_value,
+                           theano.tensor.sharedvar.SharedVariable)
 
-        check_arg_dtype(final_scale, "final_scale", numpy.floating)
+        check_is_subdtype(final_scale, "final_scale", numpy.floating)
 
-        check_arg_dtype(epochs_to_saturation,
-                        "epochs_to_saturation",
-                        numpy.integer)
+        check_is_subdtype(epochs_to_saturation,
+                          "epochs_to_saturation",
+                          numpy.integer)
 
         self.shared_value = shared_value
         self._initial_value = self.shared_value.get_value()
@@ -139,19 +138,16 @@ class TrainingMonitor(EpochCallback):
     Monitors some function of an input batch during training.
     """
 
-    def __init__(self, value_to_monitor, format):
-        check_arg_type(value_to_monitor,
-                       'value_to_monitor',
-                       theano.gof.Variable)
+    def __init__(self, value_to_monitor, fmt):
+        assert_is_instance(value_to_monitor, theano.gof.Variable)
+        assert_is_instance(fmt, Format)
 
-        check_arg_type(format, 'format', Format)
-
-        if 'b' not in format.axes:
+        if 'b' not in fmt.axes:
             raise ValueError("format.axes doesn't contain batch axis 'b': %s" %
-                             str(format.axes))
+                             str(fmt.axes))
 
         self.value_to_monitor = value_to_monitor
-        self._format = format
+        self._format = fmt
 
     def on_batch(self, input_batch, monitored_value_batch):
         self._format.check(monitored_value_batch)
@@ -163,30 +159,30 @@ class TrainingMonitor(EpochCallback):
 
 
 class AverageMonitor(TrainingMonitor):
-    def __init__(self, value_to_monitor, format=None):
-        if format is None:
+    def __init__(self, value_to_monitor, value_format=None):
+        if value_format is None:
             if value_to_monitor.ndim != 1:
                 raise ValueError("Must supply a format when monitoring "
                                  "multidimensional values (ndim is %d)."
                                  % value_to_monitor.ndim)
-            format = DenseFormat(axes=('b',),
-                                 shape=(),
-                                 dtype=value_to_monitor.dtype)
+            value_format = DenseFormat(axes=('b',),
+                                       shape=(),
+                                       dtype=value_to_monitor.dtype)
 
-        super(AverageMonitor, self).__init__(value_to_monitor, format)
-        self._total = format.make_batch(batch_size=1)
+        super(AverageMonitor, self).__init__(value_to_monitor, value_format)
+        self._total = value_format.make_batch(batch_size=1)
         self._count = 0
         self.average = None
 
     def _on_batch(self, input_batch, monitored_value_batch):
         batch_axis = self._format.axes.index('b')
-        self.total += numpy.sum(monitored_value_batch, axis=batch_axis)
+        self._total += numpy.sum(monitored_value_batch, axis=batch_axis)
 
     def on_epoch(self):
         if self._count != 0:
             self.average = self._total / self._count
 
-        self.total[...] = 0.0
+        self._total[...] = 0.0
         self._count = 0
 
 
@@ -199,17 +195,10 @@ class MaxMonitor(TrainingMonitor):
 
     def __init__(self, value_to_monitor, top_n=1):
         fmt = DenseFormat(shape=(), axes=('b',), dtype=value_to_monitor.dtype)
-        super(AverageMonitor, self).__init__(value_to_monitor, fmt)
+        super(MaxMonitor, self).__init__(value_to_monitor, fmt)
 
-        assert_not_equal(value_to_monitor.ndim, 1)
-        # if value_to_monitor.ndim != 1:
-        #     raise ValueError("Expected value_to_monitor.ndim to be 1 but got "
-        #                      "%d." % value_to_monitor.ndim)
-
+        # assert_equal(value_to_monitor.ndim, 1)
         assert_greater(top_n, 0)
-        # if top_n < 1:
-        #     raise ValueError("Expected top_n to be 1 or greater, but got %d."
-        #                      % top_n)
 
         self.maxes = fmt.make_batch(is_symbolic=False, batch_size=0)
         self._top_n = top_n
@@ -221,15 +210,15 @@ class MaxMonitor(TrainingMonitor):
         indices = numpy.searchsorted(self.maxes, batch_max)
         assert len(indices) == 1
 
-        if len(self.maxes) < self.top_n or indices[0] > 0:
+        if len(self.maxes) < self._top_n or indices[0] > 0:
             self.maxes = numpy.insert(self.maxes, indices, (batch_max, ))
-            if len(self.maxes) == self.top_n:
+            if len(self.maxes) == self._top_n:
                 self.maxes = self.maxes[1:]
 
         assert len(self.maxes) <= self._top_n
 
     def on_epoch(self):
-        self.maxes = format.make_batch(is_symbolic=False, batch_size=0)
+        self.maxes = self._format.make_batch(is_symbolic=False, batch_size=0)
 
 
 # class ComputesAverageOverEpoch_old(object):
@@ -328,9 +317,9 @@ class StopsOnStagnation(AverageMonitor):
         '''
 
         check_is_subdtype(num_epochs, 'num_epochs', numpy.integer)
-        check_greater(num_epochs, 0)
-        check_is_subdtype(min_decrease, numpy.floating)
-        check_greater_equal(min_decrease, 0.0)
+        assert_greater(num_epochs, 0)
+        check_is_subdtype(min_decrease, 'min_decrease', numpy.floating)
+        assert_greater_equal(min_decrease, 0.0)
 
         super(StopsOnStagnation, self).__init__(value_to_monitor)
 
@@ -412,9 +401,12 @@ class StopsOnStagnation(AverageMonitor):
 
 class SgdParameterUpdater(object):
     """
-    Defines how to update parameters.
+    Defines how to update parameters using SGD with momentum.
 
-    fields
+    You can set the learning rate and momentum dynamically during the
+    optimization.
+
+    Fields
     ------
     learning_rate: theano.tensor.SharedScalarVariable
       Call set_value() on this to change the learning rate.
@@ -472,9 +464,13 @@ class SgdParameterUpdater(object):
 
         assert_is_instance(parameter, theano.tensor.sharedvar.SharedVariable)
         assert_is_instance(gradient, theano.gof.Variable)
+        check_is_subdtype(gradient, 'gradient', numpy.floating)
         assert_greater_equal(learning_rate, 0)
         assert_greater_equal(momentum, 0)
         assert_is_instance(use_nesterov, bool)
+
+        if str(gradient.dtype) != str(theano.config.floatX):
+            gradient = theano.tensor.cast(gradient, theano.config.floatX)
 
         #
         # define updates, set members
@@ -486,13 +482,10 @@ class SgdParameterUpdater(object):
             else:
                 return str0 + str1
 
-        def make_name(var_name, suffix):
-            return (None if var_name is None
-                    else var_name + ' learning rate')
-
         def make_shared_floatX(numeric_var, name):
-            return theano.shared(numpy.asarray(numeric_var),
-                                 dtype=theano.config.floatX)
+            return theano.shared(numpy.asarray(numeric_var,
+                                               dtype=theano.config.floatX),
+                                 name=name)
 
         self.learning_rate = make_shared_floatX(learning_rate,
                                                 concat(parameter.name,
@@ -505,19 +498,22 @@ class SgdParameterUpdater(object):
                                             concat(parameter.name,
                                                    ' velocity'))
 
-        new_velocity = (self._momentum * self._velocity -
-                        self._learning_rate * gradient)
+        new_velocity = (self.momentum * self._velocity -
+                        self.learning_rate * gradient)
+        # pdb.set_trace()
+        assert_equal(str(new_velocity.dtype), theano.config.floatX)
         new_velocity.name = concat('new ', self._velocity.name)
 
-        step = (self.momentum * new_velocity - self._learning_rate * gradient
+        step = (self.momentum * new_velocity - self.learning_rate * gradient
                 if use_nesterov
                 else new_velocity)
 
         new_parameter = parameter + step
         new_parameter.name = concat('new ', parameter.name)
 
-        self.updates = {parameter: new_parameter,
-                        self._velocity: new_velocity}
+        # fails
+        self.updates = OrderedDict([(parameter, new_parameter),
+                                    (self._velocity, new_velocity)])
 
 # class GradientBasedParameterUpdater(object):
 #     """
@@ -697,7 +693,7 @@ class Sgd(object):
         def compile_update_function():
             outputs = [cost, ] + [m.monitored_value for m in monitors]
             updates = {}
-            for updater in updaters:
+            for updater in parameter_updaters:
                 updates.update(updater.updates)
 
             return theano.function(inputs, outputs, updates=updates)
@@ -741,6 +737,7 @@ class Sgd(object):
                 cost_arguments = self._input_iterator.get_next_batch()
 
                 # fprop-bprop, updates parameters
+                # pylint: disable=star-args
                 outputs = self.update_function(*cost_arguments)
 
                 # updates monitors

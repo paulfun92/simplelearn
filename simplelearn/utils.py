@@ -60,6 +60,19 @@ def check_is_subdtype(arg, name, expected_dtype):
     Throws a TypeError with message "Expected some_float to be a
     <type 'numpy.integer'>, but got a <type 'float'>."
     """
-    if not numpy.issubdtype(type(arg), expected_dtype):
+    if isinstance(arg, numpy.dtype):
+        dtype = arg
+    elif isinstance(arg, str):
+        dtype = numpy.dtype(arg)
+    elif hasattr(arg, 'dtype'):
+        dtype = arg.dtype
+    elif numpy.isscalar(arg):
+        dtype = type(arg)
+    else:
+        raise TypeError("Expected arg to be a scalar, or an object wth a"
+                        " .dtype attribute, but got a %s instead." %
+                        type(arg))
+
+    if not numpy.issubdtype(dtype, expected_dtype):
         raise TypeError("Expected %s to be a %s, but got a %s."
-                        % (name, expected_type, type(arg)))
+                        % (name, expected_dtype, dtype))
