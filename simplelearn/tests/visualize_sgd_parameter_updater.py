@@ -211,15 +211,15 @@ def main():
                                             args.momentum_range[1],
                                             3))
 
-    figure, all_axes = pyplot.subplots(len(momenta),
+    figure, all_axes = pyplot.subplots(len(momenta) * 2,
                                        len(learning_rates),
                                        squeeze=False,
-                                       figsize=(18, 6))
+                                       figsize=(18, 12))
 
     # label subplot grid's rows with momenta
     pad = 5 # in points
 
-    for axes, momentum in zip(all_axes[:, 0], momenta):
+    for axes, momentum in zip(all_axes[::2, 0], momenta):
         axes.annotate("momentum=%g" % momentum,
                       xy=(0, 0.5),
                       xytext=(-axes.yaxis.labelpad - pad, 0),
@@ -259,15 +259,20 @@ def main():
     contour_data = get_contour_data(cost_function,
                                     numpy.abs(initial_point).max() * 1.5)
 
-    for axes in all_axes.flat:
-        # pylint: disable=star-args
-        axes.contour(*contour_data)
-        axes.plot(initial_point[0], initial_point[1], 'gx')
-        axes.plot(0, 0, 'rx')
+    for axes_row in all_axes[::2, :]:
+        for axes in axes_row:
+            # pylint: disable=star-args
+            axes.contour(*contour_data)
+            axes.plot(initial_point[0], initial_point[1], 'gx')
+            axes.plot(0, 0, 'rx')
 
     for nesterov, line_style in safe_izip((False, True), ('r-,', 'g-,')):
-        for momentum, axes_row in safe_izip(momenta, all_axes):
-            for learning_rate, axes in safe_izip(learning_rates, axes_row):
+        for momentum, axes_row, cost_axes_row in safe_izip(momenta,
+                                                           all_axes[::2, :],
+                                                           all_axes[1::2, :]):
+            for learning_rate, axes, cost_axes in safe_izip(learning_rates,
+                                                            axes_row,
+                                                            cost_axes_row):
                 param_updater = SgdParameterUpdater(point,
                                                     gradient,
                                                     0,
@@ -309,6 +314,10 @@ def main():
                                                           args.max_iters)
 
                 axes.plot(trajectory[:, 0], trajectory[:, 1], line_style)
+                # cost_axes.set_yscale('log')
+                cost_axes.plot(numpy.arange(trajectory.shape[0]),
+                               trajectory[:, 2],
+                               line_style)
 
     # figure.tight_layout()
     figure.subplots_adjust(left=0.15, top=0.95)
