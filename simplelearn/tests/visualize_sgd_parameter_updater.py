@@ -44,6 +44,19 @@ def parse_args():
                         default=100,
                         help=("Stop optimization after this many iterations."))
 
+    parser.add_argument("--stagnation-iters",
+                        type=int,
+                        default=10,
+                        help=("Stop optimization after this many iterations "
+                              "without improving on the best cost thus far."))
+
+    parser.add_argument("--stagnation-threshold",
+                        type=int,
+                        default=.0001,
+                        help=("Stop optimization if the cost doesn't improve "
+                              "more than this, after <stagnation_iters> "
+                              "iterations."))
+
     parser.add_argument("--lambda-range",
                         nargs=2,
                         default=[0.001, .05],
@@ -69,6 +82,9 @@ def parse_args():
     result = parser.parse_args()
 
     assert_greater(result.max_iters, 0)
+
+    assert_greater(result.stagnation_iters, 0)
+    assert_greater_equal(result.stagnation_threshold, 0.0)
 
     assert_greater(result.lambda_range[0], 0.0)
     assert_greater(result.lambda_range[1], result.lambda_range[0])
@@ -243,11 +259,11 @@ def main():
                                             3))
 
     figsize = (18, 12)
+
     figure, all_axes = pyplot.subplots(len(momenta) * 2,
                                        len(learning_rates),
                                        squeeze=False,
-                                       figsize=figsize,
-                                       subplot_kw={'aspect': 'equal'})
+                                       figsize=figsize)
 
     # label subplot grid's rows with momenta
     pad = 5 # in points
@@ -272,9 +288,9 @@ def main():
                       ha='center',
                       va='baseline')
 
-    def get_contour_data(cost_function, window_bound):
-        grid_x, grid_y = (numpy.linspace(-window_bound, window_bound, 20)
-                          for i in range(2))
+    def get_contour_data(cost_function, max_x, max_y):
+        grid_x = numpy.linspace(-max_x, max_x, 20)
+        grid_y = numpy.linspace(-max_y, max_y, 20)
 
         x_grid, y_grid = numpy.meshgrid(grid_x, grid_y)
         cast_to_floatX = numpy.cast[theano.config.floatX]
@@ -289,8 +305,13 @@ def main():
 
 
     initial_point = numpy.array([1.3, .5], dtype=theano.config.floatX)
+    aspect_ratio = float(figsize[1]) / float(figsize[0])
+    aspect_ratio *= (float(len(momenta)) / float(len(learning_rates)))
+    x_limit = numpy.sqrt((initial_point**2).sum()) * 2.0
     contour_data = get_contour_data(cost_function,
-                                    numpy.abs(initial_point).max() * 1.5)
+                                    x_limit,
+                                    x_limit * aspect_ratio)
+
 
     for axes_row in all_axes[::2, :]:
         for axes in axes_row:
@@ -331,8 +352,10 @@ def main():
                                                   DenseFormat(axes=['b'],
                                                               shape=[-1],
                                                               dtype=None),
-                                                  num_epochs=10,
-                                                  min_decrease=.0001)]
+                                                  args.stagnation_iters,
+                                                  args.stagnation_threshold)]
+                                                  # num_epochs=10,
+                                                  # min_decrease=.0001)]
 
                     trainer = Sgd(cost=cost_sum,
                                   inputs=[],
@@ -354,8 +377,10 @@ def main():
                                                           update_function,
                                                           args.max_iters)
 
+                axes.set_aspect('equal')
                 axes.plot(trajectory[:, 0], trajectory[:, 1], line_style)
-                # cost_axes.set_yscale('log')
+
+                # cost_axes.set_yscale('log')  # <-- this was a bad idea
                 cost_axes.plot(numpy.arange(trajectory.shape[0]),
                                trajectory[:, 2],
                                line_style)
