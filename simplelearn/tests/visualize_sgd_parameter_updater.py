@@ -12,12 +12,14 @@ from matplotlib import pyplot
 from nose.tools import (assert_equal,
                         assert_is_not,
                         assert_greater,
+                        assert_greater_equal,
                         assert_is_instance)
 from simplelearn.utils import safe_izip
 from simplelearn.data import DataIterator
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (TrainingMonitor,
                                   LimitsNumEpochs,
+                                  StopsOnStagnation,
                                   SgdParameterUpdater,
                                   Sgd)
 import pdb
@@ -52,7 +54,31 @@ def parse_args():
                         default=[0.0, 1.0],
                         help=("Min & max momentum values."))
 
+    parser.add_argument("--angle",
+                        type=float,
+                        default=45,
+                        help=("Angle, in degrees, by which to rotate the "
+                              "cost measurement matrix."))
+
+    parser.add_argument("--singular-values",
+                        nargs=2,
+                        default=[10, 2],
+                        help=("The singular values of the cost measurement "
+                              "matrix."))
+
     result = parser.parse_args()
+
+    assert_greater(result.max_iters, 0)
+
+    assert_greater(result.lambda_range[0], 0.0)
+    assert_greater(result.lambda_range[1], result.lambda_range[0])
+
+    assert_greater_equal(result.momentum_range[0], 0.0)
+    assert_greater(result.momentum_range[1], result.momentum_range[0])
+
+    for singular_value in result.singular_values:
+        assert_greater(singular_value, 0.0)
+
     return result
 
 
@@ -188,10 +214,15 @@ def main():
     args = parse_args()
 
     point = theano.shared(numpy.zeros((1, 2), dtype=theano.config.floatX))
-    cost_batch = create_cost_batch(singular_values=(10, 2),
-                                   angle=numpy.pi/4,
+    cost_batch = create_cost_batch(singular_values=args.singular_values,
+                                   angle=args.angle,
                                    point=point)
-    gradient = theano.gradient.grad(cost_batch.sum(), point)
+    cost_batch.name = 'cost_batch'
+
+    cost_sum = cost_batch.sum()
+    cost_sum.name = 'cost_sum'
+
+    gradient = theano.gradient.grad(cost_sum, point)
 
     # can't use shared variable <point> as an explicit input to a function;
     # must tell it to replace the shared variable's value with some non-shared
@@ -211,10 +242,12 @@ def main():
                                             args.momentum_range[1],
                                             3))
 
+    figsize = (18, 12)
     figure, all_axes = pyplot.subplots(len(momenta) * 2,
                                        len(learning_rates),
                                        squeeze=False,
-                                       figsize=(18, 12))
+                                       figsize=figsize,
+                                       subplot_kw={'aspect': 'equal'})
 
     # label subplot grid's rows with momenta
     pad = 5 # in points
@@ -293,14 +326,22 @@ def main():
                                                       shape=(-1,),
                                                       dtype=floatX)))
 
-                    trainer = Sgd(cost=cost_batch.sum(),
+                    monitors = [recording_monitor,
+                                StopsOnStagnation(cost_batch,
+                                                  DenseFormat(axes=['b'],
+                                                              shape=[-1],
+                                                              dtype=None),
+                                                  num_epochs=10,
+                                                  min_decrease=.0001)]
+
+                    trainer = Sgd(cost=cost_sum,
                                   inputs=[],
                                   parameters=[point],
                                   parameter_updaters=[param_updater],
                                   input_iterator=DummyIterator(),
-                                  monitors=[recording_monitor],
-                                  epoch_callbacks=[LimitsNumEpochs(
-                                      args.max_iters)])
+                                  monitors=monitors,
+                                  epoch_callbacks=[
+                                      LimitsNumEpochs(args.max_iters)])
 
                     trajectory = optimize_with_trainer(trainer,
                                                        recording_monitor)

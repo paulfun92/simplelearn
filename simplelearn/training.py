@@ -7,6 +7,7 @@ __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
+import warnings
 from collections import Sequence, OrderedDict
 import numpy
 import theano
@@ -17,6 +18,7 @@ from nose.tools import (assert_true,
                         assert_greater,
                         assert_greater_equal,
                         assert_is_instance,
+                        assert_is_not,
                         assert_in)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip, check_is_subdtype
@@ -189,11 +191,14 @@ class TrainingMonitor(EpochCallback):
 class AverageMonitor(TrainingMonitor):
     def __init__(self, values_to_monitor, formats):
         super(AverageMonitor, self).__init__(values_to_monitor, formats)
+        assert_greater(values_to_monitor, 0)
+
         self._totals = None
         self._count = 0
-        self.average = None
+        self.averages = None
 
     def _on_batch(self, input_batches, monitored_value_batches):
+
         if self._totals is None:
             self._totals = []
             for batch, fmt in safe_izip(monitored_value_batches,
@@ -207,9 +212,34 @@ class AverageMonitor(TrainingMonitor):
                 batch_axis = fmt.axes.index('b')
                 total += numpy.sum(batch, axis=batch_axis)
 
+        def get_num_examples(batches, formats):
+            '''
+            Returns the # of examples in a batch of sub-batches.
+
+            Checks that all sub-batches contain the same # of examples.
+            '''
+
+            result = None
+
+            # Checks that all batches have the same number of examples
+            for batch, fmt in safe_izip(batches, formats):
+                batch_axis = fmt.axes.index('b')
+                batch_size = batch.shape[batch_axis]
+
+                if result is None:
+                    result = batch_size
+                else:
+                    assert_equal(batch_size, result)
+
+            assert_is_not(result, None)
+
+            return result
+
+        self._count += get_num_examples(monitored_value_batches, self._formats)
+
     def on_epoch(self):
         if self._count != 0:
-            self.average = tuple(total / self._count for total in self._totals)
+            self.averages = tuple(total / self._count for total in self._totals)
 
         self._totals = None
         self._count = 0
@@ -383,8 +413,15 @@ class StopsOnStagnation(AverageMonitor):
         # Computes average value over epoch
         super(StopsOnStagnation, self).on_epoch()
 
-        if self._min_value - self.average > self._min_decrease:
-            self._min_value = self.average
+        # There were no batches in the previous epoch
+        if self.averages is None:
+            return
+        else:
+            assert_equal(len(self.averages), 1)
+            average = self.averages[0]
+
+        if self._min_value - average > self._min_decrease:
+            self._min_value = average
             self._epochs_since_min = 0
         else:
             self._epochs_since_min += 1
@@ -739,6 +776,12 @@ class Sgd(object):
         assert_is_instance(epoch_callbacks, Sequence)
         for epoch_callback in epoch_callbacks:
             assert_is_instance(epoch_callback, EpochCallback)
+            if isinstance(epoch_callback, TrainingMonitor):
+                warnings.warn("You've passed a TrainingMonitor subclass %s "
+                              "as one of the epoch_callbacks. If you want the "
+                              ".on_batch() method to be called on this, you "
+                              "need to pass it in as one of the monitors." %
+                              str(epoch_callback))
 
         #
         # Sets members
@@ -825,7 +868,7 @@ class Sgd(object):
                                         len(monitor.monitored_values))
                     assert_less_equal(new_output_index, len(outputs))
                     monitored_values = outputs[output_index:new_output_index]
-                    # pdb.set_trace()
+
                     monitor.on_batch(cost_arguments, monitored_values)
 
                     output_index = new_output_index
