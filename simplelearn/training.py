@@ -7,18 +7,20 @@ __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
-from collections import OrderedDict
+from collections import Sequence, OrderedDict
 import numpy
 import theano
 from nose.tools import (assert_true,
                         assert_equal,
+                        assert_not_equal,
+                        assert_less_equal,
                         assert_greater,
                         assert_greater_equal,
                         assert_is_instance,
                         assert_in)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip, check_is_subdtype
-from simplelearn.formats import Format, DenseFormat
+from simplelearn.formats import Format
 import pdb
 
 # pylint: disable=too-few-public-methods
@@ -138,87 +140,114 @@ class TrainingMonitor(EpochCallback):
     Monitors some function of an input batch during training.
     """
 
-    def __init__(self, value_to_monitor, fmt):
-        assert_is_instance(value_to_monitor, theano.gof.Variable)
-        assert_is_instance(fmt, Format)
+    def __init__(self, values_to_monitor, formats):
+        '''
+        Parameters
+        ----------
+        values_to_monitor: sequence
+          A sequence of theano variables to monitor
 
-        if 'b' not in fmt.axes:
-            raise ValueError("format.axes doesn't contain batch axis 'b': %s" %
-                             str(fmt.axes))
+        formats: sequence
+          A sequence of the above values' Formats
+        '''
 
-        self.value_to_monitor = value_to_monitor
-        self._format = fmt
+        #
+        # Checks args
+        #
 
-    def on_batch(self, input_batch, monitored_value_batch):
-        self._format.check(monitored_value_batch)
-        self._on_batch(input_batch, monitored_value_batch)
+        assert_is_instance(values_to_monitor, Sequence)
+        assert_is_instance(formats, Sequence)
 
-    def _on_batch(self, input_batch, monitored_value_batch):
+        for value, fmt in safe_izip(values_to_monitor, formats):
+            assert_is_instance(value, theano.gof.Variable)
+            assert_is_instance(fmt, Format)
+
+            if 'b' not in fmt.axes:
+                raise ValueError("format.axes doesn't contain batch axis "
+                                 "'b': %s" % str(fmt.axes))
+
+        #
+        # Sets members
+        #
+
+        self.monitored_values = tuple(values_to_monitor)
+        self._formats = tuple(formats)
+
+    def on_batch(self, input_batches, monitored_value_batches):
+        assert_equal(len(monitored_value_batches), len(self._formats))
+
+        for batch, fmt in safe_izip(monitored_value_batches, self._formats):
+            fmt.check(batch)
+
+        self._on_batch(input_batches, monitored_value_batches)
+
+    def _on_batch(self, input_batches, monitored_value_batches):
         raise NotImplementedError("%s._on_batch() not yet implemented." %
                                   type(self))
 
 
 class AverageMonitor(TrainingMonitor):
-    def __init__(self, value_to_monitor, value_format=None):
-        if value_format is None:
-            if value_to_monitor.ndim != 1:
-                raise ValueError("Must supply a format when monitoring "
-                                 "multidimensional values (ndim is %d)."
-                                 % value_to_monitor.ndim)
-            value_format = DenseFormat(axes=('b',),
-                                       shape=(),
-                                       dtype=value_to_monitor.dtype)
-
-        super(AverageMonitor, self).__init__(value_to_monitor, value_format)
-        self._total = value_format.make_batch(batch_size=1)
+    def __init__(self, values_to_monitor, formats):
+        super(AverageMonitor, self).__init__(values_to_monitor, formats)
+        self._totals = None
         self._count = 0
         self.average = None
 
-    def _on_batch(self, input_batch, monitored_value_batch):
-        batch_axis = self._format.axes.index('b')
-        self._total += numpy.sum(monitored_value_batch, axis=batch_axis)
+    def _on_batch(self, input_batches, monitored_value_batches):
+        if self._totals is None:
+            self._totals = []
+            for batch, fmt in safe_izip(monitored_value_batches,
+                                        self._formats):
+                batch_axis = fmt.axes.index('b')
+                self._totals.append(numpy.sum(batch, axis=batch_axis))
+        else:
+            for total, batch, fmt in safe_izip(self._totals,
+                                               monitored_value_batches,
+                                               self._formats):
+                batch_axis = fmt.axes.index('b')
+                total += numpy.sum(batch, axis=batch_axis)
 
     def on_epoch(self):
         if self._count != 0:
-            self.average = self._total / self._count
+            self.average = tuple(total / self._count for total in self._totals)
 
-        self._total[...] = 0.0
+        self._totals = None
         self._count = 0
 
 
-class MaxMonitor(TrainingMonitor):
-    """
-    Keeps track of the N largest values of some f(x), along with inputs x.
+# class MaxMonitor(TrainingMonitor):
+#     """
+#     Keeps track of the N largest values of some f(x), along with inputs x.
 
-    The list of values gets cleared after each epoch.
-    """
+#     The list of values gets cleared after each epoch.
+#     """
 
-    def __init__(self, value_to_monitor, top_n=1):
-        fmt = DenseFormat(shape=(), axes=('b',), dtype=value_to_monitor.dtype)
-        super(MaxMonitor, self).__init__(value_to_monitor, fmt)
+#     def __init__(self, value_to_monitor, top_n=1):
+#         fmt = DenseFormat(shape=(), axes=('b',), dtype=value_to_monitor.dtype)
+#         super(MaxMonitor, self).__init__(value_to_monitor, fmt)
 
-        # assert_equal(value_to_monitor.ndim, 1)
-        assert_greater(top_n, 0)
+#         # assert_equal(value_to_monitor.ndim, 1)
+#         assert_greater(top_n, 0)
 
-        self.maxes = fmt.make_batch(is_symbolic=False, batch_size=0)
-        self._top_n = top_n
+#         self.maxes = fmt.make_batch(is_symbolic=False, batch_size=0)
+#         self._top_n = top_n
 
-    def _on_batch(self, input_batch, monitored_value_batch):
-        batch_axis = self._format.axes.index('b')
-        batch_max = numpy.max(monitored_value_batch, axis=batch_axis)
+#     def _on_batch(self, input_batch, *monitored_value_batches):
+#         batch_axis = self._format.axes.index('b')
+#         batch_max = numpy.max(monitored_value_batch, axis=batch_axis)
 
-        indices = numpy.searchsorted(self.maxes, batch_max)
-        assert len(indices) == 1
+#         indices = numpy.searchsorted(self.maxes, batch_max)
+#         assert len(indices) == 1
 
-        if len(self.maxes) < self._top_n or indices[0] > 0:
-            self.maxes = numpy.insert(self.maxes, indices, (batch_max, ))
-            if len(self.maxes) == self._top_n:
-                self.maxes = self.maxes[1:]
+#         if len(self.maxes) < self._top_n or indices[0] > 0:
+#             self.maxes = numpy.insert(self.maxes, indices, (batch_max, ))
+#             if len(self.maxes) == self._top_n:
+#                 self.maxes = self.maxes[1:]
 
-        assert len(self.maxes) <= self._top_n
+#         assert len(self.maxes) <= self._top_n
 
-    def on_epoch(self):
-        self.maxes = self._format.make_batch(is_symbolic=False, batch_size=0)
+#     def on_epoch(self):
+#         self.maxes = self._format.make_batch(is_symbolic=False, batch_size=0)
 
 
 # class ComputesAverageOverEpoch_old(object):
@@ -302,33 +331,56 @@ class StopsOnStagnation(AverageMonitor):
     Halts training if the average of f(x) over an epoch stops decreasing.
     """
 
-    def __init__(self, value_to_monitor, num_epochs, min_decrease=0.0):
+    def __init__(self,
+                 value_to_monitor,
+                 value_format,
+                 num_epochs,
+                 min_decrease=0.0,
+                 value_name=None):
         '''
         Parameters
         ----------
         value_to_monitor: theano expression
           Some f(x) (x is the data iterator output batch).
 
+        value_format: Format
+          Data format of value_to_monitor
+
         num_epochs: int
           maximum number of epochs to wait for average f to decrease.
 
         min_decrease: float
           minimum decrease in avg f needed for it to count as a decrease.
+
+        value_name: str
+          If value_to_monitor doesn't have a name, specify it here.
         '''
 
         check_is_subdtype(num_epochs, 'num_epochs', numpy.integer)
         assert_greater(num_epochs, 0)
         check_is_subdtype(min_decrease, 'min_decrease', numpy.floating)
         assert_greater_equal(min_decrease, 0.0)
+        assert_not_equal(value_to_monitor.name is None,
+                         value_name is None,
+                         ("value_to_monitor.name was specified. No need to "
+                          "provide value_name argument"
+                          if value_to_monitor.name is not None
+                          else ("when value_to_monitor has no name, you must "
+                                "provide a <name> argument.")))
 
-        super(StopsOnStagnation, self).__init__(value_to_monitor)
+        super(StopsOnStagnation, self).__init__([value_to_monitor],
+                                                [value_format])
 
         self._max_epochs_since_min = num_epochs
         self._epochs_since_min = 0
         self._min_decrease = min_decrease
         self._min_value = numpy.inf
+        self._value_name = (value_to_monitor.name
+                            if value_to_monitor.name is not None
+                            else value_name)
 
     def on_epoch(self):
+        # Computes average value over epoch
         super(StopsOnStagnation, self).on_epoch()
 
         if self._min_value - self.average > self._min_decrease:
@@ -340,7 +392,8 @@ class StopsOnStagnation(AverageMonitor):
         if self._epochs_since_min > self._max_epochs_since_min:
             raise StopTraining(status='ok',
                                message=("%s didn't decrease for %d epochs." %
-                                        (self._name, self._epochs_since_min)))
+                                        (self.monitored_values[0].name,
+                                         self._epochs_since_min)))
 
 
 # class StopsOnStagnation_old(object):
@@ -469,8 +522,10 @@ class SgdParameterUpdater(object):
         assert_greater_equal(momentum, 0)
         assert_is_instance(use_nesterov, bool)
 
-        if str(gradient.dtype) != str(theano.config.floatX):
-            gradient = theano.tensor.cast(gradient, theano.config.floatX)
+        floatX = theano.config.floatX
+
+        if str(gradient.dtype) != str(floatX):
+            gradient = theano.tensor.cast(gradient, floatX)
 
         #
         # define updates, set members
@@ -483,8 +538,7 @@ class SgdParameterUpdater(object):
                 return str0 + str1
 
         def make_shared_floatX(numeric_var, name):
-            return theano.shared(numpy.asarray(numeric_var,
-                                               dtype=theano.config.floatX),
+            return theano.shared(numpy.asarray(numeric_var, dtype=floatX),
                                  name=name)
 
         self.learning_rate = make_shared_floatX(learning_rate,
@@ -500,8 +554,8 @@ class SgdParameterUpdater(object):
 
         new_velocity = (self.momentum * self._velocity -
                         self.learning_rate * gradient)
-        # pdb.set_trace()
-        assert_equal(str(new_velocity.dtype), theano.config.floatX)
+
+        assert_equal(str(new_velocity.dtype), str(floatX))
         new_velocity.name = concat('new ', self._velocity.name)
 
         step = (self.momentum * new_velocity - self.learning_rate * gradient
@@ -660,14 +714,17 @@ class Sgd(object):
 
         assert_is_instance(cost, theano.gof.Variable)
 
+        assert_is_instance(inputs, Sequence)
         for input_symbol in inputs:
             assert_is_instance(input_symbol, theano.gof.Variable)
 
+        assert_is_instance(parameters, Sequence)
+        assert_is_instance(parameter_updaters, Sequence)
         for parameter, updater in safe_izip(parameters, parameter_updaters):
             assert_is_instance(parameter,
                                theano.tensor.sharedvar.SharedVariable)
 
-            assert_is_instance(updater, GradientBasedParameterUpdater)
+            assert_is_instance(updater, SgdParameterUpdater)
 
             assert_in(parameter, updater.updates)
 
@@ -675,9 +732,11 @@ class Sgd(object):
 
         assert_true(input_iterator.next_is_new_epoch())
 
+        assert_is_instance(monitors, Sequence)
         for monitor in monitors:
             assert_is_instance(monitor, TrainingMonitor)
 
+        assert_is_instance(epoch_callbacks, Sequence)
         for epoch_callback in epoch_callbacks:
             assert_is_instance(epoch_callback, EpochCallback)
 
@@ -691,9 +750,13 @@ class Sgd(object):
         self._monitors = tuple(monitors)
 
         def compile_update_function():
-            outputs = [cost, ] + [m.monitored_value for m in monitors]
-            updates = {}
+            outputs = [cost]
+            for monitor in monitors:
+                outputs.extend(monitor.monitored_values)
+
+            updates = OrderedDict()
             for updater in parameter_updaters:
+                assert_is_instance(updater.updates, OrderedDict)
                 updates.update(updater.updates)
 
             return theano.function(inputs, outputs, updates=updates)
@@ -704,7 +767,7 @@ class Sgd(object):
         assert_equal(len(repeated_callbacks),
                      0,
                      "There were duplicate entries between monitors and "
-                     "epoch_callbacks: " % str(repeated_callbacks))
+                     "epoch_callbacks: %s" % str(repeated_callbacks))
 
         # These get called once before any training, and after each epoch
         # thereafter. One of them must halt the training at some point by
@@ -734,21 +797,32 @@ class Sgd(object):
             while True:
 
                 # gets batch of data
-                cost_arguments = self._input_iterator.get_next_batch()
+                cost_arguments = self._input_iterator.next()
 
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
-                outputs = self.update_function(*cost_arguments)
+                outputs = self._update_function(*cost_arguments)
 
                 # updates monitors
-                for monitor, monitored_value in safe_izip(self._monitors,
-                                                          outputs[1:]):
-                    monitor.on_batch(monitored_value)
+                output_index = 1
+                for monitor in self._monitors:
+                    new_output_index = (output_index +
+                                        len(monitor.monitored_values))
+                    assert_less_equal(new_output_index, len(outputs))
+                    monitored_values = outputs[output_index:new_output_index]
+                    # pdb.set_trace()
+                    monitor.on_batch(cost_arguments, monitored_values)
+
+                    output_index = new_output_index
+
+                # for monitor, monitored_value in safe_izip(self._monitors,
+                #                                           outputs[1:]):
+                #     monitor.on_batch(monitored_value)
 
                 # calls epoch callbacks, if we've iterated through an epoch
                 if self._input_iterator.next_is_new_epoch():
-                    for callback in all_callbacks():
-                        callback()
+                    for callback in all_callbacks:
+                        callback.on_epoch()
 
         except StopTraining, exception:
             if exception.status == 'ok':

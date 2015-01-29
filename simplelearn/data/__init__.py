@@ -76,13 +76,14 @@ class DataIterator(object):
         """
 
         if not self._next_was_called:
-            if not next_is_new_epoch():
+            if not self.next_is_new_epoch():
                 raise ValueError("%s.next_is_new_epoch() implemented "
                                  "incorrectly: if next() hasn't yet been "
                                  "called, next_is_new_epoch() must return "
                                  "True. (It returned False.)")
 
-        self._batch = self._next()
+        # self._batch = self._next()
+        result = self._next()
 
         if not isinstance(result, tuple) or \
            not all(Format.is_numeric(r) for r in result):
@@ -91,7 +92,7 @@ class DataIterator(object):
                             "something else.")
 
         self._next_was_called = True
-        return self.batch()
+        return result
 
     def _next(self):
         """
