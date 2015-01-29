@@ -5,7 +5,7 @@ Uses SgdParameterUpdater to perform gradient descent of a 2D point in a
 quadratic energy basin, and plots the path of the point over time.
 '''
 
-import sys
+import sys, argparse
 import numpy
 import theano
 from matplotlib import pyplot
@@ -21,6 +21,39 @@ from simplelearn.training import (TrainingMonitor,
                                   SgdParameterUpdater,
                                   Sgd)
 import pdb
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+                description=("Simple demo of stochastic gradient descent, "
+                             "with and without Nesterov's accelerated "
+                             "gradients."))
+    parser.add_argument("--use-trainer",
+                        type=bool,
+                        default=False,
+                        help=("If True, use simplelearn.training.Sgd trainer. "
+                              "If False, use a bare simplelearn.training."
+                              "SgdParameterUpdater object. These two should "
+                              "produce equivalent results if --lambda-scaling "
+                              "and --momentum-scaling aren't provided."))
+
+    parser.add_argument("--max-iters",
+                        type=int,
+                        default=100,
+                        help=("Stop optimization after this many iterations."))
+
+    parser.add_argument("--lambda-range",
+                        nargs=2,
+                        default=[0.001, .05],
+                        help=("Min & max learning rate values."))
+
+    parser.add_argument("--momentum-range",
+                        nargs=2,
+                        default=[0.0, 1.0],
+                        help=("Min & max momentum values."))
+
+    result = parser.parse_args()
+    return result
 
 
 class DummyIterator(DataIterator):
@@ -52,16 +85,7 @@ class RecordingMonitor(TrainingMonitor):
             self.logs = [[batch] for batch in value_batches]
         else:
             for log, batch in safe_izip(self.logs, value_batches):
-                # Extends log along the batch axis, then copies batch into it.
                 log.append(batch)
-                # batch_axis = fmt.axes.index('b')
-                # new_shape = list(log.shape)
-                # new_shape[batch_axis] += batch.shape[batch_axis]
-                # log.resize(new_shape, refcheck=False)
-                # batch_slice = ((slice(None), ) * batch_axis +
-                #                (slice(batch_axis, None), ) +
-                #                (slice(None), ) * (log.ndim - 1 - batch_axis))
-                # log[batch_slice] = batch
 
     def on_epoch(self):
         if self.logs is not None:
@@ -127,13 +151,12 @@ def create_cost_batch(singular_values, angle, point):
     return theano.tensor.cast(batch_of_costs, theano.config.floatX)
 
 
-def optimize_without_trainer(point, update_function):
+def optimize_without_trainer(point, update_function, num_iterations):
     '''
     Returns a Nx2 matrix where each row is the [x, y] coordinates of an
     iteration of gradient descent.
     '''
 
-    num_iterations = 100
     outputs = numpy.zeros((num_iterations, 3))
 
     for output in outputs:
@@ -141,7 +164,7 @@ def optimize_without_trainer(point, update_function):
         output[2] = update_function()
 
     return outputs
-    # return numpy.vstack((numpy.arange(3), numpy.arange(3))).T
+
 
 def optimize_with_trainer(trainer, recording_monitor):
     recording_monitor.clear()
@@ -158,14 +181,12 @@ def optimize_with_trainer(trainer, recording_monitor):
 
     cost_log = cost_log[:, numpy.newaxis]
 
-    # assert_is_instance(trainer._epoch_callbacks[0], LimitsNumEpochs)
-
     return numpy.hstack((point_log, cost_log))
-    # cost_log = recording_monitor.logs[1][:, numpy.newaxis]
-    # return numpy.hstack((recording_monitor.logs[0], cost_log))
 
 
 def main():
+    args = parse_args()
+
     point = theano.shared(numpy.zeros((1, 2), dtype=theano.config.floatX))
     cost_batch = create_cost_batch(singular_values=(10, 2),
                                    angle=numpy.pi/4,
@@ -183,8 +204,12 @@ def main():
     floatX = numpy.dtype(theano.config.floatX)
     cast_to_floatX = numpy.cast[floatX]
 
-    momenta = cast_to_floatX(numpy.linspace(0.0, 1.0, 3))
-    learning_rates = cast_to_floatX(numpy.linspace(.001, .05, 4))
+    learning_rates = cast_to_floatX(numpy.linspace(args.lambda_range[0],
+                                                   args.lambda_range[1],
+                                                   4))
+    momenta = cast_to_floatX(numpy.linspace(args.momentum_range[0],
+                                            args.momentum_range[1],
+                                            3))
 
     figure, all_axes = pyplot.subplots(len(momenta),
                                        len(learning_rates),
@@ -240,8 +265,6 @@ def main():
         axes.plot(initial_point[0], initial_point[1], 'gx')
         axes.plot(0, 0, 'rx')
 
-    use_trainer = True
-
     for nesterov, line_style in safe_izip((False, True), ('r-,', 'g-,')):
         for momentum, axes_row in safe_izip(momenta, all_axes):
             for learning_rate, axes in safe_izip(learning_rates, axes_row):
@@ -255,7 +278,7 @@ def main():
 
                 point.set_value(initial_point[numpy.newaxis, :])
 
-                if use_trainer:
+                if args.use_trainer:
                     recording_monitor = \
                         RecordingMonitor((point, cost_batch),
                                          (DenseFormat(axes=('b', 'f'),
@@ -271,7 +294,8 @@ def main():
                                   parameter_updaters=[param_updater],
                                   input_iterator=DummyIterator(),
                                   monitors=[recording_monitor],
-                                  epoch_callbacks=[LimitsNumEpochs(200)])
+                                  epoch_callbacks=[LimitsNumEpochs(
+                                      args.max_iters)])
 
                     trajectory = optimize_with_trainer(trainer,
                                                        recording_monitor)
@@ -281,7 +305,8 @@ def main():
                                         cost_batch,
                                         updates=param_updater.updates)
                     trajectory = optimize_without_trainer(point,
-                                                          update_function)
+                                                          update_function,
+                                                          args.max_iters)
 
                 axes.plot(trajectory[:, 0], trajectory[:, 1], line_style)
 

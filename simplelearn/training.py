@@ -565,9 +565,9 @@ class SgdParameterUpdater(object):
         new_parameter = parameter + step
         new_parameter.name = concat('new ', parameter.name)
 
-        # fails
         self.updates = OrderedDict([(parameter, new_parameter),
                                     (self._velocity, new_velocity)])
+
 
 # class GradientBasedParameterUpdater(object):
 #     """
@@ -774,6 +774,9 @@ class Sgd(object):
         # throwing a StopTraining exception.
         self._epoch_callbacks = tuple(epoch_callbacks)
 
+        self._train_called = False
+
+
     def train(self):
         """
         Runs training until a StopTraining exception is raised.
@@ -781,6 +784,18 @@ class Sgd(object):
         Training runs indefinitely until one of self.epoch_callbacks raises
         a StopTraining exception.
         """
+
+        if self._train_called:
+            raise RuntimeError("train() has already been called on this %s. "
+                               "Re-running train() risks inadvertently "
+                               "carrying over implicit state from the "
+                               "previous training run, such as the direction "
+                               "of parameter updates (via the momentum "
+                               "term). Instead, instantiate a new copy of "
+                               "this %s and run train() on that." %
+                               (type(self), type(self)))
+
+        self._train_called = True
 
         if len(self._epoch_callbacks) + len(self._monitors) == 0:
             raise RuntimeError("self._monitors and self._epoch_callbacks are "
