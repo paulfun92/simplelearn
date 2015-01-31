@@ -4,7 +4,7 @@
 Steps through the iterations of a simple 2D->1D linear regression problem.
 '''
 
-import sys, argparse
+import argparse
 
 from matplotlib import pyplot
 from nose.tools import (assert_equal,
@@ -12,7 +12,7 @@ from nose.tools import (assert_equal,
                         assert_greater,
                         assert_greater_equal,
                         assert_is_instance)
-
+import theano
 from simplelearn.utils import check_is_subdtype
 
 import pdb
@@ -41,10 +41,16 @@ def parse_args():
                         help=("The number of points in the validation set."))
 
     result = parser.parse_args()
+    return result
 
 
 def main():
     args = parse_args()
+
+    floatX = numpy.dtype(theano.config.floatX)
+
+    ground_truth_node = AffineTransform(2, 1, dtype=floatX)
+    ground_truth_node.weights.set_value(
 
 
 if __name__ == '__main__':

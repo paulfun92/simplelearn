@@ -10,30 +10,9 @@ __license__ = "Apache 2.0"
 
 import numpy
 import theano
+from nose.tools import assert_is_instance, assert_in
 from simplelearn.utils import safe_izip
 from simplelearn.formats import Format, DenseFormat
-
-
-# def make_shared_variable(initial_value, name=None):
-#     """
-#     Creates a shared variable, initializing its contents with initial_value.
-
-#     Parameters
-#     ----------
-#     initial_value: numpy array
-#       Determines shape, dtype, and initial value of the return value.
-
-#     name: str or None
-#       If provided, the return value's name will be set to this.
-
-#     Returns
-#     -------
-#     rval: theano shared variable.
-#     """
-#     # pylint: disable=protected-access
-#     return theano.shared(theano._asarray(initial_value,
-#                                          dtype=initial_value.dtype),
-#                          name=name)
 
 
 class Node(object):
@@ -49,27 +28,15 @@ class Node(object):
     """
 
     def __init__(self, output_symbol, output_format, *input_nodes):
-        if not isinstance(output_symbol, theano.gof.Variable):
-            raise TypeError("Expected output_symbol to be a theano variable, "
-                            "not a %s." % type(output_symbol))
-
-        if not isinstance(output_format, Format):
-            raise TypeError("Expected output_format to be an instance of "
-                            "Format, not %s." % type(output_format))
+        assert_is_instance(output_symbol, theano.gof.Variable)
+        assert_is_instance(output_format, Format)
 
         for input_node in input_nodes:
-            if not isinstance(input_node, Node):
-                raise TypeError("Expected input_nodes to be Nodes, but got a "
-                                "%s." % type(input_node))
+            assert_is_instance(input_node, Node)
 
         self.inputs = input_nodes
         self.output_format = output_format
         self.output_symbol = output_symbol
-
-    # def compile_function(self):
-    #     inputs = tuple(x.make_batch(is_symbolic=True)
-    #                    for x in self.inputs)
-    #     return theano.function(inputs, self.output_symbol)
 
 
 class InputNode(Node):
@@ -87,21 +54,26 @@ class InputNode(Node):
 
 class Function1dTo1d(Node):
     """
-    Represents a 1-D function of 1-D vectors.
+    Represents a vector-valued function of vectors.
 
-    Internally reshapes input to a 2-D matrix, independently computes
-    a function of each row, then reshapes the result to the output format.
+    Takes the input, reshapes it into a matrix[batch_index, feature_index],
+    and computes the output using a vector-valued function of the rows.
+
+    This output matrix is then reshaped to the desired output_format.
     """
 
     @staticmethod
     def _get_bf_shape(fmt):
         """
         Returns the shape of an equivalent format with ('b', 'f') axes.
+
+        Does this by collapsing all axes other than 'b' into a single axis 'f'.
         """
 
-        non_b_sizes = [fmt.shape[fmt.axes.index(a)] for a in fmt.axes]
+        non_b_sizes = [fmt.shape[fmt.axes.index(a)]
+                       for a in fmt.axes if a != 'b']
         f_size = numpy.prod(non_b_sizes)
-        b_size = fmt.axes.index('b')
+        b_size = fmt.shape[fmt.axes.index('b')]
         return (b_size, f_size)
 
     def __init__(self, output_format, input_node):
@@ -110,24 +82,19 @@ class Function1dTo1d(Node):
         axes.
         """
 
-        #
-        # Checks that input and output axes contain 'b' and 'f'.
-        #
+        assert_is_instance(output_format, Format)
+        assert_is_instance(input_node, Node)
 
-        input_format = input_node.format
+        input_format = input_node.output_format
         input_axes = input_format.axes
         output_axes = output_format.axes
 
-        for expected_axis in ('b', 'f'):
-            for (format_axes,
-                 format_name) in safe_izip((input_axes, output_axes),
-                                           ('input', 'output')):
-                if expected_axis not in format_axes:
-                    raise ValueError("Expected %s format's axes to contain "
-                                     "axis '%s', but it didn't: %s." %
-                                     (format_name,
-                                      expected_axis,
-                                      str(format_axes)))
+        #
+        # Checks that input and output axes contain 'b', the batch axis.
+        #
+
+        assert_in('b', input_axes)
+        assert_in('b', output_axes)
 
         #
         # Creates equivalent bf format to input format.
@@ -135,26 +102,23 @@ class Function1dTo1d(Node):
 
         get_bf_shape = Function1dTo1d._get_bf_shape
 
-        bf_shape = get_bf_shape(input_node.output_format)
-        if get_bf_shape(output_format) != bf_shape:
-            raise ValueError("Total size of non-batch axes of input and "
-                             "output formats don't match (%d vs %d)."
-                             % (bf_shape[0], get_bf_shape(output_format)[0]))
-
-        bf_format = DenseFormat(axes=('b', 'f'),
-                                shape=bf_shape,
-                                dtype=input_format.dtype)
+        input_bf_format = DenseFormat(axes=('b', 'f'),
+                                      shape=get_bf_shape(input_format),
+                                      dtype=input_format.dtype)
 
         #
-        # Creates axis mappings to and from bf_format
+        # Creates axis mappings to and from input_bf_format
         #
 
-        input_b_axes = tuple(a for a in input_axes if a != 'f')
-        input_to_bf_map = {'f': 'f',
-                           input_b_axes: 'b'}
-        output_b_axes = tuple(a for a in output_format.axes if a != 'f')
-        bf_to_output_map = {'f': 'f',
-                            'b': output_b_axes}
+        # input_b_axes = tuple(a for a in input_axes if a != 'f')
+        input_non_b_axes = tuple(a for a in input_axes if a != 'b')
+        input_to_bf_map = {input_non_b_axes: 'f',
+                           'b': 'b'}
+
+        # output_b_axes = tuple(a for a in output_format.axes if a != 'f')
+        output_non_b_axes = tuple(a for a in output_format.axes if a != 'b')
+        bf_to_output_map = {'f': output_non_b_axes,
+                            'b': 'b'}
 
         #
         # Creates this node's function/output symbol.
@@ -163,17 +127,21 @@ class Function1dTo1d(Node):
         input_symbol = input_node.output_symbol
 
         # format input to bf_format
-        bf_symbol = input_format.convert(input_symbol,
-                                         bf_format,
-                                         axis_map=input_to_bf_map)
+        input_bf_symbol = input_format.convert(input_symbol,
+                                               input_bf_format,
+                                               axis_map=input_to_bf_map)
 
         # compute function of feature vectors
-        bf_symbol = self._get_function_of_rows(bf_symbol)
+        output_bf_symbol = self._get_function_of_rows(input_bf_symbol)
 
         # format to output format
-        output_symbol = bf_format.convert(bf_symbol,
-                                          output_format,
-                                          axis_map=bf_to_output_map)
+        output_bf_format = DenseFormat(axes=('b', 'f'),
+                                       shape=get_bf_shape(output_format),
+                                       dtype=output_format.dtype)
+
+        output_symbol = output_bf_format.convert(output_bf_symbol,
+                                                 output_format,
+                                                 axis_map=bf_to_output_map)
 
         super(Function1dTo1d, self).__init__(output_symbol,
                                              output_format,
@@ -193,27 +161,63 @@ class Function1dTo1d(Node):
 class Linear(Function1dTo1d):
 
     def __init__(self, output_format, input_node):
-        super(Linear, self).__init__(output_format, input_node)
-
         get_bf_shape = Function1dTo1d._get_bf_shape
 
-        num_input_features = get_bf_shape(input_node.format)[1]
+        num_input_features = get_bf_shape(input_node.output_format)[1]
         num_output_features = get_bf_shape(output_format)[1]
 
-        weights = numpy.zeros((num_input_features, num_output_features),
-                              dtype=output_format.dtype)
-        self.weights = theano.shared(weights)
-        # self.weights = make_shared_variable(weights)
+        params = numpy.zeros((num_input_features, num_output_features),
+                             dtype=output_format.dtype)
+        self.params = theano.shared(params)
+
+        super(Linear, self).__init__(output_format, input_node)
 
     def _get_function_of_rows(self, rows_symbol):
         """
-        Returns dot(X, W), where X is the input, and W are self.weights.
+        Returns dot(X, W), where X is the input, and W are self.params.
 
         Parameters
         ----------
         rows_symbol: X, a theano 2D tensor
+
+        Returns
+        -------
+        rval: a theano 2D tensor
+          rval[i, :] := dot(rows_symbol[i, :], W)
         """
-        return theano.tensor.dot(rows_symbol, self.weights)
+        return theano.tensor.dot(rows_symbol, self.params)
+
+
+class AddBias(Function1dTo1d):
+
+    def __init__(self, output_format, input_node):
+        super(AddBias, self).__init__(output_format, input_node)
+
+        get_bf_shape = Function1dTo1d._get_bf_shape
+
+        num_input_features = get_bf_shape(input_node.output_format)[1]
+        num_output_features = get_bf_shape(output_format)[1]
+
+        assert_equal(num_output_features, num_input_features)
+
+        params = numpy.zeros((1, num_output_features),
+                             dtype=output_format.dtype,
+                             broadcastable=[True, False])
+
+        self.params = theano.shared(params)
+
+    def _get_function_of_rows(self, rows_symbol):
+        return rows_symbol + self.params
+
+
+class AffineTransform(Function1dTo1d):
+    def __init__(self, output_format, input_node):
+        self.linear_node = Linear(output_format, input_node)
+        self.bias_node = AddBias(self.linear_mode.output_format,
+                                 self.linear_mode)
+
+    def get_function_of_rows(self, rows_symbol):
+        return self.bias_node.output_symbol
 
 
 class Softmax(Function1dTo1d):

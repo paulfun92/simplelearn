@@ -15,11 +15,12 @@ __license__ = "Apache 2.0"
 
 
 import numpy
+from nose.tools import assert_equal, assert_greater_equal, assert_is_instance
 import theano
 from theano.gof.op import get_debug_values
 from theano.tensor import TensorType
 from theano.sandbox.cuda.type import CudaNdarrayType
-from simplelearn.utils import safe_izip, flatten
+from simplelearn.utils import safe_izip, flatten, check_is_subdtype
 
 
 class Format(object):
@@ -246,22 +247,15 @@ class Format(object):
           Omit if is_symbolic is False.
         """
 
-        # Sanity-checks batch_size
-        if batch_size is not None:
-            if not numpy.issubdtype(type(batch_size), numpy.integer):
-                raise TypeError("batch_size must be an integer, not a %s." %
-                                type(batch_size))
-            elif batch_size < 0:
-                raise ValueError("batch_size must be non-negative, not %d." %
-                                 batch_size)
+        assert_is_instance(is_symbolic, bool)
 
         # checks is_symbolic vs batch_size
-        # if is_symbolic and batch_size is not None:
-        #     raise ValueError("Can't supply a batch_size when is_symbolic "
-        #                      "is True.")
-        if not is_symbolic and batch_size is None:
-            raise ValueError("Must supply a batch_size when is_symbolic "
-                             "is False.")
+        assert_equal(is_symbolic, batch_size is None)
+
+        # Sanity-checks batch_size
+        if not is_symbolic:
+            check_is_subdtype(batch_size, 'batch_size', numpy.integer)
+            assert_greater_equal(batch_size, 0)
 
         # checks is_symbolic vs name
         if not is_symbolic and name is not None:
@@ -613,13 +607,13 @@ class DenseFormat(Format):
             for implicit_axis in implicit_keys:
                 result[implicit_axis] = implicit_axis
 
-            assert frozenset(flatten(result.iterkeys())) == source_axes
-            assert frozenset(flatten(result.itervalues())) == target_axes
+            assert_equal(frozenset(flatten(result.iterkeys())), source_axes)
+            assert_equal(frozenset(flatten(result.itervalues())), target_axes)
 
             return result
 
         def transpose(batch, from_axes, to_axes):
-            assert frozenset(from_axes) == frozenset(to_axes)
+            assert_equal(frozenset(from_axes), frozenset(to_axes))
 
             for axes in (from_axes, to_axes):
                 assert all(isinstance(axis, str) for axis in axes)
@@ -650,6 +644,8 @@ class DenseFormat(Format):
         if output_batch is not None:
             output_batch[...] = batch
             return output_batch
+        elif target_format.dtype is None:
+            return batch
         else:
             if self.is_symbolic(batch):
                 return theano.tensor.cast(batch, str(target_format.dtype))
@@ -658,9 +654,11 @@ class DenseFormat(Format):
 
     def _is_equivalent(self, target_format):
         for fmt in (self, target_format):
-            assert isinstance(fmt.dtype, numpy.dtype)
-            assert isinstance(fmt.axes, tuple)
-            assert isinstance(fmt.shape, tuple)
+            if fmt.dtype is not None:
+                assert_is_instance(fmt.dtype, numpy.dtype)
+
+            assert_is_instance(fmt.axes, tuple)
+            assert_is_instance(fmt.shape, tuple)
 
         return (self.dtype == target_format.dtype and
                 self.axes == target_format.axes and
