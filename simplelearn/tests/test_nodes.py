@@ -5,7 +5,12 @@ Tests for simplelearn.nodes
 import numpy
 import theano
 from numpy.testing import assert_allclose
-from simplelearn.nodes import (InputNode, Linear, AddBias, Function1dTo1d)
+from nose.tools import assert_is_instance, assert_equal
+from simplelearn.nodes import (Node,
+                               InputNode,
+                               Linear,
+                               Bias,
+                               Function1dTo1d)
 from simplelearn.formats import DenseFormat
 
 from unittest import TestCase
@@ -24,8 +29,8 @@ class DummyFunction1dTo1d(Function1dTo1d):
 class Function1dTo1dTester(TestCase):
     def setUp(self):
         input_format = DenseFormat(axes=('0', 'b', '1'),
-                                        shape=(3, -1, 4),
-                                        dtype=theano.config.floatX)
+                                   shape=(3, -1, 4),
+                                   dtype=theano.config.floatX)
 
         self.input_node = InputNode(input_format)
 
@@ -33,7 +38,11 @@ class Function1dTo1dTester(TestCase):
                                     shape=(6, -1, 2),
                                     dtype=None)
 
-        self.node = DummyFunction1dTo1d(output_format, self.input_node)
+        self.node = self._make_node(output_format, self.input_node)
+        assert_is_instance(self.node, Node)
+
+    def _make_node(self, output_format, input_node):
+        return DummyFunction1dTo1d(output_format, input_node)
 
     def expected_function1dTo1d(self, rows):
         return rows
@@ -45,20 +54,18 @@ class Function1dTo1dTester(TestCase):
         input_mat = input_batch.reshape((input_batch.shape[0],
                                          numpy.prod(input_batch.shape[1:])))
 
-        # output_mat = numpy.dot(input_mat, linear.params.get_value())
-        # output_mat = input_mat
         output_mat = self.expected_function1dTo1d(input_mat)
 
-        # output_format = self.node.output_format
-        output_axes = self.node.output_format.axes
-        non_b_axes = [a for a in output_axes if a != 'b']
-        non_b_shape = [self.node.output_format.shape[output_axes.index(a)]
-                       for a in non_b_axes]
+        output_format = self.node.output_format
+        non_b_axes = [a for a in output_format.axes if a != 'b']
+        non_b_shape = \
+            [self.node.output_format.shape[output_format.axes.index(a)]
+             for a in non_b_axes]
 
         output_batch = output_mat.reshape([-1] + non_b_shape)
         output_axes = tuple(['b'] + non_b_axes)
         output_batch = output_batch.transpose([output_axes.index(a)
-                                               for a in output_axes])
+                                               for a in output_format.axes])
 
         return output_batch
 
@@ -83,109 +90,163 @@ class Function1dTo1dTester(TestCase):
             assert_allclose(output_batch, expected_output_batch)
 
 
+# def test_function1dto1d():
+#     input_format = DenseFormat(axes=('0', 'b', '1'),
+#                                shape=(3, -1, 4),
+#                                dtype=theano.config.floatX)
+
+#     input_node = InputNode(input_format)
+
+#     output_format = DenseFormat(axes=('k', 'b', 'f'),
+#                                 shape=(6, -1, 2),
+#                                 dtype=None)
+
+#     node = DummyFunction1dTo1d(output_format, input_node)
+
+#     def expected_function(input_batch):
+#         input_batch = input_batch.transpose([input_format.axes.index(a)
+#                                              for a in ('b', '0', '1')])
+#         input_mat = input_batch.reshape((input_batch.shape[0],
+#                                          numpy.prod(input_batch.shape[1:])))
+
+#         # output_mat = numpy.dot(input_mat, linear.params.get_value())
+#         output_mat = input_mat
+
+#         non_b_axes = [a for a in output_format.axes if a != 'b']
+#         non_b_shape = [output_format.shape[output_format.axes.index(a)]
+#                        for a in non_b_axes]
+
+#         output_batch = output_mat.reshape([-1] + non_b_shape)
+#         output_axes = tuple(['b'] + non_b_axes)
+#         output_batch = output_batch.transpose([output_axes.index(a)
+#                                                for a in output_format.axes])
+
+#         return output_batch
 
 
-def test_function1dto1d():
-    input_format = DenseFormat(axes=('0', 'b', '1'),
-                               shape=(3, -1, 4),
-                               dtype=theano.config.floatX)
+#     rng = numpy.random.RandomState(14141)
 
-    input_node = InputNode(input_format)
+#     node_function = theano.function([input_node.output_symbol],
+#                                     node.output_symbol)
 
-    output_format = DenseFormat(axes=('k', 'b', 'f'),
-                                shape=(6, -1, 2),
-                                dtype=None)
+#     batch_size = 5
 
-    node = DummyFunction1dTo1d(output_format, input_node)
+#     for _ in range(3):
+#         input_batch = input_format.make_batch(is_symbolic=False,
+#                                               batch_size=batch_size)
+#         input_batch[...] = rng.uniform(size=input_batch.shape)
 
-    def expected_function(input_batch):
-        input_batch = input_batch.transpose([input_format.axes.index(a)
-                                             for a in ('b', '0', '1')])
-        input_mat = input_batch.reshape((input_batch.shape[0],
-                                         numpy.prod(input_batch.shape[1:])))
+#         output_batch = node_function(input_batch)
+#         expected_output_batch = expected_function(input_batch)
 
-        # output_mat = numpy.dot(input_mat, linear.params.get_value())
-        output_mat = input_mat
+#         assert_allclose(output_batch, expected_output_batch)
 
-        non_b_axes = [a for a in output_format.axes if a != 'b']
-        non_b_shape = [output_format.shape[output_format.axes.index(a)]
-                       for a in non_b_axes]
+class LinearTester(Function1dTo1dTester):
 
-        output_batch = output_mat.reshape([-1] + non_b_shape)
-        output_axes = tuple(['b'] + non_b_axes)
-        output_batch = output_batch.transpose([output_axes.index(a)
-                                               for a in output_format.axes])
+    def _make_node(self, output_format, input_node):
+        return Linear(output_format, input_node)
 
-        return output_batch
+    def expected_function1dTo1d(self, rows):
+        return numpy.dot(rows, self.node.params.get_value())
 
 
-    rng = numpy.random.RandomState(14141)
+class BiasTester(Function1dTo1dTester):
+    def _make_node(self, output_format, input_node):
+        return Bias(output_format, input_node)
 
-    node_function = theano.function([input_node.output_symbol],
-                                    node.output_symbol)
+    def expected_function1dTo1d(self, rows):
+        params = self.node.params.get_value()
+        assert_equal(params.shape[0], 1)
+        assert_equal(rows.shape[1], params.shape[1])
 
-    batch_size = 5
+        return rows + self.node.params.get_value()
 
-    for _ in range(3):
-        input_batch = input_format.make_batch(is_symbolic=False,
-                                              batch_size=batch_size)
-        input_batch[...] = rng.uniform(size=input_batch.shape)
+def test_l2loss():
+    rng = numpy.random.RandomState(3523)
 
-        output_batch = node_function(input_batch)
-        expected_output_batch = expected_function(input_batch)
+    def expected_loss_function(arg0, arg1):
+        diff = arg0 - arg1
+        return (diff * diff).sum()
 
-        assert_allclose(output_batch, expected_output_batch)
+    def make_loss_function(vec_size):
+        fmt = DenseFormat(axes=('b', 'f'),
+                          shape=(-1, vec_size),
+                          dtype=theano.config.floatX)
+
+        input_node_a = InputNode(fmt)
+        input_node_b = InputNode(fmt)
+
+        diff = input_node_a.output_symbol - input_node_b.output_symbol
+        loss = (diff * diff).sum()
+
+        return theano.function([input_node_a.output_symbol,
+                                input_node_b.output_symbol],
+                               loss)
 
 
-def test_linear():
+    vec_size = 10
+    loss_function = make_loss_function(vec_size)
 
-    input_format = DenseFormat(axes=('0', 'b', '1'),
-                               shape=(3, -1, 4),
-                               dtype=theano.config.floatX)
+    cast_to_floatX = numpy.cast[theano.config.floatX]
 
-    input_node = InputNode(input_format)
+    for batch_size in xrange(4):
+        arg0 = cast_to_floatX(rng.uniform(size=(batch_size, vec_size)))
+        arg1 = cast_to_floatX(rng.uniform(size=(batch_size, vec_size)))
 
-    output_format = DenseFormat(axes=('k', 'b', 'f'),
-                                shape=(6, -1, 2),
-                                dtype=None)
+        expected_loss = expected_loss_function(arg0, arg1)
+        loss = loss_function(arg0, arg1)
 
-    linear = Linear(output_format, input_node)
+        assert_allclose(loss, expected_loss)
 
-    def expected_function(input_batch):
-        input_batch = input_batch.transpose([input_format.axes.index(a)
-                                             for a in ('b', '0', '1')])
-        input_mat = input_batch.reshape((input_batch.shape[0],
-                                         numpy.prod(input_batch.shape[1:])))
+# def test_linear():
 
-        output_mat = numpy.dot(input_mat, linear.params.get_value())
+#     input_format = DenseFormat(axes=('0', 'b', '1'),
+#                                shape=(3, -1, 4),
+#                                dtype=theano.config.floatX)
 
-        non_b_axes = [a for a in output_format.axes if a != 'b']
-        non_b_shape = [output_format.shape[output_format.axes.index(a)]
-                       for a in non_b_axes]
+#     input_node = InputNode(input_format)
 
-        output_batch = output_mat.reshape([-1] + non_b_shape)
-        output_axes = tuple(['b'] + non_b_axes)
-        output_batch = output_batch.transpose([output_axes.index(a)
-                                               for a in output_format.axes])
+#     output_format = DenseFormat(axes=('k', 'b', 'f'),
+#                                 shape=(6, -1, 2),
+#                                 dtype=None)
 
-        return output_batch
+#     linear = Linear(output_format, input_node)
 
-    rng = numpy.random.RandomState(14141)
-    param_shape = linear.params.get_value().shape
+#     def expected_function(input_batch):
+#         input_batch = input_batch.transpose([input_format.axes.index(a)
+#                                              for a in ('b', '0', '1')])
+#         input_mat = input_batch.reshape((input_batch.shape[0],
+#                                          numpy.prod(input_batch.shape[1:])))
 
-    node_function = theano.function([input_node.output_symbol],
-                                    linear.output_symbol)
+#         output_mat = numpy.dot(input_mat, linear.params.get_value())
 
-    batch_size = 5
+#         non_b_axes = [a for a in output_format.axes if a != 'b']
+#         non_b_shape = [output_format.shape[output_format.axes.index(a)]
+#                        for a in non_b_axes]
 
-    for _ in range(3):
-        input_batch = input_format.make_batch(is_symbolic=False,
-                                              batch_size=batch_size)
-        input_batch[...] = rng.uniform(size=input_batch.shape)
+#         output_batch = output_mat.reshape([-1] + non_b_shape)
+#         output_axes = tuple(['b'] + non_b_axes)
+#         output_batch = output_batch.transpose([output_axes.index(a)
+#                                                for a in output_format.axes])
 
-        linear.params.set_value(rng.uniform(size=param_shape))
+#         return output_batch
 
-        output_batch = node_function(input_batch)
-        expected_output_batch = expected_function(input_batch)
+#     rng = numpy.random.RandomState(14141)
+#     param_shape = linear.params.get_value().shape
 
-        assert_allclose(output_batch, expected_output_batch)
+#     node_function = theano.function([input_node.output_symbol],
+#                                     linear.output_symbol)
+
+#     batch_size = 5
+
+#     for _ in range(3):
+#         input_batch = input_format.make_batch(is_symbolic=False,
+#                                               batch_size=batch_size)
+#         input_batch[...] = rng.uniform(size=input_batch.shape)
+
+#         linear.params.set_value(rng.uniform(size=param_shape))
+
+#         output_batch = node_function(input_batch)
+#         expected_output_batch = expected_function(input_batch)
+
+#         assert_allclose(output_batch, expected_output_batch)

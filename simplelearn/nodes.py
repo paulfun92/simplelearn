@@ -10,7 +10,7 @@ __license__ = "Apache 2.0"
 
 import numpy
 import theano
-from nose.tools import assert_is_instance, assert_in
+from nose.tools import assert_equal, assert_is_instance, assert_in
 from simplelearn.utils import safe_izip
 from simplelearn.formats import Format, DenseFormat
 
@@ -76,10 +76,25 @@ class Function1dTo1d(Node):
         b_size = fmt.shape[fmt.axes.index('b')]
         return (b_size, f_size)
 
-    def __init__(self, output_format, input_node):
+    def __init__(self,
+                 output_format,
+                 input_node,
+                 input_to_bf_map=None,
+                 bf_to_output_map=None):
         """
         Input node's format and output_format must both contain 'b' and 'f'
         axes.
+
+        Parameters
+        ----------
+        output_format: Format
+          Format of this node's output_symbol.
+
+        input_node: Node
+          Node that provides input to this Node.
+
+        input_to_bf_map: dict
+          A mapping from
         """
 
         assert_is_instance(output_format, Format)
@@ -110,15 +125,16 @@ class Function1dTo1d(Node):
         # Creates axis mappings to and from input_bf_format
         #
 
-        # input_b_axes = tuple(a for a in input_axes if a != 'f')
-        input_non_b_axes = tuple(a for a in input_axes if a != 'b')
-        input_to_bf_map = {input_non_b_axes: 'f',
-                           'b': 'b'}
+        if input_to_bf_map is None:
+            input_non_b_axes = tuple(a for a in input_axes if a != 'b')
+            input_to_bf_map = {input_non_b_axes: 'f',
+                               'b': 'b'}
 
-        # output_b_axes = tuple(a for a in output_format.axes if a != 'f')
-        output_non_b_axes = tuple(a for a in output_format.axes if a != 'b')
-        bf_to_output_map = {'f': output_non_b_axes,
-                            'b': 'b'}
+        if bf_to_output_map is None:
+            output_non_b_axes = tuple(a for a in output_format.axes
+                                      if a != 'b')
+            bf_to_output_map = {'f': output_non_b_axes,
+                                'b': 'b'}
 
         #
         # Creates this node's function/output symbol.
@@ -159,6 +175,9 @@ class Function1dTo1d(Node):
 
 
 class Linear(Function1dTo1d):
+    '''
+    Applies a linear transformation to the input.
+    '''
 
     def __init__(self, output_format, input_node):
         get_bf_shape = Function1dTo1d._get_bf_shape
@@ -188,11 +207,12 @@ class Linear(Function1dTo1d):
         return theano.tensor.dot(rows_symbol, self.params)
 
 
-class AddBias(Function1dTo1d):
+class Bias(Function1dTo1d):
+    '''
+    Adds a bias to the input.
+    '''
 
     def __init__(self, output_format, input_node):
-        super(AddBias, self).__init__(output_format, input_node)
-
         get_bf_shape = Function1dTo1d._get_bf_shape
 
         num_input_features = get_bf_shape(input_node.output_format)[1]
@@ -201,14 +221,27 @@ class AddBias(Function1dTo1d):
         assert_equal(num_output_features, num_input_features)
 
         params = numpy.zeros((1, num_output_features),
-                             dtype=output_format.dtype,
-                             broadcastable=[True, False])
+                             dtype=output_format.dtype)
 
-        self.params = theano.shared(params)
+        self.params = theano.shared(params, broadcastable=[True, False])
+        super(Bias, self).__init__(output_format, input_node)
 
     def _get_function_of_rows(self, rows_symbol):
         return rows_symbol + self.params
 
+
+class L2Loss(Node):
+    def __init__(self, input_node_a, input_node_b):
+        diff = input_node_a.output_symbol - input_node_b.output_symbol
+        output_symbol = (diff * diff).sum()
+        output_format = DenseFormat(axes=(),
+                                    shape=(),
+                                    dtype=None)
+
+        super(L2Loss, self).__init__(output_symbol,
+                                     output_format,
+                                     input_node_a,
+                                     input_node_b)
 
 class AffineTransform(Function1dTo1d):
     def __init__(self, output_format, input_node):
