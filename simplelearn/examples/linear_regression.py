@@ -82,6 +82,7 @@ def main():
 
         outputs = affine_transform(matrix, bias, inputs)
 
+        # pdb.set_trace()
         output_noise = rng.normal(scale=output_variance, size=outputs.shape)
 
         return inputs, outputs + output_noise
@@ -138,40 +139,38 @@ def main():
         return grid_xs, grid_ys, grid_zs
 
 
-    def get_bounding_cube(xs, ys, zs):
-        '''
-        Returns a tight bounding box around points given by xs, ys, and zs.
+    # def get_bounding_cube(xs, ys, zs):
+    #     '''
+    #     Returns a tight bounding box around points given by xs, ys, and zs.
 
-        Returns the x, y, and z coordinates of 8 corners of a tight
-        bounding box around xs, ys, and zs. Plot these using some invisible
-        color ('w') as a workaround to matplotlib's current inability to set
-        the aspect ratio of 3d plots to be equal.
-        '''
+    #     Returns the x, y, and z coordinates of 8 corners of a tight
+    #     bounding box around xs, ys, and zs. Plot these using some invisible
+    #     color ('w') as a workaround to matplotlib's current inability to set
+    #     the aspect ratio of 3d plots to be equal.
+    #     '''
 
-        mins = tuple(v.min() for v in (xs, ys, zs))
-        max_range = max(v.max() - v.min() for v in (xs, ys, zs))
+    #     mins = tuple(v.min() for v in (xs, ys, zs))
+    #     max_range = max(v.max() - v.min() for v in (xs, ys, zs))
 
-        cube_xs = []
-        cube_ys = []
-        cube_zs = []
+    #     cube_xs = []
+    #     cube_ys = []
+    #     cube_zs = []
 
-        for xi in range(2):
-            for yi in range(2):
-                for zi in range(2):
-                    cube_xs.append(mins[0] + max_range * xi)
-                    cube_ys.append(mins[1] + max_range * yi)
-                    cube_zs.append(mins[2] + max_range * zi)
+    #     for xi in range(2):
+    #         for yi in range(2):
+    #             for zi in range(2):
+    #                 cube_xs.append(mins[0] + max_range * xi)
+    #                 cube_ys.append(mins[1] + max_range * yi)
+    #                 cube_zs.append(mins[2] + max_range * zi)
 
-        return tuple(numpy.asarray(vs) for vs in (cube_xs,
-                                                  cube_ys,
-                                                  cube_zs))
+    #     return tuple(numpy.asarray(vs) for vs in (cube_xs,
+    #                                               cube_ys,
+    #                                               cube_zs))
 
     figure = pyplot.gcf()
     figure.set_size_inches(18, 6, forward=True)
-    points_axes = figure.add_subplot(1, 2, 1, projection='3d')
 
-    # This does nothing in matplotlib 1.8.1.
-    # It's apparently a long-standing bug.
+    points_axes = figure.add_subplot(1, 2, 1, projection='3d')
     points_axes.set_aspect('equal')
 
     loss_axes = figure.add_subplot(1, 2, 2)
@@ -182,16 +181,28 @@ def main():
                                          max_input,
                                          10))
 
-    points_axes.plot_surface(*ground_truth_plane)
+    points_axes.plot_surface(ground_truth_plane[0],
+                             ground_truth_plane[1],
+                             ground_truth_plane[2],
+                             color=[0, 1, 0, 0.5])  # translucent
 
-    z_ticks = 0.5 * numpy.arange(numpy.floor(ground_truth_plane[2].min() / 0.5),
-                                 numpy.ceil(ground_truth_plane[2].max() / 0.5))
+    z_ticks = (0.5 *
+               numpy.arange(numpy.floor(ground_truth_plane[2].min() / 0.5),
+                            numpy.ceil(ground_truth_plane[2].max() / 0.5)))
     points_axes.set_zticks(z_ticks)
-    # A workaround to the fact that set_aspect('equal') doesn't yet work in
-    # matplotlib 1.8.1. This was suggested here
-    # bounding_cube = get_bounding_cube(*ground_truth_plane)
-    # for bx, yx, zx in safe_izip(*bounding_cube):
-    #     points_axes.plot([bx], [yx], [zx], 'w')
+
+    points_axes.scatter(training_inputs[:, 0],
+                        training_inputs[:, 1],
+                        training_outputs,
+                        c='blue')
+
+    points_axes.scatter(testing_inputs[:, 0],
+                        testing_inputs[:, 1],
+                        testing_outputs,
+                        c='red')
+
+
+
 
     def on_key_press(event):
         if event.key == 'q':

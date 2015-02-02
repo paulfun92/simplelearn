@@ -30,6 +30,7 @@ def parse_args():
                 description=("Simple demo of stochastic gradient descent, "
                              "with and without Nesterov's accelerated "
                              "gradients."))
+
     parser.add_argument("--use-trainer",
                         type=bool,
                         default=False,
