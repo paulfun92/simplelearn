@@ -29,7 +29,7 @@ class Dataset(DataSource):
     """
 
     def __init__(self, names, formats, tensors):
-        if not all(len(x) == len(names) for x in (formats, tensors)):
+        if len(names) != len(formats) or len(names) != len(tensors):
             raise ValueError("Names, formats, and tensors must all have the "
                              "same length, but got %d, %d, and %d "
                              "respectively." %

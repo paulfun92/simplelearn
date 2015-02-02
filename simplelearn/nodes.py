@@ -13,7 +13,7 @@ import theano
 from nose.tools import assert_equal, assert_is_instance, assert_in
 from simplelearn.utils import safe_izip
 from simplelearn.formats import Format, DenseFormat
-
+import pdb
 
 class Node(object):
 
@@ -72,7 +72,7 @@ class Function1dTo1d(Node):
 
         non_b_sizes = [fmt.shape[fmt.axes.index(a)]
                        for a in fmt.axes if a != 'b']
-        f_size = numpy.prod(non_b_sizes)
+        f_size = 1 if len(non_b_sizes) == 0 else numpy.prod(non_b_sizes)
         b_size = fmt.shape[fmt.axes.index('b')]
         return (b_size, f_size)
 
@@ -127,14 +127,20 @@ class Function1dTo1d(Node):
 
         if input_to_bf_map is None:
             input_non_b_axes = tuple(a for a in input_axes if a != 'b')
-            input_to_bf_map = {input_non_b_axes: 'f',
-                               'b': 'b'}
+            if len(input_non_b_axes) == 0:
+                input_to_bf_map = {'b' : ('b', 'f')}
+            else:
+                input_to_bf_map = {input_non_b_axes: 'f',
+                                   'b': 'b'}
 
         if bf_to_output_map is None:
             output_non_b_axes = tuple(a for a in output_format.axes
                                       if a != 'b')
-            bf_to_output_map = {'f': output_non_b_axes,
-                                'b': 'b'}
+            if len(output_non_b_axes) == 0:
+                bf_to_output_map = {('b', 'f') : 'b'}
+            else:
+                bf_to_output_map = {'f': output_non_b_axes,
+                                    'b': 'b'}
 
         #
         # Creates this node's function/output symbol.
@@ -244,12 +250,24 @@ class L2Loss(Node):
                                      input_node_b)
 
 class AffineTransform(Function1dTo1d):
-    def __init__(self, output_format, input_node):
-        self.linear_node = Linear(output_format, input_node)
-        self.bias_node = AddBias(self.linear_mode.output_format,
-                                 self.linear_mode)
+    def __init__(self,
+                 output_format,
+                 input_node,
+                 input_to_bf_map=None,
+                 bf_to_output_map=None):
+        self.linear_node = Linear(input_node,
+                                  input_to_bf_map=input_to_bf_map)
 
-    def get_function_of_rows(self, rows_symbol):
+        # bias node's output format is the same as its input format
+        self.bias_node = Bias(self.linear_node,
+                              self.linear_node.output_format,
+                              bf_to_output_map=bf_to_output_map)
+
+        super(AffineTransform, self).__init__(bias_node.output_format,
+                                              bias_node,
+                                              bf_to_output_map)
+
+    def _get_function_of_rows(self, input_bf_symbol):
         return self.bias_node.output_symbol
 
 

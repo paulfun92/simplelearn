@@ -17,10 +17,11 @@ from nose.tools import (assert_equal,
                         assert_greater)
 
 import theano
-from simplelearn.nodes import AffineTransform
+from simplelearn.nodes import AffineTransform, L2Loss
 from simplelearn.utils import safe_izip
 from simplelearn.data.dataset import Dataset
 from simplelearn.formats import DenseFormat
+from simplelearn.training import SgdParameterUpdater, Sgd
 import pdb
 
 
@@ -71,7 +72,8 @@ def main():
                             max_input,
                             output_variance,
                             rng,
-                            num_points):
+                            num_points,
+                            dtype):
         num_dims = matrix.shape[0]
         assert_equal(len(min_input), num_dims)
         assert_equal(len(max_input), num_dims)
@@ -84,10 +86,11 @@ def main():
 
         outputs = affine_transform(matrix, bias, inputs)
 
-        # pdb.set_trace()
         output_noise = rng.normal(scale=output_variance, size=outputs.shape)
 
-        return inputs, outputs + output_noise
+        cast = numpy.cast[dtype]
+
+        return cast(inputs), cast(outputs + output_noise)
 
 
     rng = numpy.random.RandomState(352351)
@@ -106,7 +109,8 @@ def main():
                                                             max_input,
                                                             output_variance,
                                                             rng,
-                                                            args.training_size)
+                                                            args.training_size,
+                                                            floatX)
 
     testing_inputs, testing_outputs = make_random_dataset(matrix,
                                                           bias,
@@ -114,7 +118,8 @@ def main():
                                                           max_input,
                                                           output_variance,
                                                           rng,
-                                                          args.testing_size)
+                                                          args.testing_size,
+                                                          floatX)
 
     def make_grid(matrix,
                   bias,
@@ -189,19 +194,19 @@ def main():
                                                                  shape=[-1],
                                                                  dtype=None),
                                        input_node=input_node)
-    cost = L2Loss(input_node, label_node)
+    cost = L2Loss(affine_transform, label_node)
     grad = theano.gradient.grad
     parameter_udpaters = [SgdParameterUpdater(p,
-                                              grad(cost.output_node, p),
+                                              grad(cost.output_symbol, p),
                                               args.learning_rate,
                                               args.momentum,
                                               args.nesterov)
-                          for p in (affine_transform.linear_node.param,
-                                    affine_transform.bias_node.param)]
+                          for p in (affine_transform.linear_node.params,
+                                    affine_transform.bias_node.params)]
 
     def plot_model_surface():
-        xs, ys, zs = make_grid(affine_transform.linear.param.get_values(),
-                                   affine_transform.bias.param.get_values(),
+        xs, ys, zs = make_grid(affine_transform.linear.params.get_values(),
+                                   affine_transform.bias.params.get_values(),
                                    min_input,
                                    max_input,
                                    10)
@@ -212,8 +217,8 @@ def main():
 
     sgd = Sgd(cost=cost,
               inputs=[input_node, label_node],
-              parameters=[affine_transform.linear_node.param,
-                          affine_transform.bias_node.param],
+              parameters=[affine_transform.linear_node.params,
+                          affine_transform.bias_node.params],
               parameter_updaters=parameter_updaters,
               input_iterator=training_set.iterator(
                   iterator_type='sequential',
