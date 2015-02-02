@@ -19,6 +19,8 @@ from nose.tools import (assert_equal,
 import theano
 from simplelearn.nodes import AffineTransform
 from simplelearn.utils import safe_izip
+from simplelearn.data.dataset import Dataset
+from simplelearn.formats import DenseFormat
 import pdb
 
 
@@ -138,35 +140,6 @@ def main():
 
         return grid_xs, grid_ys, grid_zs
 
-
-    # def get_bounding_cube(xs, ys, zs):
-    #     '''
-    #     Returns a tight bounding box around points given by xs, ys, and zs.
-
-    #     Returns the x, y, and z coordinates of 8 corners of a tight
-    #     bounding box around xs, ys, and zs. Plot these using some invisible
-    #     color ('w') as a workaround to matplotlib's current inability to set
-    #     the aspect ratio of 3d plots to be equal.
-    #     '''
-
-    #     mins = tuple(v.min() for v in (xs, ys, zs))
-    #     max_range = max(v.max() - v.min() for v in (xs, ys, zs))
-
-    #     cube_xs = []
-    #     cube_ys = []
-    #     cube_zs = []
-
-    #     for xi in range(2):
-    #         for yi in range(2):
-    #             for zi in range(2):
-    #                 cube_xs.append(mins[0] + max_range * xi)
-    #                 cube_ys.append(mins[1] + max_range * yi)
-    #                 cube_zs.append(mins[2] + max_range * zi)
-
-    #     return tuple(numpy.asarray(vs) for vs in (cube_xs,
-    #                                               cube_ys,
-    #                                               cube_zs))
-
     figure = pyplot.gcf()
     figure.set_size_inches(18, 6, forward=True)
 
@@ -202,6 +175,51 @@ def main():
                         c='red')
 
 
+    training_set = Dataset(names=('inputs', 'targets'),
+                           formats=(DenseFormat(axes=('b', 'f'),
+                                                shape=(-1, 2),
+                                                dtype=floatX),
+                                    DenseFormat(axes=['b', 'f'],
+                                                shape=[-1, 1],
+                                                dtype=floatX)),
+                           tensors=(training_inputs, training_outputs))
+
+    input_node, label_node = training_set.make_input_nodes()
+    affine_transform = AffineTransform(output_format=DenseFormat(axes=['b'],
+                                                                 shape=[-1],
+                                                                 dtype=None),
+                                       input_node=input_node)
+    cost = L2Loss(input_node, label_node)
+    grad = theano.gradient.grad
+    parameter_udpaters = [SgdParameterUpdater(p,
+                                              grad(cost.output_node, p),
+                                              args.learning_rate,
+                                              args.momentum,
+                                              args.nesterov)
+                          for p in (affine_transform.linear_node.param,
+                                    affine_transform.bias_node.param)]
+
+    def plot_model_surface():
+        xs, ys, zs = make_grid(affine_transform.linear.param.get_values(),
+                                   affine_transform.bias.param.get_values(),
+                                   min_input,
+                                   max_input,
+                                   10)
+        model_surface = points_axes.plot_surface(xs, ys, zs, c='orange')
+        return model_surface
+
+    model_surface = plot_model_surface()
+
+    sgd = Sgd(cost=cost,
+              inputs=[input_node, label_node],
+              parameters=[affine_transform.linear_node.param,
+                          affine_transform.bias_node.param],
+              parameter_updaters=parameter_updaters,
+              input_iterator=training_set.iterator(
+                  iterator_type='sequential',
+                  batch_size=training_outpus.shape[0]),
+              monitors=[],
+              epoch_callbacks=[LimitsNumEpochs(100)])
 
 
     def on_key_press(event):
