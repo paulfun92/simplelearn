@@ -8,6 +8,7 @@ __copyright__ = "Copyright 2014"
 __license__ = "Apache 2.0"
 
 
+import collections
 import numpy
 import theano
 from nose.tools import assert_equal, assert_is_instance, assert_in
@@ -27,9 +28,26 @@ class Node(object):
     A model is a directed acyclic graph (DAG) of Nodes.
     """
 
-    def __init__(self, output_symbol, output_format, *input_nodes):
+    def __init__(self, input_nodes, output_symbol, output_format):
+        '''
+        Parameters
+        ----------
+        input_nodes: Node, or Sequence of Nodes
+
+        output_symbol: theano.gof.Variable
+          A function of the input_nodes' output_symbols.
+
+        output_format: Format
+          The output_symbol's data format.
+        '''
+        assert_is_instance(input_nodes, (Node, collections.Sequence))
         assert_is_instance(output_symbol, theano.gof.Variable)
         assert_is_instance(output_format, Format)
+
+        if isinstance(input_nodes, Node):
+            input_nodes = (input_nodes, )
+        else:
+            input_nodes = tuple(input_nodes)
 
         for input_node in input_nodes:
             assert_is_instance(input_node, Node)
@@ -47,8 +65,15 @@ class InputNode(Node):
     """
 
     def __init__(self, fmt):
+        '''
+        Parameters
+        ----------
+        fmt: Format
+          Format of self.output_symbol
+        '''
         output_symbol = fmt.make_batch(is_symbolic=True)
-        super(InputNode, self).__init__(output_symbol=output_symbol,
+        super(InputNode, self).__init__(input_nodes=(),
+                                        output_symbol=output_symbol,
                                         output_format=fmt)
 
 
@@ -77,8 +102,8 @@ class Function1dTo1d(Node):
         return (b_size, f_size)
 
     def __init__(self,
-                 output_format,
                  input_node,
+                 output_format,
                  input_to_bf_map=None,
                  bf_to_output_map=None):
         """
@@ -87,14 +112,28 @@ class Function1dTo1d(Node):
 
         Parameters
         ----------
-        output_format: Format
-          Format of this node's output_symbol.
-
         input_node: Node
           Node that provides input to this Node.
 
+        output_format: Format
+          Format of this node's output_symbol.
+
         input_to_bf_map: dict
-          A mapping from
+          An axis map from input_node's axes to the ('b', 'f') axes used
+          internally.
+
+          See docs for Format.convert() for more detail on axis maps.
+
+          If omitted, this will keep the 'b' axis, and collapse all remaining
+          axes into a single 'f' axis.
+
+        bf_to_output_map: dict
+          An axis map from the internal ('b', 'f') axes to the output_format.
+
+          See docs for Format.convert() for more detail on axis maps.
+
+          If omitted, this will keep the 'b' axis, and expand the 'f' axis to
+          all remaining axes in output_format.
         """
 
         assert_is_instance(output_format, Format)
@@ -165,9 +204,9 @@ class Function1dTo1d(Node):
                                                  output_format,
                                                  axis_map=bf_to_output_map)
 
-        super(Function1dTo1d, self).__init__(output_symbol,
-                                             output_format,
-                                             input_node)
+        super(Function1dTo1d, self).__init__(input_node,
+                                             output_symbol,
+                                             output_format)
 
     def _get_function_of_rows(self, rows_symbol):
         """
@@ -185,7 +224,7 @@ class Linear(Function1dTo1d):
     Applies a linear transformation to the input.
     '''
 
-    def __init__(self, output_format, input_node):
+    def __init__(self, input_node, output_format):
         get_bf_shape = Function1dTo1d._get_bf_shape
 
         num_input_features = get_bf_shape(input_node.output_format)[1]
@@ -195,7 +234,7 @@ class Linear(Function1dTo1d):
                              dtype=output_format.dtype)
         self.params = theano.shared(params)
 
-        super(Linear, self).__init__(output_format, input_node)
+        super(Linear, self).__init__(input_node, output_format)
 
     def _get_function_of_rows(self, rows_symbol):
         """
@@ -218,7 +257,7 @@ class Bias(Function1dTo1d):
     Adds a bias to the input.
     '''
 
-    def __init__(self, output_format, input_node):
+    def __init__(self, input_node, output_format):
         get_bf_shape = Function1dTo1d._get_bf_shape
 
         num_input_features = get_bf_shape(input_node.output_format)[1]
@@ -230,7 +269,7 @@ class Bias(Function1dTo1d):
                              dtype=output_format.dtype)
 
         self.params = theano.shared(params, broadcastable=[True, False])
-        super(Bias, self).__init__(output_format, input_node)
+        super(Bias, self).__init__(input_node, output_format)
 
     def _get_function_of_rows(self, rows_symbol):
         return rows_symbol + self.params
@@ -251,8 +290,8 @@ class L2Loss(Node):
 
 class AffineTransform(Function1dTo1d):
     def __init__(self,
-                 output_format,
                  input_node,
+                 output_format,
                  input_to_bf_map=None,
                  bf_to_output_map=None):
         self.linear_node = Linear(input_node,

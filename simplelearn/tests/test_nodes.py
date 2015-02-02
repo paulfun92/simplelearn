@@ -20,7 +20,7 @@ import pdb
 
 class DummyFunction1dTo1d(Function1dTo1d):
     def __init__(self, output_format, input_node):
-        super(DummyFunction1dTo1d, self).__init__(output_format, input_node)
+        super(DummyFunction1dTo1d, self).__init__(input_node, output_format)
 
     def _get_function_of_rows(self, input_rows):
         return input_rows
@@ -38,10 +38,10 @@ class Function1dTo1dTester(TestCase):
                                     shape=(6, -1, 2),
                                     dtype=None)
 
-        self.node = self._make_node(output_format, self.input_node)
+        self.node = self._make_node(self.input_node, output_format)
         assert_is_instance(self.node, Node)
 
-    def _make_node(self, output_format, input_node):
+    def _make_node(self, input_node, output_format):
         return DummyFunction1dTo1d(output_format, input_node)
 
     def expected_function1dTo1d(self, rows):
@@ -143,16 +143,16 @@ class Function1dTo1dTester(TestCase):
 
 class LinearTester(Function1dTo1dTester):
 
-    def _make_node(self, output_format, input_node):
-        return Linear(output_format, input_node)
+    def _make_node(self, input_node, output_format):
+        return Linear(input_node, output_format)
 
     def expected_function1dTo1d(self, rows):
         return numpy.dot(rows, self.node.params.get_value())
 
 
 class BiasTester(Function1dTo1dTester):
-    def _make_node(self, output_format, input_node):
-        return Bias(output_format, input_node)
+    def _make_node(self, input_node, output_format):
+        return Bias(input_node, output_format)
 
     def expected_function1dTo1d(self, rows):
         params = self.node.params.get_value()

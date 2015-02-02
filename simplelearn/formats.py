@@ -250,7 +250,11 @@ class Format(object):
         assert_is_instance(is_symbolic, bool)
 
         # checks is_symbolic vs batch_size
-        assert_equal(is_symbolic, batch_size is None)
+        assert_equal(is_symbolic, batch_size is None,
+                     "Must not supply a batch_size when is_symbolic is True."
+                     if is_symbolic
+                     else
+                     "Must supply a batch_size when is_symbolic is False.")
 
         # Sanity-checks batch_size
         if not is_symbolic:

@@ -150,13 +150,13 @@ def test_format_make_batch():
     none_format = Format(None)
 
     assert_raises_regexp(TypeError,
-                         "batch_size must be an integer, not a ",
+                         "Expected batch_size to be a <type 'numpy.integer'",
                          floatX_format.make_batch,
                          False,
                          1.)
 
-    assert_raises_regexp(ValueError,
-                         "batch_size must be non-negative, not ",
+    assert_raises_regexp(AssertionError,
+                         "-2 not greater than or equal to 0",
                          floatX_format.make_batch,
                          False,
                          -2)
@@ -173,12 +173,12 @@ def test_format_make_batch():
     #                      True,
     #                      2)
 
-    assert_raises_regexp(ValueError,
+    assert_raises_regexp(AssertionError,
                          "Must supply a batch_size when is_symbolic is False",
                          floatX_format.make_batch,
                          False)
 
-    assert_raises_regexp(ValueError,
+    assert_raises_regexp(AssertionError,
                          "Must supply a batch_size when is_symbolic is False",
                          floatX_format.make_batch,
                          is_symbolic=False,
