@@ -23,7 +23,7 @@ class Node(object):
 
     The function's input nodes are in self.inputs
     The function's output is self.output_symbol.
-    The function's outptu format is self.output_format.
+    The function's output format is self.output_format.
 
     A model is a directed acyclic graph (DAG) of Nodes.
     """
@@ -56,6 +56,21 @@ class Node(object):
         self.output_format = output_format
         self.output_symbol = output_symbol
 
+class FormatNode(Node):
+    '''
+    A node that just performs a format conversion.
+    '''
+    def __init__(self, input_node, output_format, axis_map):
+        input_format = input_node.output_format
+        input_symbol = input_node.output_symbol
+
+        output_symbol = input_node.output_format.convert(
+            input_symbol,
+            output_format=output_format,
+            axis_map=axis_map)
+        super(FormatNode, self).__init__(input_node,
+                                         output_symbol,
+                                         output_format)
 
 class InputNode(Node):
     """
@@ -181,42 +196,85 @@ class Function1dTo1d(Node):
                 bf_to_output_map = {'f': output_non_b_axes,
                                     'b': 'b'}
 
+        input_to_bf_node = FormatNode(input_node,
+                                      input_bf_format,
+                                      input_to_bf_map)
+
         #
         # Creates this node's function/output symbol.
         #
 
-        input_symbol = input_node.output_symbol
+        # input_symbol = input_node.output_symbol
 
-        # format input to bf_format
-        input_bf_symbol = input_format.convert(input_symbol,
-                                               input_bf_format,
-                                               axis_map=input_to_bf_map)
-
-        # compute function of feature vectors
-        output_bf_symbol = self._get_function_of_rows(input_bf_symbol)
+        # # format input to bf_format
+        # input_bf_symbol = input_format.convert(input_symbol,
+        #                                        input_bf_format,
+        #                                        axis_map=input_to_bf_map)
 
         # format to output format
         output_bf_format = DenseFormat(axes=('b', 'f'),
                                        shape=get_bf_shape(output_format),
                                        dtype=output_format.dtype)
 
-        output_symbol = output_bf_format.convert(output_bf_symbol,
-                                                 output_format,
-                                                 axis_map=bf_to_output_map)
+        # compute function of feature vectors
+        output_bf_node = self._get_output_bf_node(input_to_bf_node,
+                                                  output_bf_format)
+
+        bf_to_output_node = FormatNode(output_bf_node,
+                                       output_format,
+                                       bf_to_output_map)
+
+        # output_bf_symbol = self._get_function_of_rows(input_bf_symbol
+        #                                               input_bf_format,
+        #                                               output_bf_format)
+
+        # output_bf_format.check(output_bf_symbol)
+
+        # output_symbol = output_bf_format.convert(output_bf_symbol,
+        #                                          output_format,
+        #                                          axis_2map=bf_to_output_map)
 
         super(Function1dTo1d, self).__init__(input_node,
-                                             output_symbol,
-                                             output_format)
+                                             bf_to_output_node.output_symbol,
+                                             bf_to_output_node.output_format)
 
-    def _get_function_of_rows(self, rows_symbol):
-        """
-        Returns a symbol f(x), where f is a function of rows of x.
-
-        rows_symbol: theano variable
-          A matrix where each row is an input to f.
-        """
-        raise NotImplementedError("%s._get_function_of_features() not yet "
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            output_bf_format):
+        '''
+        Returns a Node that takes input with axes=('b', 'f'), and
+        yields output with axes=('b', 'f').
+        '''
+        raise NotImplementedError("%s._get_output_bf_node() not yet "
                                   "implemented." % type(self))
+
+    # def _get_function_of_rows(self,
+    #                           input_bf,
+    #                           input_bf_format,
+    #                           output_bf_format):
+    #     """
+    #     Returns a symbol f(x), where f is a function of rows of x.
+
+    #     Parameters
+    #     ----------
+
+    #     input_bf: theano.gof.Variable
+    #       A matrix where each row is an input to f().
+
+    #     input_bf_format: DenseFormat
+    #       The format of input_bf, a DenseFormat with axes=('b', 'f')
+
+    #     output_bf_format: DenseFormat
+    #       The format expected of the return value, a DenseFormat with
+    #       axes=('b', 'f').
+
+    #     Returns
+    #     -------
+    #     rval: theano.gof.Variable
+    #       f(x), with format given by output_bf_format.
+    #     """
+    #     raise NotImplementedError("%s._get_function_of_features() not yet "
+    #                               "implemented." % type(self))
 
 
 class Linear(Function1dTo1d):
@@ -231,25 +289,35 @@ class Linear(Function1dTo1d):
         num_output_features = get_bf_shape(output_format)[1]
 
         params = numpy.zeros((num_input_features, num_output_features),
-                             dtype=output_format.dtype)
+                             dtype=input_node.output_symbol.dtype)
         self.params = theano.shared(params)
 
         super(Linear, self).__init__(input_node, output_format)
 
-    def _get_function_of_rows(self, rows_symbol):
-        """
-        Returns dot(X, W), where X is the input, and W are self.params.
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            output_bf_format):
+        output_symbol = theano.tensor.dot(input_bf_node.output_symbol,
+                                          self.params)
+        return Node(input_bf_node, output_symbol, output_bf_format)
 
-        Parameters
-        ----------
-        rows_symbol: X, a theano 2D tensor
+    # def _get_function_of_rows(self,
+    #                           input_bf,
+    #                           input_bf_format,
+    #                           output_bf_format):
+    #     """
+    #     Returns dot(X, W), where X is the input, and W are self.params.
 
-        Returns
-        -------
-        rval: a theano 2D tensor
-          rval[i, :] := dot(rows_symbol[i, :], W)
-        """
-        return theano.tensor.dot(rows_symbol, self.params)
+    #     Parameters
+    #     ----------
+    #     rows_symbol: X, a theano 2D tensor
+
+    #     Returns
+    #     -------
+    #     rval: a theano 2D tensor
+    #       rval[i, :] := dot(rows_symbol[i, :], W)
+    #     """
+    #     return theano.tensor.dot(input_bf, self.params)
 
 
 class Bias(Function1dTo1d):
@@ -265,14 +333,25 @@ class Bias(Function1dTo1d):
 
         assert_equal(num_output_features, num_input_features)
 
+
         params = numpy.zeros((1, num_output_features),
-                             dtype=output_format.dtype)
+                             dtype=input_node.output_symbol.dtype)
 
         self.params = theano.shared(params, broadcastable=[True, False])
         super(Bias, self).__init__(input_node, output_format)
 
-    def _get_function_of_rows(self, rows_symbol):
-        return rows_symbol + self.params
+
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            output_bf_format):
+        output_symbol = input_bf_node.output_symbol + self.params
+        return Node(input_bf_node, output_symbol, output_bf_format)
+
+    # def _get_function_of_rows(self,
+    #                           input_bf,
+    #                           input_bf_format,
+    #                           output_bf_format):
+    #     return input_bf + self.params
 
 
 class L2Loss(Node):
@@ -283,10 +362,10 @@ class L2Loss(Node):
                                     shape=(),
                                     dtype=None)
 
-        super(L2Loss, self).__init__(output_symbol,
-                                     output_format,
-                                     input_node_a,
-                                     input_node_b)
+        super(L2Loss, self).__init__((input_node_a, input_node_b),
+                                     output_symbol,
+                                     output_format)
+
 
 class AffineTransform(Function1dTo1d):
     def __init__(self,
@@ -294,20 +373,38 @@ class AffineTransform(Function1dTo1d):
                  output_format,
                  input_to_bf_map=None,
                  bf_to_output_map=None):
-        self.linear_node = Linear(input_node,
-                                  input_to_bf_map=input_to_bf_map)
+
+        super(AffineTransform, self).__init__(input_node,
+                                              output_format,
+                                              input_to_bf_map,
+                                              bf_to_output_map)
+
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            output_bf_format):
+        self.linear_node = Linear(input_bf_node, output_bf_format)
 
         # bias node's output format is the same as its input format
         self.bias_node = Bias(self.linear_node,
-                              self.linear_node.output_format,
-                              bf_to_output_map=bf_to_output_map)
+                              output_format=output_bf_format)
 
-        super(AffineTransform, self).__init__(bias_node.output_format,
-                                              bias_node,
-                                              bf_to_output_map)
+        return self.bias_node
 
-    def _get_function_of_rows(self, input_bf_symbol):
-        return self.bias_node.output_symbol
+    # def _get_function_of_rows(self,
+    #                           input_bf_symbol,
+    #                           input_bf_format,
+    #                           output_bf_format):
+
+    #     self.linear_node = Linear(input_node,
+    #                               output_format=input_bf_format,
+    #                               input_to_bf_map=input_to_bf_map)
+
+    #     # bias node's output format is the same as its input format
+    #     self.bias_node = Bias(self.linear_node,
+    #                           output_format=output_bf_format,
+    #                           bf_to_output_map=bf_to_output_map)
+
+    #     return self.bias_node.output_symbol
 
 
 class Softmax(Function1dTo1d):

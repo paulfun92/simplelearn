@@ -21,7 +21,7 @@ from simplelearn.nodes import AffineTransform, L2Loss
 from simplelearn.utils import safe_izip
 from simplelearn.data.dataset import Dataset
 from simplelearn.formats import DenseFormat
-from simplelearn.training import SgdParameterUpdater, Sgd
+from simplelearn.training import SgdParameterUpdater, Sgd, LimitsNumEpochs
 import pdb
 
 
@@ -37,6 +37,12 @@ def parse_args():
 
         return arg
 
+    def positive_float(arg):
+        arg = float(arg)
+        assert_greater(arg, 0)
+
+        return arg
+
     parser.add_argument("--training-size",
                         type=positive_int,
                         default=100,
@@ -46,6 +52,21 @@ def parse_args():
                         type=positive_int,
                         default=10,
                         help=("The number of points in the testing set."))
+
+    parser.add_argument("--learning-rate",
+                        type=positive_float,
+                        default=.1,
+                        help="Learning rate for SGD")
+
+    parser.add_argument("--momentum",
+                        type=positive_float,
+                        default=.5,
+                        help="Momentum for SGD")
+
+    parser.add_argument("--nesterov",
+                        type=bool,
+                        default=True,
+                        help="Set to True to use Nesterov momentum.")
 
     result = parser.parse_args()
     return result
@@ -190,39 +211,42 @@ def main():
                            tensors=(training_inputs, training_outputs))
 
     input_node, label_node = training_set.make_input_nodes()
-    affine_transform = AffineTransform(output_format=DenseFormat(axes=['b'],
-                                                                 shape=[-1],
-                                                                 dtype=None),
-                                       input_node=input_node)
-    cost = L2Loss(affine_transform, label_node)
+
+    affine_node = AffineTransform(input_node=input_node,
+                                  output_format=DenseFormat(axes=['b'],
+                                                            shape=[-1],
+                                                            dtype=None))
+
+    cost = L2Loss(affine_node, label_node)
     grad = theano.gradient.grad
-    parameter_udpaters = [SgdParameterUpdater(p,
+    parameter_updaters = [SgdParameterUpdater(p,
                                               grad(cost.output_symbol, p),
                                               args.learning_rate,
                                               args.momentum,
                                               args.nesterov)
-                          for p in (affine_transform.linear_node.params,
-                                    affine_transform.bias_node.params)]
+                          for p in (affine_node.linear_node.params,
+                                    affine_node.bias_node.params)]
 
     def plot_model_surface():
-        xs, ys, zs = make_grid(affine_transform.linear.params.get_values(),
-                                   affine_transform.bias.params.get_values(),
-                                   min_input,
-                                   max_input,
-                                   10)
-        model_surface = points_axes.plot_surface(xs, ys, zs, c='orange')
+        xs, ys, zs = \
+            make_grid(affine_node.linear_node.params.get_value(),
+                      affine_node.bias_node.params.get_value(),
+                      min_input,
+                      max_input,
+                      10)
+        model_surface = points_axes.plot_surface(xs, ys, zs, color='orange')
         return model_surface
 
     model_surface = plot_model_surface()
 
-    sgd = Sgd(cost=cost,
-              inputs=[input_node, label_node],
-              parameters=[affine_transform.linear_node.params,
-                          affine_transform.bias_node.params],
+    sgd = Sgd(cost=cost.output_symbol,
+              inputs=[n.output_symbol for n in (input_node, label_node)],
+              parameters=[affine_node.linear_node.params,
+                          affine_node.bias_node.params],
               parameter_updaters=parameter_updaters,
               input_iterator=training_set.iterator(
                   iterator_type='sequential',
-                  batch_size=training_outpus.shape[0]),
+                  batch_size=training_outputs.shape[0]),
               monitors=[],
               epoch_callbacks=[LimitsNumEpochs(100)])
 

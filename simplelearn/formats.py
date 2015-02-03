@@ -107,30 +107,30 @@ class Format(object):
         """
         return not Format.is_symbolic(batch)
 
-    def _is_equivalent(self, target_format):
+    def _requires_conversion(self, target_format):
         """
         Returns True if converting from self to target_format is a no-op.
         """
-        raise NotImplementedError("%s._is_equivalent() not yet implemented." %
+        raise NotImplementedError("%s._requires_conversion() not yet implemented." %
                                   type(self))
 
-    def convert(self, batch, target_format, output=None, **kwargs):
+    def convert(self, batch, output_format, output=None, **kwargs):
         """
-        Formats a data batch in this format to the target_format.
+        Formats a data batch in this format to the output_format.
 
         Output argument only supported for numeric batches.
 
         This function just calls self._convert(), check()-ing its
         inputs and outputs.
 
-        Note that if output is None and self._is_equivalent(target_format), the
+        Note that if output is None and self._requires_conversion(output_format), the
         batch is returned as-is without calling self._convert().
 
         Parameters
         ----------
         batch: numpy.ndarray-like or theano.gof.Variable
 
-        target_format: DataFormat
+        output_format: DataFormat
 
         output: NoneType, or numpy.ndarray-like
           Optional output variable. Can only be supplied if batch is numeric.
@@ -146,23 +146,23 @@ class Format(object):
 
         self.check(batch)
 
-        if output is None and self._is_equivalent(target_format):
+        if output is None and not self._requires_conversion(output_format):
             return batch
 
-        if target_format.dtype is not None and \
+        if output_format.dtype is not None and \
            not numpy.can_cast(batch.dtype,
-                              target_format.dtype,
+                              output_format.dtype,
                               casting='same_kind'):  # Allows float64->float32
             raise TypeError("Can't cast from %s to %s." %
-                            (batch.dtype, target_format.dtype))
+                            (batch.dtype, output_format.dtype))
 
         if self.is_symbolic(batch) and output is not None:
             raise ValueError("You can't provide an output argument when "
                              "data is symbolic.")
 
-        result = self._convert(batch, target_format, output, **kwargs)
+        result = self._convert(batch, output_format, output, **kwargs)
 
-        target_format.check(result)
+        output_format.check(result)
 
         if self.is_symbolic(batch) != self.is_symbolic(result):
             def symbolic_or_numeric(batch):
@@ -177,12 +177,12 @@ class Format(object):
 
         return result
 
-    def _convert(self, batch, target_format, output, **kwargs):
+    def _convert(self, batch, output_format, output, **kwargs):
         """
         Implementation of format(). See that method's description for specs.
 
         Must throw an exception (typically TypeError or ValueError) if
-        conversion to target_format is not supported.
+        conversion to output_format is not supported.
         """
 
         raise NotImplementedError("%s._convert() not yet implemented." %
@@ -462,7 +462,7 @@ class DenseFormat(Format):
                                       axis,
                                       size))
 
-    def _convert(self, batch, target_format, output_batch, **kwargs):
+    def _convert(self, batch, output_format, output_batch, **kwargs):
         """
         Converts a batch to another format.
 
@@ -470,25 +470,25 @@ class DenseFormat(Format):
         See those methods' documentation for details.
         """
 
-        if isinstance(target_format, DenseFormat):
+        if isinstance(output_format, DenseFormat):
             return self._convert_to_DenseFormat(batch,
-                                                target_format,
+                                                output_format,
                                                 output_batch,
                                                 **kwargs)
         else:
             raise NotImplementedError("Conversion from format %s to format %s "
                                       "not supported." %
-                                      (type(self), type(target_format)))
+                                      (type(self), type(output_format)))
 
     def _convert_to_DenseFormat(self,
                                 batch,
-                                target_format,
+                                output_format,
                                 output_batch,
                                 **kwargs):
         """
         Converts batch in this format to a DenseFormat.
 
-        If the axes of <self> and <target_format> are the same,
+        If the axes of <self> and <output_format> are the same,
         but in a different order, this will transpose the axes for you.
 
         Example 1: same axes, different order
@@ -498,7 +498,7 @@ class DenseFormat(Format):
           source.format(batch, target)  # transposes batch to target.axes
 
         If the axes are different, you must supply an "axis_map" argument to
-        specify which axes of self correspond with which axes of target_format.
+        specify which axes of self correspond with which axes of output_format.
 
         Example 2: same # of axes, different names.
 
@@ -557,9 +557,9 @@ class DenseFormat(Format):
           identity mappings, the axis_map may be omitted entirely.
         """
 
-        if frozenset(self.axes) != frozenset(target_format.axes) and \
+        if frozenset(self.axes) != frozenset(output_format.axes) and \
            'axis_map' not in kwargs:
-            raise ValueError("If self.axes and target_format.axes don't "
+            raise ValueError("If self.axes and output_format.axes don't "
                              "contain the same axes, then you must supply an "
                              "'axis_map' keyword argument.")
 
@@ -626,7 +626,7 @@ class DenseFormat(Format):
 
         axis_map = get_standardized_axis_map(axis_map,
                                              self.axes,
-                                             target_format.axes)
+                                             output_format.axes)
 
         grouped_source_axes = tuple(axis_map.iterkeys())
         ungrouped_source_axes = tuple(flatten(grouped_source_axes))
@@ -638,25 +638,25 @@ class DenseFormat(Format):
         # The sizes of target axes, in the order that they appear in
         # ungrouped_target_axes
         ungrouped_target_shape = \
-            tuple(target_format.shape[target_format.axes.index(a)]
+            tuple(output_format.shape[output_format.axes.index(a)]
                   for a in ungrouped_target_axes)
         batch = batch.reshape(ungrouped_target_shape)
         batch = transpose(batch,
                           ungrouped_target_axes,
-                          target_format.axes)
+                          output_format.axes)
 
         if output_batch is not None:
             output_batch[...] = batch
             return output_batch
-        elif target_format.dtype is None:
+        elif output_format.dtype is None:
             return batch
         else:
             if self.is_symbolic(batch):
-                return theano.tensor.cast(batch, str(target_format.dtype))
+                return theano.tensor.cast(batch, str(output_format.dtype))
             else:
-                return numpy.cast[target_format.dtype](batch)
+                return numpy.cast[output_format.dtype](batch)
 
-    def _is_equivalent(self, target_format):
+    def _requires_conversion(self, target_format):
         for fmt in (self, target_format):
             if fmt.dtype is not None:
                 assert_is_instance(fmt.dtype, numpy.dtype)
@@ -664,6 +664,9 @@ class DenseFormat(Format):
             assert_is_instance(fmt.axes, tuple)
             assert_is_instance(fmt.shape, tuple)
 
-        return (self.dtype == target_format.dtype and
-                self.axes == target_format.axes and
-                self.shape == target_format.shape)
+        if target_format.dtype is not None and \
+           self.dtype != target_format.dtype:
+            return True
+
+        return (self.axes != target_format.axes or
+                self.shape != target_format.shape)
