@@ -603,9 +603,9 @@ class SgdParameterUpdater(object):
 
         #self.updates = OrderedDict([(parameter, parameter)])  # no problem with this
 
-        self.updates = OrderedDict([(parameter, new_parameter)])  # problem persists
-        # self.updates = OrderedDict([(parameter, new_parameter),
-        #                             (self._velocity, new_velocity)])
+        # self.updates = OrderedDict([(parameter, new_parameter)])  # problem persists
+        self.updates = OrderedDict([(parameter, new_parameter),
+                                    (self._velocity, new_velocity)])  # this is correct, but breaks
 
 
 # class GradientBasedParameterUpdater(object):
