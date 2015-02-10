@@ -21,7 +21,10 @@ from simplelearn.nodes import AffineTransform, L2Loss
 from simplelearn.utils import safe_izip
 from simplelearn.data.dataset import Dataset
 from simplelearn.formats import DenseFormat
-from simplelearn.training import SgdParameterUpdater, Sgd, LimitsNumEpochs
+from simplelearn.training import (SgdParameterUpdater,
+                                  Sgd,
+                                  LimitsNumEpochs,
+                                  TrainingMonitor)
 import pdb
 
 
@@ -231,10 +234,26 @@ def main():
                       min_input,
                       max_input,
                       10)
-        model_surface = points_axes.plot_surface(xs, ys, zs, color='orange')
+        model_surface = points_axes.plot_surface(xs, ys, zs,
+                                                 color=[1, .5, .5, .5])
         return model_surface
 
-    model_surface = plot_model_surface()
+    model_surface = [plot_model_surface()]
+
+    class ModelSurfaceReplotter(TrainingMonitor):
+
+        def __init__(self):
+            super(ModelSurfaceReplotter, self).__init__([], [])
+
+        def _on_batch(self, input_batches, monitored_value_batches):
+            # pdb.set_trace()
+            del model_surface[0]
+            model_surface.append(plot_model_surface())
+            figure.canvas.draw()
+
+        def on_epoch(self):
+            pass
+
 
     sgd = Sgd(cost=cost.output_symbol,
               inputs=[n.output_symbol for n in (input_node, label_node)],
@@ -244,12 +263,14 @@ def main():
               input_iterator=training_set.iterator(
                   iterator_type='sequential',
                   batch_size=training_outputs.shape[0]),
-              monitors=[],
+              monitors=[ModelSurfaceReplotter()],
               epoch_callbacks=[LimitsNumEpochs(100)])
 
     def on_key_press(event):
         if event.key == 'q':
             sys.exit(0)
+        if event.key == ' ':
+            sgd.train()
 
     figure.canvas.mpl_connect('key_press_event', on_key_press)
 

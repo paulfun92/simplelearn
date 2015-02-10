@@ -4,10 +4,6 @@ import theano
 import numpy
 from theano.tensor import TensorType
 from collections import OrderedDict
-# from simplelearn.nodes import InputNode, AffineTransform, L2Loss, Bias
-# from simplelearn.formats import DenseFormat
-# from simplelearn.utils import safe_izip
-# from nose.tools import assert_equal
 import pdb
 
 
@@ -42,9 +38,6 @@ def main():
                              name="velocity")
 
     new_velocity = momentum * velocity - learning_rate * bias_grads
-    # pdb.set_trace()
-    # new_velocity = theano.tensor.patternbroadcast(new_velocity,
-    #                                               velocity.broadcastable)
 
     use_momentum = True  # Set to False to side-step Theano error
 
@@ -57,12 +50,6 @@ def main():
     training_func = theano.function([input, label],
                                     l2loss,
                                     updates=updates)
-
-    # Problem doesn't occur if we use these simpler updates:
- #    ((affine_node.linear_node.params,
-#                                               -linear_grads * learning_rate),
-#                                              (affine_node.bias_node.params,
-#                                               -bias_grads * learning_rate)))
 
     cast = numpy.cast[floatX]
 
