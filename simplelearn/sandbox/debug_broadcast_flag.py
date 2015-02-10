@@ -4,10 +4,10 @@ import theano
 import numpy
 from theano.tensor import TensorType
 from collections import OrderedDict
-from simplelearn.nodes import InputNode, AffineTransform, L2Loss, Bias
-from simplelearn.formats import DenseFormat
-from simplelearn.utils import safe_izip
-from nose.tools import assert_equal
+# from simplelearn.nodes import InputNode, AffineTransform, L2Loss, Bias
+# from simplelearn.formats import DenseFormat
+# from simplelearn.utils import safe_izip
+# from nose.tools import assert_equal
 import pdb
 
 
@@ -38,12 +38,21 @@ def main():
 
     velocity = theano.shared(numpy.asarray(0.0 * bias.get_value(),
                                            dtype=floatX),
+                             broadcastable=bias_grads.broadcastable,
                              name="velocity")
 
     new_velocity = momentum * velocity - learning_rate * bias_grads
+    # pdb.set_trace()
+    # new_velocity = theano.tensor.patternbroadcast(new_velocity,
+    #                                               velocity.broadcastable)
 
-    updates = OrderedDict(((bias, bias + new_velocity),
-                           (velocity, new_velocity)))
+    use_momentum = True  # Set to False to side-step Theano error
+
+    if use_momentum:
+        updates = OrderedDict(((bias, bias + new_velocity),
+                               (velocity, new_velocity)))
+    else:
+        updates = OrderedDict(((bias, bias + (-learning_rate * bias_grads)),))
 
     training_func = theano.function([input, label],
                                     l2loss,
@@ -61,7 +70,7 @@ def main():
 
     num_examples = 99
     batch_size = 3
-    assert_equal(num_examples % batch_size, 0)
+    assert num_examples % batch_size == 0
 
     input_vectors = cast(numpy.random.uniform(size=(num_examples,
                                                     feature_size)))
@@ -75,7 +84,7 @@ def main():
                                     batch_size) +
                                    labels.shape[1:])
 
-    for input_batch, label_batch in safe_izip(input_batches, label_batches):
+    for input_batch, label_batch in zip(input_batches, label_batches):
         print training_func(input_batch, label_batch)
 
 if __name__ == '__main__':

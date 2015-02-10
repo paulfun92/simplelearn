@@ -553,6 +553,9 @@ class SgdParameterUpdater(object):
 
         assert_is_instance(parameter, theano.tensor.sharedvar.SharedVariable)
         assert_is_instance(gradient, theano.gof.Variable)
+        assert_equal(parameter.broadcastable, gradient.broadcastable,
+                     "If an Op's .grad() method is buggy, it can return "
+                     "broadcast masks.")
         check_is_subdtype(gradient, 'gradient', numpy.floating)
         assert_greater_equal(learning_rate, 0)
         assert_greater_equal(momentum, 0)
@@ -573,9 +576,10 @@ class SgdParameterUpdater(object):
             else:
                 return str0 + str1
 
-        def make_shared_floatX(numeric_var, name):
+        def make_shared_floatX(numeric_var, name, **kwargs):
             return theano.shared(numpy.asarray(numeric_var, dtype=floatX),
-                                 name=name)
+                                 name=name,
+                                 **kwargs)
 
         self.learning_rate = make_shared_floatX(learning_rate,
                                                 concat(parameter.name,
@@ -584,19 +588,24 @@ class SgdParameterUpdater(object):
         self.momentum = make_shared_floatX(momentum,
                                            concat(parameter.name, ' momentum'))
 
-        self._velocity = make_shared_floatX(0.0 * parameter.get_value(),
-                                            concat(parameter.name,
-                                                   ' velocity'))
+        self._velocity = make_shared_floatX(
+            0.0 * parameter.get_value(),
+            concat(parameter.name, ' velocity'),
+            broadcastable=parameter.broadcastable)
 
         new_velocity = (self.momentum * self._velocity -
                         self.learning_rate * gradient)
+        new_velocity.name = concat('new ', self._velocity.name)
 
         assert_equal(str(new_velocity.dtype), str(floatX))
-        new_velocity.name = concat('new ', self._velocity.name)
+        assert_equal(self._velocity.broadcastable, new_velocity.broadcastable)
 
         step = (self.momentum * new_velocity - self.learning_rate * gradient
                 if use_nesterov
                 else new_velocity)
+
+        assert_equal(parameter.broadcastable,
+                     step.broadcastable)
 
         new_parameter = parameter + step
         new_parameter.name = concat('new ', parameter.name)
