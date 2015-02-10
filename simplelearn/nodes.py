@@ -16,6 +16,7 @@ from simplelearn.utils import safe_izip
 from simplelearn.formats import Format, DenseFormat
 import pdb
 
+
 class Node(object):
 
     """
@@ -56,21 +57,23 @@ class Node(object):
         self.output_format = output_format
         self.output_symbol = output_symbol
 
+
 class FormatNode(Node):
     '''
     A node that just performs a format conversion.
     '''
     def __init__(self, input_node, output_format, axis_map):
-        input_format = input_node.output_format
         input_symbol = input_node.output_symbol
-
+        input_format = input_node.output_format
         output_symbol = input_node.output_format.convert(
             input_symbol,
             output_format=output_format,
             axis_map=axis_map)
+
         super(FormatNode, self).__init__(input_node,
                                          output_symbol,
                                          output_format)
+
 
 class InputNode(Node):
     """
@@ -182,7 +185,7 @@ class Function1dTo1d(Node):
         if input_to_bf_map is None:
             input_non_b_axes = tuple(a for a in input_axes if a != 'b')
             if len(input_non_b_axes) == 0:
-                input_to_bf_map = {'b' : ('b', 'f')}
+                input_to_bf_map = {'b': ('b', 'f')}
             else:
                 input_to_bf_map = {input_non_b_axes: 'f',
                                    'b': 'b'}
@@ -191,7 +194,7 @@ class Function1dTo1d(Node):
             output_non_b_axes = tuple(a for a in output_format.axes
                                       if a != 'b')
             if len(output_non_b_axes) == 0:
-                bf_to_output_map = {('b', 'f') : 'b'}
+                bf_to_output_map = {('b', 'f'): 'b'}
             else:
                 bf_to_output_map = {'f': output_non_b_axes,
                                     'b': 'b'}
@@ -333,13 +336,11 @@ class Bias(Function1dTo1d):
 
         assert_equal(num_output_features, num_input_features)
 
-
         params = numpy.zeros((1, num_output_features),
                              dtype=input_node.output_symbol.dtype)
 
         self.params = theano.shared(params, broadcastable=[True, False])
         super(Bias, self).__init__(input_node, output_format)
-
 
     def _get_output_bf_node(self,
                             input_bf_node,

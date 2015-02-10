@@ -27,8 +27,6 @@ import pdb
 
 # pylint: disable=too-few-public-methods
 
-
-
 # Sketch:
 
 # SGD takes N params and N GradientBasedUpdaters. One of the callbacks may
@@ -52,6 +50,7 @@ import pdb
 #           weight_updater_updater)
 #
 # hmm... not so bad.
+
 
 class EpochCallback(object):
     def on_epoch(self):
@@ -602,8 +601,10 @@ class SgdParameterUpdater(object):
         new_parameter = parameter + step
         new_parameter.name = concat('new ', parameter.name)
 
-        self.updates = OrderedDict([(parameter, new_parameter),
-                                    (self._velocity, new_velocity)])
+        self.updates = OrderedDict([(parameter, parameter)])  # no problem with this
+        #self.updates = OrderedDict([(parameter, new_parameter)])  # problem persists
+        # self.updates = OrderedDict([(parameter, new_parameter),
+        #                             (self._velocity, new_velocity)])
 
 
 # class GradientBasedParameterUpdater(object):

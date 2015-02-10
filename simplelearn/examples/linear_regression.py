@@ -27,9 +27,9 @@ import pdb
 
 def parse_args():
     parser = argparse.ArgumentParser(
-                description=("Simple demo of stochastic gradient descent, "
-                             "with and without Nesterov's accelerated "
-                             "gradients."))
+        description=("Simple demo of stochastic gradient descent, "
+                     "with and without Nesterov's accelerated "
+                     "gradients."))
 
     def positive_int(arg):
         arg = int(arg)
@@ -200,7 +200,6 @@ def main():
                         testing_outputs,
                         c='red')
 
-
     training_set = Dataset(names=('inputs', 'targets'),
                            formats=(DenseFormat(axes=('b', 'f'),
                                                 shape=(-1, 2),
@@ -249,7 +248,6 @@ def main():
                   batch_size=training_outputs.shape[0]),
               monitors=[],
               epoch_callbacks=[LimitsNumEpochs(100)])
-
 
     def on_key_press(event):
         if event.key == 'q':
