@@ -104,7 +104,6 @@ def main():
                                            size=num_points)
                                for i in range(num_dims)]).T
 
-
         outputs = affine_transform(matrix, bias, inputs)
 
         output_noise = rng.normal(scale=output_variance, size=outputs.shape)
@@ -112,7 +111,6 @@ def main():
         cast = numpy.cast[dtype]
 
         return cast(inputs), cast(outputs + output_noise)
-
 
     rng = numpy.random.RandomState(352351)
 

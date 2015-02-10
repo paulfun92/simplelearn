@@ -601,8 +601,9 @@ class SgdParameterUpdater(object):
         new_parameter = parameter + step
         new_parameter.name = concat('new ', parameter.name)
 
-        self.updates = OrderedDict([(parameter, parameter)])  # no problem with this
-        #self.updates = OrderedDict([(parameter, new_parameter)])  # problem persists
+        #self.updates = OrderedDict([(parameter, parameter)])  # no problem with this
+
+        self.updates = OrderedDict([(parameter, new_parameter)])  # problem persists
         # self.updates = OrderedDict([(parameter, new_parameter),
         #                             (self._velocity, new_velocity)])
 
