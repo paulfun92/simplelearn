@@ -14,7 +14,8 @@ from matplotlib import pyplot
 import mpl_toolkits.mplot3d   # pylint: disable=unused-import
 
 from nose.tools import (assert_equal,
-                        assert_greater)
+                        assert_greater,
+                        assert_greater_equal)
 
 import theano
 from simplelearn.nodes import AffineTransform, L2Loss
@@ -46,6 +47,12 @@ def parse_args():
 
         return arg
 
+    def non_negative_float(arg):
+        arg = float(arg)
+        assert_greater_equal(arg, 0)
+
+        return arg
+
     parser.add_argument("--training-size",
                         type=positive_int,
                         default=100,
@@ -62,7 +69,7 @@ def parse_args():
                         help="Learning rate for SGD")
 
     parser.add_argument("--momentum",
-                        type=positive_float,
+                        type=non_negative_float,
                         default=.5,
                         help="Momentum for SGD")
 
@@ -219,13 +226,16 @@ def main():
 
     cost = L2Loss(affine_node, label_node)
     grad = theano.gradient.grad
+
     parameter_updaters = [SgdParameterUpdater(p,
                                               grad(cost.output_symbol, p),
-                                              args.learning_rate,
+                                              args.learning_rate / training_outputs.shape[0],
                                               args.momentum,
                                               args.nesterov)
                           for p in (affine_node.linear_node.params,
                                     affine_node.bias_node.params)]
+
+    pdb.set_trace()
 
     def plot_model_surface():
         xs, ys, zs = \
@@ -236,6 +246,7 @@ def main():
                       10)
         model_surface = points_axes.plot_surface(xs, ys, zs,
                                                  color=[1, .5, .5, .5])
+        print "model normal: %s, %s" % (str(affine_node.linear_node.params.get_value()), str(affine_node.bias_node.params.get_value()))
         return model_surface
 
     model_surface = [plot_model_surface()]
@@ -247,13 +258,20 @@ def main():
 
         def _on_batch(self, input_batches, monitored_value_batches):
             # pdb.set_trace()
+            model_surface[0].remove()
             del model_surface[0]
             model_surface.append(plot_model_surface())
+            # points_axes.autoscale_view(tight=True)
+            # points_axes.autoscale(enable=True, axis='both')
+            print("updated")
+            points_axes.set_zlim(bottom=-1, top=1)
+
+            # points_axes.relim()
+            #points_axes.draw_idle()
             figure.canvas.draw()
 
         def on_epoch(self):
             pass
-
 
     sgd = Sgd(cost=cost.output_symbol,
               inputs=[n.output_symbol for n in (input_node, label_node)],
