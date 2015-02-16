@@ -18,14 +18,16 @@ from nose.tools import (assert_equal,
                         assert_greater_equal)
 
 import theano
-from simplelearn.nodes import AffineTransform, AverageL2Loss
+from simplelearn.nodes import AffineTransform, L2Loss
 from simplelearn.utils import safe_izip
 from simplelearn.data.dataset import Dataset
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
                                   LimitsNumEpochs,
-                                  TrainingMonitor)
+                                  TrainingMonitor,
+                                  ValidationCallback,
+                                  StopsOnStagnation)
 import pdb
 
 
@@ -53,6 +55,14 @@ def parse_args():
 
         return arg
 
+    def batch_size(arg):
+        arg = int(arg)
+        if arg < 1 and arg != -1:
+            raise ValueError("Batch size must be positive, or -1, not %d."
+                             % arg)
+
+        return arg
+
     parser.add_argument("--training-size",
                         type=positive_int,
                         default=100,
@@ -77,6 +87,12 @@ def parse_args():
                         type=bool,
                         default=True,
                         help="Set to True to use Nesterov momentum.")
+
+    parser.add_argument("--batch-size",
+                        type=batch_size,
+                        default=-1,
+                        help=("Batch size. Set to -1 (default) to use entire "
+                              "dataset."))
 
     result = parser.parse_args()
     return result
@@ -213,14 +229,29 @@ def main():
                         testing_outputs,
                         c='red')
 
-    training_set = Dataset(names=('inputs', 'targets'),
-                           formats=(DenseFormat(axes=('b', 'f'),
-                                                shape=(-1, 2),
-                                                dtype=floatX),
-                                    DenseFormat(axes=['b', 'f'],
-                                                shape=[-1, 1],
-                                                dtype=floatX)),
-                           tensors=(training_inputs, training_outputs))
+    training_set, testing_set = (
+        Dataset(names=('inputs', 'targets'),
+                formats=(DenseFormat(axes=('b', 'f'),
+                                     shape=(-1, 2),
+                                     dtype=floatX),
+                         DenseFormat(axes=['b', 'f'],
+                                     shape=[-1, 1],
+                                     dtype=floatX)),
+                tensors=(training_inputs, training_outputs))
+        for inputs, outputs in safe_izip((training_inputs, testing_inputs),
+                                         (training_outputs, testing_outputs)))
+
+    # training_set = Dataset(names=('inputs', 'targets'),
+    #                        formats=(DenseFormat(axes=('b', 'f'),
+    #                                             shape=(-1, 2),
+    #                                             dtype=floatX),
+    #                                 DenseFormat(axes=['b', 'f'],
+    #                                             shape=[-1, 1],
+    #                                             dtype=floatX)),
+    #                        tensors=(training_inputs, training_outputs))
+
+    # testing_set = Dataset(names=('inputs', 'targets'),
+    #                       formats=
 
     input_node, label_node = training_set.make_input_nodes()
 
@@ -229,7 +260,11 @@ def main():
                                                             shape=[-1, 1],
                                                             dtype=None))
 
-    cost = AverageL2Loss(affine_node, label_node)
+    loss_node = L2Loss(affine_node, label_node)
+    loss_node.output_symbol.name = 'loss'
+
+    batch_loss = loss_node.output_symbol.sum()
+
     grad = theano.gradient.grad
 
     #DEBUG
@@ -238,7 +273,7 @@ def main():
     # affine_node.bias_node.params.set_value(cast(bias))
 
     parameter_updaters = [SgdParameterUpdater(p,
-                                              grad(cost.output_symbol, p),
+                                              grad(batch_loss, p),
                                               args.learning_rate / training_outputs.shape[0],
                                               args.momentum,
                                               args.nesterov)
@@ -266,9 +301,9 @@ def main():
                       10)
         model_surface = points_axes.plot_surface(xs, ys, zs,
                                                  color=[1, .5, .5, .5])
-        print("model normal: %s, %s" %
-              (str(affine_node.linear_node.params.get_value().flatten()),
-               str(affine_node.bias_node.params.get_value().flatten())))
+        # print("model normal: %s, %s" %
+        #       (str(affine_node.linear_node.params.get_value().flatten()),
+        #        str(affine_node.bias_node.params.get_value().flatten())))
         return model_surface
 
     model_surface = [plot_model_surface()]
@@ -285,7 +320,7 @@ def main():
             model_surface.append(plot_model_surface())
             # points_axes.autoscale_view(tight=True)
             # points_axes.autoscale(enable=True, axis='both')
-            print("updated")
+            # print("updated")
             points_axes.set_zlim(bottom=-1, top=1)
 
             # points_axes.relim()
@@ -305,10 +340,14 @@ def main():
             inputs = [input_node.output_symbol,
                       label_node.output_symbol]
 
-            self.lin_func = theano.function(inputs[:1], affine_node.linear_node.output_symbol)
-            self.bias_func = theano.function(inputs[:1], affine_node.bias_node.output_symbol)
-            self.affine_func = theano.function(inputs[:1], affine_node.output_symbol)
-            self.cost_func = theano.function(inputs, cost.output_symbol)
+            self.lin_func = theano.function(
+                inputs[:1],
+                affine_node.linear_node.output_symbol)
+            self.bias_func = theano.function(
+                inputs[:1], affine_node.bias_node.output_symbol)
+            self.affine_func = theano.function(
+                inputs[:1], affine_node.output_symbol)
+            self.cost_func = theano.function(inputs, loss.output_symbol)
 
         def _on_batch(self, input_batches, monitored_value_batches):
             assert_equal(len(input_batches), 2)
@@ -325,7 +364,7 @@ def main():
                        str(self.lin_func(input).flatten()),
                        str(self.bias_func(input).flatten()),
                        str(label.flatten().flatten()),
-                       str(self.cost_func(input, label))))
+                       str(self.cost_func(input, label).flatten())))
 
             self.batch_number += 1
 
@@ -335,21 +374,34 @@ def main():
 
             print("ending epoch %d" % self.epoch_number)
 
-    sgd = Sgd(cost=cost.output_symbol,
-              inputs=[n.output_symbol for n in (input_node, label_node)],
-              # parameters=[],
-              # parameters=[affine_node.linear_node.params],
+    batch_size = args.batch_size
+    if batch_size == -1:
+        batch_size = training_outputs.shape[0]
+
+    assert_greater(batch_size, 0)
+
+    input_symbols = [n.output_symbol for n in (input_node, label_node)]
+
+    validation_callback = ValidationCallback(
+        inputs=input_symbols,
+        input_iterator=testing_set.iterator(iterator_type='sequential',
+                                            batch_size=batch_size),
+        monitors=[StopsOnStagnation(loss_node.output_symbol,
+                                    loss_node.output_format,
+                                    num_epochs=10,
+                                    min_decrease=0.1,
+                                    value_name=None)])
+
+    sgd = Sgd(#cost=cost.output_symbol,
+              inputs=input_symbols,
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],
-              # parameter_updaters=[],
               parameter_updaters=parameter_updaters,
               input_iterator=training_set.iterator(
                   iterator_type='sequential',
-                  batch_size=training_outputs.shape[0]),
-                  #batch_size=2),
-              # monitors=[ModelSurfaceReplotter(), BatchPrinter()],
+                  batch_size=batch_size),
               monitors=[ModelSurfaceReplotter()],
-              epoch_callbacks=[LimitsNumEpochs(100)])  # revert to 100 once we've debugged
+              epoch_callbacks=[LimitsNumEpochs(100), validation_callback])
 
     def on_key_press(event):
         if event.key == 'q':

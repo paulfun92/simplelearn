@@ -86,6 +86,33 @@ class LimitsNumEpochs(EpochCallback):
                                         self._max_num_epochs))
 
 
+class ValidationCallback(EpochCallback):
+    '''
+    Computes statistics over a validation dataset at each training epoch.
+    '''
+
+    def __init__(self, inputs, input_iterator, monitors):
+        self._epoch_limiter = LimitsNumEpochs(1)
+        epoch_callbacks = [self._epoch_limiter, ]
+        self.trainer = Sgd(#cost=None,
+                           inputs=inputs,
+                           parameters=[],
+                           parameter_updaters=[],
+                           input_iterator=input_iterator,
+                           monitors=monitors,
+                           epoch_callbacks=epoch_callbacks)
+
+    def on_epoch(self):
+        try:
+            self.trainer.train()
+        except StopTraining, stop_training:
+            if stop_training.status == 'ok' and \
+               stop_training.message.startswith("Reached max # of epochs "):
+                self._epoch_limiter._epochs_seen = 0
+            else:
+                raise
+
+
 class LinearlyScalesOverEpochs(EpochCallback):
     """
     An epoch callback that linearly scales a theano shared variable over time.
@@ -192,18 +219,31 @@ class AverageMonitor(TrainingMonitor):
         super(AverageMonitor, self).__init__(values_to_monitor, formats)
         assert_greater(values_to_monitor, 0)
 
+        # values must have names
+        for value in values_to_monitor:
+            assert_in('name', value.__dict__)
+            assert_is_instance(value.name, str)
+
+        # value names must be unique
+        if len(frozenset(v.name for v in values_to_monitor)) != \
+           len(values_to_monitor):
+            raise ValueError("There were some duplicate variable names: %s" %
+                             str(tuple(v.name for v in values_to_monitor)))
+
         self._totals = None
         self._count = 0
         self.averages = None
 
     def _on_batch(self, input_batches, monitored_value_batches):
 
+        # Create _totals if this is the first call in an epoch.
         if self._totals is None:
             self._totals = []
             for batch, fmt in safe_izip(monitored_value_batches,
                                         self._formats):
                 batch_axis = fmt.axes.index('b')
                 self._totals.append(numpy.sum(batch, axis=batch_axis))
+        # Otherwise, accumulate monitored values into _totals.
         else:
             for total, batch, fmt in safe_izip(self._totals,
                                                monitored_value_batches,
@@ -238,7 +278,8 @@ class AverageMonitor(TrainingMonitor):
 
     def on_epoch(self):
         if self._count != 0:
-            self.averages = tuple(total / self._count for total in self._totals)
+            self.averages = tuple(total / self._count
+                                  for total in self._totals)
 
         self._totals = None
         self._count = 0
@@ -629,7 +670,7 @@ class Sgd(object):
     """
 
     def __init__(self,
-                 cost,
+                 # cost,
                  inputs,
                  parameters,
                  parameter_updaters,
@@ -641,8 +682,9 @@ class Sgd(object):
         Parameters
         ----------
 
-        cost: theano.gof.Variable
-          The cost to be reduced. Get as cost_node.get_output_symbol().
+        cost: theano.gof.Variable or None
+          The cost to be reduced. Must be a scalar.
+          May be None if parameters and parameter_updaters are both empty.
 
         inputs: sequence of theano.gof.Variables
           The inputs to the cost (e.g. [images, labels]), in the order yielded
@@ -658,6 +700,7 @@ class Sgd(object):
 
         parameter_updaters: sequence of SgdParameterUpdaters
           updaters for the corresponding elements in <parameters>.
+          These are defined using the loss function to be minimized.
 
         inputs: sequence of theano.gof.Variables
           These are the inputs to cost.
@@ -674,7 +717,11 @@ class Sgd(object):
         # sanity-checks the arguments.
         #
 
-        assert_is_instance(cost, theano.gof.Variable)
+        # if cost is None:
+        #     assert_equal(len(parameters), 0)
+        #     assert_equal(len(parameter_updaters), 0)
+        # else:
+        #     assert_isinstance(cost, theano.gof.Variable)
 
         assert_is_instance(inputs, Sequence)
         for input_symbol in inputs:
@@ -718,7 +765,7 @@ class Sgd(object):
         self._monitors = tuple(monitors)
 
         def compile_update_function():
-            outputs = [cost]
+            outputs = [] #if cost is None else [cost]
             for monitor in monitors:
                 outputs.extend(monitor.monitored_values)
 
@@ -744,7 +791,6 @@ class Sgd(object):
 
         self._train_called = False
 
-
     def train(self):
         """
         Runs training until a StopTraining exception is raised.
@@ -753,7 +799,7 @@ class Sgd(object):
         a StopTraining exception.
         """
 
-        if self._train_called:
+        if self._train_called and len(self._parameter_updaters) > 0:
             raise RuntimeError("train() has already been called on this %s. "
                                "Re-running train() risks inadvertently "
                                "carrying over implicit state from the "
@@ -787,20 +833,17 @@ class Sgd(object):
                 outputs = self._update_function(*cost_arguments)
 
                 # updates monitors
-                output_index = 1
+                output_index = 0
                 for monitor in self._monitors:
                     new_output_index = (output_index +
                                         len(monitor.monitored_values))
+                    # pdb.set_trace()
                     assert_less_equal(new_output_index, len(outputs))
                     monitored_values = outputs[output_index:new_output_index]
 
                     monitor.on_batch(cost_arguments, monitored_values)
 
                     output_index = new_output_index
-
-                # for monitor, monitored_value in safe_izip(self._monitors,
-                #                                           outputs[1:]):
-                #     monitor.on_batch(monitored_value)
 
                 # calls epoch callbacks, if we've iterated through an epoch
                 if self._input_iterator.next_is_new_epoch():

@@ -377,7 +377,8 @@ class DenseFormat(Format):
             # ok if batch_size is None
             shape[self.axes.index('b')] = batch_size
 
-            broadcastable = tuple(size == 1 for size in shape)
+            broadcastable = [False] * len(self.axes)
+            # broadcastable = tuple(size == 1 for size in shape)
 
             # broadcastable = [False] * len(self.axes)
             # if 'f' in self.axes:

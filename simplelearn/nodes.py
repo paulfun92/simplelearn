@@ -285,38 +285,57 @@ class Bias(Function1dTo1d):
         return Node(input_bf_node, output_symbol, output_bf_format)
 
 
-class AverageL2Loss(Node):
+class L2Loss(Node):
     '''
-    Computes the average L2 loss over a batch of data.
+    Computes the total sum-of-squared-differences over a batch of data.
+
+    Does not sum over batch axis. Given a batch of B examples, this will return
+    a size-B vector.
     '''
 
     def __init__(self, input_node_a, input_node_b):
         format_a = input_node_a.output_format
         format_b = input_node_b.output_format
+
         if format_a.shape != format_b.shape or \
            format_a.axes != format_b.axes:
-            raise ValueError("Can't take the L2 loss between different formats: %s vs "
-                             "%s" % (format_a, format_b))
+            raise ValueError("Can't take the L2 loss between different "
+                             "formats: %s vs %s" % (format_a, format_b))
 
-        # DEBUG
-        Print = theano.printing.Print
-        # input_a_symbol = Print("input")(input_node_a.output_symbol)
-        # input_b_symbol = Print("target")(input_node_b.output_symbol)
-        # diff = Print("diff")(input_a_symbol - input_b_symbol)
+        def make_bf_format(format):
+            batch_size = format.shape[format.axes.index('b')]
+            feature_size = numpy.prod(tuple(size
+                                            for size, axis
+                                            in safe_izip(format.shape,
+                                                         format.axes)
+                                            if axis != 'b'))
+            return DenseFormat(shape=(batch_size, feature_size),
+                               axes=('b', 'f'),
+                               dtype=format.dtype)
 
-        symbol_a = input_node_a.output_symbol
-        symbol_b = input_node_b.output_symbol
+        format_a_bf = make_bf_format(format_a)
+        format_b_bf = make_bf_format(format_b)
 
-        diff = symbol_a - symbol_b
-        batch_size = symbol_a.shape[input_node_a.output_format.axes.index('b')]
-        output_symbol = (diff * diff).sum() / batch_size
-        output_format = DenseFormat(axes=(),
-                                    shape=(),
+        symbol_a_bf = format_a.convert(input_node_a.output_symbol, format_a_bf)
+        symbol_b_bf = format_b.convert(input_node_b.output_symbol, format_b_bf)
+
+        diff = symbol_a_bf - symbol_b_bf
+        output_symbol = (diff * diff).sum(axis=1)
+        output_format = DenseFormat(axes=['b'],
+                                    shape=[-1],
                                     dtype=None)
-        # DEBUG
-        output_symbol = Print("cost")(output_symbol)
 
-        super(AverageL2Loss, self).__init__((input_node_a, input_node_b),
+        # diff = input_node_a.output_symbol - input_node_b.output_symbol
+        # output_symbol = (diff * diff).sum()
+        # output_format = DenseFormat(axes=(),
+        #                             shape=(),
+        #                             dtype=None)
+
+        # DEBUG
+        # Print = theano.printing.Print
+        # output_symbol = Print("cost")(output_symbol)
+
+        super(L2Loss, self).__init__((input_node_a, input_node_b),
                                      output_symbol,
                                      output_format)
 
