@@ -18,7 +18,7 @@ from nose.tools import (assert_equal,
                         assert_greater_equal)
 
 import theano
-from simplelearn.nodes import AffineTransform, L2Loss
+from simplelearn.nodes import AffineTransform, AverageL2Loss
 from simplelearn.utils import safe_izip
 from simplelearn.data.dataset import Dataset
 from simplelearn.formats import DenseFormat
@@ -105,6 +105,8 @@ def main():
                             rng,
                             num_points,
                             dtype):
+        assert_greater_equal(output_variance, 0.0)
+
         num_dims = matrix.shape[0]
         assert_equal(len(min_input), num_dims)
         assert_equal(len(max_input), num_dims)
@@ -116,7 +118,10 @@ def main():
 
         outputs = affine_transform(matrix, bias, inputs)
 
-        output_noise = rng.normal(scale=output_variance, size=outputs.shape)
+        output_noise = (numpy.zeros(outputs.shape, dtype=dtype)
+                        if output_variance == 0.0
+                        else rng.normal(scale=output_variance,
+                                        size=outputs.shape))
 
         cast = numpy.cast[dtype]
 
@@ -220,12 +225,17 @@ def main():
     input_node, label_node = training_set.make_input_nodes()
 
     affine_node = AffineTransform(input_node=input_node,
-                                  output_format=DenseFormat(axes=['b'],
-                                                            shape=[-1],
+                                  output_format=DenseFormat(axes=['b', 'f'],
+                                                            shape=[-1, 1],
                                                             dtype=None))
 
-    cost = L2Loss(affine_node, label_node)
+    cost = AverageL2Loss(affine_node, label_node)
     grad = theano.gradient.grad
+
+    #DEBUG
+    # cast = numpy.cast[affine_node.linear_node.params.get_value().dtype]
+    # affine_node.linear_node.params.set_value(cast(matrix))
+    # affine_node.bias_node.params.set_value(cast(bias))
 
     parameter_updaters = [SgdParameterUpdater(p,
                                               grad(cost.output_symbol, p),
@@ -235,7 +245,17 @@ def main():
                           for p in (affine_node.linear_node.params,
                                     affine_node.bias_node.params)]
 
-    pdb.set_trace()
+
+    # DEBUG
+    # affine_node.bias_node.params.set_value([[0.5]])
+    # parameter_updaters = [SgdParameterUpdater(affine_node.linear_node.params,
+    #                                           grad(cost.output_symbol,
+    #                                                affine_node.linear_node.params),
+    #                                           args.learning_rate / training_outputs.shape[0],
+    #                                           args.momentum,
+    #                                           args.nesterov)]
+
+    # pdb.set_trace()
 
     def plot_model_surface():
         xs, ys, zs = \
@@ -246,7 +266,9 @@ def main():
                       10)
         model_surface = points_axes.plot_surface(xs, ys, zs,
                                                  color=[1, .5, .5, .5])
-        print "model normal: %s, %s" % (str(affine_node.linear_node.params.get_value()), str(affine_node.bias_node.params.get_value()))
+        print("model normal: %s, %s" %
+              (str(affine_node.linear_node.params.get_value().flatten()),
+               str(affine_node.bias_node.params.get_value().flatten())))
         return model_surface
 
     model_surface = [plot_model_surface()]
@@ -273,16 +295,61 @@ def main():
         def on_epoch(self):
             pass
 
+    class BatchPrinter(TrainingMonitor):
+
+        def __init__(self):
+            super(BatchPrinter, self).__init__([], [])
+            self.batch_number = 0
+            self.epoch_number = -1
+
+            inputs = [input_node.output_symbol,
+                      label_node.output_symbol]
+
+            self.lin_func = theano.function(inputs[:1], affine_node.linear_node.output_symbol)
+            self.bias_func = theano.function(inputs[:1], affine_node.bias_node.output_symbol)
+            self.affine_func = theano.function(inputs[:1], affine_node.output_symbol)
+            self.cost_func = theano.function(inputs, cost.output_symbol)
+
+        def _on_batch(self, input_batches, monitored_value_batches):
+            assert_equal(len(input_batches), 2)
+
+            input_batches = tuple(b[:, numpy.newaxis, :]
+                                  for b in input_batches)
+
+            print("\nbatch %d:\n" % self.batch_number)
+
+            # print("batch cost: %s" % self.cost_func(*input_batches))
+            for input, label in safe_izip(*input_batches):
+                print("x: %s L(x): %s B(L(x)): %s tgt: %s cost: %s" %
+                      (str(input.flatten()),
+                       str(self.lin_func(input).flatten()),
+                       str(self.bias_func(input).flatten()),
+                       str(label.flatten().flatten()),
+                       str(self.cost_func(input, label))))
+
+            self.batch_number += 1
+
+        def on_epoch(self):
+            self.batch_number = 0
+            self.epoch_number += 1
+
+            print("ending epoch %d" % self.epoch_number)
+
     sgd = Sgd(cost=cost.output_symbol,
               inputs=[n.output_symbol for n in (input_node, label_node)],
+              # parameters=[],
+              # parameters=[affine_node.linear_node.params],
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],
+              # parameter_updaters=[],
               parameter_updaters=parameter_updaters,
               input_iterator=training_set.iterator(
                   iterator_type='sequential',
                   batch_size=training_outputs.shape[0]),
+                  #batch_size=2),
+              # monitors=[ModelSurfaceReplotter(), BatchPrinter()],
               monitors=[ModelSurfaceReplotter()],
-              epoch_callbacks=[LimitsNumEpochs(100)])
+              epoch_callbacks=[LimitsNumEpochs(100)])  # revert to 100 once we've debugged
 
     def on_key_press(event):
         if event.key == 'q':

@@ -160,12 +160,7 @@ def matrix_weighted_norm(covariance, batch_of_vectors):
     rval: theano.gof.Variable
       A Mx1 matrix, storing the v^T C v for the v's in batch_of_vectors' rows.
     '''
-    # assert_op = theano.tensor.opt.Assert()
-    # eq_op = theano.tensor.eq
-
-    # covariance = assert_op(covariance, eq_op(covariance.ndim, 2))
-    # batch_of_vectors = assert_op(batch_of_vectors,
-    #                              eq_op(batch_of_vectors.ndim, 2))
+    assert_equal(covariance.ndim, 2)
 
     x_dot_c = theano.dot(batch_of_vectors, covariance)
     return (x_dot_c * batch_of_vectors).sum(axis=1)  #, keepdims=True)
@@ -175,7 +170,7 @@ def create_cost_batch(singular_values, angle, point):
     # eq_op = theano.tensor.eq
 
     # point = assert_op(point, eq_op(point.ndim, 2))
-
+    assert_equal(point.ndim, 2)
     covariance = numpy.diag(singular_values)
 
     def make_rotation_matrix(angle):

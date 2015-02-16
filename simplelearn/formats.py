@@ -107,11 +107,11 @@ class Format(object):
         """
         return not Format.is_symbolic(batch)
 
-    def _requires_conversion(self, target_format):
+    def requires_conversion(self, target_format):
         """
         Returns True if converting from self to target_format is a no-op.
         """
-        raise NotImplementedError("%s._requires_conversion() not yet implemented." %
+        raise NotImplementedError("%s.requires_conversion() not yet implemented." %
                                   type(self))
 
     def convert(self, batch, output_format, output=None, **kwargs):
@@ -123,7 +123,7 @@ class Format(object):
         This function just calls self._convert(), check()-ing its
         inputs and outputs.
 
-        Note that if output is None and self._requires_conversion(output_format), the
+        Note that if output is None and self.requires_conversion(output_format), the
         batch is returned as-is without calling self._convert().
 
         Parameters
@@ -146,7 +146,7 @@ class Format(object):
 
         self.check(batch)
 
-        if output is None and not self._requires_conversion(output_format):
+        if output is None and not self.requires_conversion(output_format):
             return batch
 
         if output_format.dtype is not None and \
@@ -361,6 +361,10 @@ class DenseFormat(Format):
 
         self.axes = tuple(axes)
         self.shape = tuple(shape)
+
+    def __str__(self):
+        return ("DenseFormat{shape: %s, axes: %s, dtype: %s}" %
+                (str(self.shape), str(self.axes), self.dtype))
 
     def _make_batch(self, is_symbolic, batch_size, dtype, name):
 
@@ -656,7 +660,7 @@ class DenseFormat(Format):
             else:
                 return numpy.cast[output_format.dtype](batch)
 
-    def _requires_conversion(self, target_format):
+    def requires_conversion(self, target_format):
         for fmt in (self, target_format):
             if fmt.dtype is not None:
                 assert_is_instance(fmt.dtype, numpy.dtype)
