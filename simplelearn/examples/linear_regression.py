@@ -25,7 +25,9 @@ from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
                                   LimitsNumEpochs,
-                                  TrainingMonitor,
+                                  LogsToLists,
+                                  Monitor,
+                                  AverageMonitor,
                                   ValidationCallback,
                                   StopsOnStagnation)
 import pdb
@@ -308,10 +310,10 @@ def main():
 
     model_surface = [plot_model_surface()]
 
-    class ModelSurfaceReplotter(TrainingMonitor):
+    class ModelSurfaceReplotter(Monitor):
 
         def __init__(self):
-            super(ModelSurfaceReplotter, self).__init__([], [])
+            super(ModelSurfaceReplotter, self).__init__([], [], [])
 
         def _on_batch(self, input_batches, monitored_value_batches):
             # pdb.set_trace()
@@ -327,52 +329,52 @@ def main():
             #points_axes.draw_idle()
             figure.canvas.draw()
 
-        def on_epoch(self):
-            pass
+        def _on_epoch(self):
+            return ()
 
-    class BatchPrinter(TrainingMonitor):
+    # class BatchPrinter(TrainingMonitor):
 
-        def __init__(self):
-            super(BatchPrinter, self).__init__([], [])
-            self.batch_number = 0
-            self.epoch_number = -1
+    #     def __init__(self):
+    #         super(BatchPrinter, self).__init__([], [])
+    #         self.batch_number = 0
+    #         self.epoch_number = -1
 
-            inputs = [input_node.output_symbol,
-                      label_node.output_symbol]
+    #         inputs = [input_node.output_symbol,
+    #                   label_node.output_symbol]
 
-            self.lin_func = theano.function(
-                inputs[:1],
-                affine_node.linear_node.output_symbol)
-            self.bias_func = theano.function(
-                inputs[:1], affine_node.bias_node.output_symbol)
-            self.affine_func = theano.function(
-                inputs[:1], affine_node.output_symbol)
-            self.cost_func = theano.function(inputs, loss.output_symbol)
+    #         self.lin_func = theano.function(
+    #             inputs[:1],
+    #             affine_node.linear_node.output_symbol)
+    #         self.bias_func = theano.function(
+    #             inputs[:1], affine_node.bias_node.output_symbol)
+    #         self.affine_func = theano.function(
+    #             inputs[:1], affine_node.output_symbol)
+    #         self.cost_func = theano.function(inputs, loss.output_symbol)
 
-        def _on_batch(self, input_batches, monitored_value_batches):
-            assert_equal(len(input_batches), 2)
+    #     def _on_batch(self, input_batches, monitored_value_batches):
+    #         assert_equal(len(input_batches), 2)
 
-            input_batches = tuple(b[:, numpy.newaxis, :]
-                                  for b in input_batches)
+    #         input_batches = tuple(b[:, numpy.newaxis, :]
+    #                               for b in input_batches)
 
-            print("\nbatch %d:\n" % self.batch_number)
+    #         print("\nbatch %d:\n" % self.batch_number)
 
-            # print("batch cost: %s" % self.cost_func(*input_batches))
-            for input, label in safe_izip(*input_batches):
-                print("x: %s L(x): %s B(L(x)): %s tgt: %s cost: %s" %
-                      (str(input.flatten()),
-                       str(self.lin_func(input).flatten()),
-                       str(self.bias_func(input).flatten()),
-                       str(label.flatten().flatten()),
-                       str(self.cost_func(input, label).flatten())))
+    #         # print("batch cost: %s" % self.cost_func(*input_batches))
+    #         for input, label in safe_izip(*input_batches):
+    #             print("x: %s L(x): %s B(L(x)): %s tgt: %s cost: %s" %
+    #                   (str(input.flatten()),
+    #                    str(self.lin_func(input).flatten()),
+    #                    str(self.bias_func(input).flatten()),
+    #                    str(label.flatten().flatten()),
+    #                    str(self.cost_func(input, label).flatten())))
 
-            self.batch_number += 1
+    #         self.batch_number += 1
 
-        def on_epoch(self):
-            self.batch_number = 0
-            self.epoch_number += 1
+    #     def on_epoch(self):
+    #         self.batch_number = 0
+    #         self.epoch_number += 1
 
-            print("ending epoch %d" % self.epoch_number)
+    #         print("ending epoch %d" % self.epoch_number)
 
     batch_size = args.batch_size
     if batch_size == -1:
@@ -382,25 +384,30 @@ def main():
 
     input_symbols = [n.output_symbol for n in (input_node, label_node)]
 
+    validation_loss_logger = LogsToLists()
+    training_stopper = StopsOnStagnation(max_epochs=10, min_decrease=.1)
+
     validation_callback = ValidationCallback(
         inputs=input_symbols,
         input_iterator=testing_set.iterator(iterator_type='sequential',
                                             batch_size=batch_size),
-        monitors=[StopsOnStagnation(loss_node.output_symbol,
-                                    loss_node.output_format,
-                                    num_epochs=10,
-                                    min_decrease=0.1,
-                                    value_name=None)])
+        monitors=[AverageMonitor(loss_node.output_symbol,
+                                 loss_node.output_format,
+                                 callbacks=[validation_loss_logger,
+                                            training_stopper])])
 
-    sgd = Sgd(#cost=cost.output_symbol,
-              inputs=input_symbols,
+    training_loss_logger = LogsToLists()
+    training_loss_monitor = AverageMonitor(loss_node.output_symbol,
+                                           loss_node.output_format,
+                                           callbacks=[training_loss_logger])
+
+    sgd = Sgd(inputs=input_symbols,
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],
               parameter_updaters=parameter_updaters,
-              input_iterator=training_set.iterator(
-                  iterator_type='sequential',
-                  batch_size=batch_size),
-              monitors=[ModelSurfaceReplotter()],
+              input_iterator=training_set.iterator(iterator_type='sequential',
+                                                   batch_size=batch_size),
+              monitors=[ModelSurfaceReplotter(), training_loss_monitor],
               epoch_callbacks=[LimitsNumEpochs(100), validation_callback])
 
     def on_key_press(event):

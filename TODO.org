@@ -1,3 +1,24 @@
+* ValidationCallback: loops through an epoch of data with an Sgd, so that it can re-use any monitor or callback classes.
+** Common pattern: on_batch computes some function of input_batch (e.g. cost, max/min output of a given layer), while on_epoch reports it (perhaps also computing the average).
+** StopsOnStagnation currently implemented as a subclass of AverageMonitor. Can stop on stagnation of the average of any f(input).
+** We would also like to print out/plot/log the average that it's computing.
+*** Subclassing is not the answer, since if we're doing more than one thing (stop on stagnation/print/plot/log), each task would be a different subclass of AverageMonitor, each independently and redundantly computing the average.
+**** Solution 1: callbacks
+***** AverageMonitor accumulates in on_batch, computes the average on on_epoch, and feeds it to a list of registered callbacks' __call__ methods.
+***** MaxMonitor/MinMonitor updates max/min during on_batch, and feeds it to a list of registered callbacks' __call__ methods.
+***** StopsOnStagnation is now a Callback for these monitors.
+***** Structurally, this sounds great; a problem is the names. Maybe remap to:
+****** EpochCallback: EpochCallback
+******* on_epoch(self)
+****** TrainingMonitor(EpochCallback): BatchAndEpochCallback(EpochCallback)
+******* __init__(self, value_to_monitor)
+******* on_batch(self, input_batch), in addition to inherited on_epoch(self)
+****** AverageMonitor/MaxMonitor/MinMonitor(TrainingMonitor): as is, suclassing from BatchAndEpochCallback
+****** Callback for the above monitors: MonitorCallback
+******* __call__(self, value)
+
+
+
 Next: flesh out sgd to contain a list of updaters, and build the theano function (with updates) on train().
 
 Sgd._function = theano.function(inputs=input_nodes' inputs,

@@ -53,6 +53,14 @@ import pdb
 
 
 class EpochCallback(object):
+
+    def on_start_training(self):
+        '''
+        Called at the beginning of training, before processing any batches.
+        '''
+        raise NotImplementedError("%s.on_start_training() not yet implemented."
+                                  % type(self))
+
     def on_epoch(self):
         raise NotImplementedError("%s.on_epoch() not yet implemented." %
                                   type(self))
@@ -73,14 +81,17 @@ class LimitsNumEpochs(EpochCallback):
                              max_num_epochs)
 
         self._max_num_epochs = max_num_epochs
-        self._epochs_seen = -1
+        self._num_epochs_seen = None
+
+    def on_start_training(self):
+        self._num_epochs_seen = 0
 
     def on_epoch(self):
-        self._epochs_seen += 1
+        assert self._num_epochs_seen >= 0
 
-        assert self._epochs_seen >= 0
+        self._num_epochs_seen += 1
 
-        if self._epochs_seen >= self._max_num_epochs:
+        if self._num_epochs_seen >= self._max_num_epochs:
             raise StopTraining(status='ok',
                                message=('Reached max # of epochs %d.' %
                                         self._max_num_epochs))
@@ -88,19 +99,21 @@ class LimitsNumEpochs(EpochCallback):
 
 class ValidationCallback(EpochCallback):
     '''
-    Computes statistics over a validation dataset at each training epoch.
+    Runs monitors over a validation dataset after each training epoch.
     '''
 
     def __init__(self, inputs, input_iterator, monitors):
         self._epoch_limiter = LimitsNumEpochs(1)
         epoch_callbacks = [self._epoch_limiter, ]
-        self.trainer = Sgd(#cost=None,
-                           inputs=inputs,
+        self.trainer = Sgd(inputs=inputs,
                            parameters=[],
                            parameter_updaters=[],
                            input_iterator=input_iterator,
                            monitors=monitors,
                            epoch_callbacks=epoch_callbacks)
+
+    def on_start_training(self):
+        self.on_epoch()
 
     def on_epoch(self):
         try:
@@ -108,7 +121,7 @@ class ValidationCallback(EpochCallback):
         except StopTraining, stop_training:
             if stop_training.status == 'ok' and \
                stop_training.message.startswith("Reached max # of epochs "):
-                self._epoch_limiter._epochs_seen = 0
+                self._epoch_limiter._num_epochs_seen = 0
             else:
                 raise
 
@@ -147,12 +160,13 @@ class LinearlyScalesOverEpochs(EpochCallback):
         self._final_scale = final_scale
         self._epochs_to_saturation = epochs_to_saturation
 
-        self._num_epochs_seen = -1
+        self._num_epochs_seen = None
+
+    def on_start_training(self):
+        self._num_epochs_seen = 0
 
     def on_epoch(self):
-        self._num_epochs_seen += 1
-
-        assert self._num_epochs_seen >= 0
+        assert_greater_equal(self._num_epochs_seen, 0)
 
         # interpolation parameter
         alpha = min(1.0,
@@ -163,28 +177,60 @@ class LinearlyScalesOverEpochs(EpochCallback):
         self.shared_value.set_value(scale * self._initial_value)
 
 
-class TrainingMonitor(EpochCallback):
+class Monitor(EpochCallback):
     """
-    Monitors some function of an input batch during training.
+    On each epoch, this reports statistics about some monitored value Y.
+
+    Examples: Y might be the output of layer 3 of a 6-layer net.
+
+              MaxMonitor reports the elementwise maximum of Y encountered
+              over the epoch.
+
+              AverageMonitor reports Y, elementwise-averaged over the epoch.
     """
 
-    def __init__(self, values_to_monitor, formats):
+    def __init__(self, values_to_monitor, formats, callbacks):
         '''
         Parameters
         ----------
-        values_to_monitor: sequence
-          A sequence of theano variables to monitor
+        values_to_monitor: theano expression, or a Sequence of them
+          A sequence of theano expressions to monitor. These should be
+          functions of the input variables.
 
-        formats: sequence
-          A sequence of the above values' Formats
+          Must not be empty.
+
+        formats: a Format, or a Sequence of them
+          A sequence of the above values' Formats.
+
+        callbacks: a __call__-able, or a Sequence of them
+          The values returned by self._on_epoch() get fed to these callbacks.
+          These must have the call signature f(values, formats).
+          Values is the Sequence returned by self._on_epoch().
+          Formats are the values' formats, also a Sequence.
         '''
 
         #
         # Checks args
         #
 
+        if isinstance(values_to_monitor, theano.gof.Variable):
+            values_to_monitor = [values_to_monitor]
+
+        if isinstance(formats, Format):
+            formats = [formats]
+
+        if not isinstance(callbacks, Sequence):
+            callbacks = [callbacks]
+
         assert_is_instance(values_to_monitor, Sequence)
         assert_is_instance(formats, Sequence)
+        assert_is_instance(callbacks, Sequence)
+
+        assert_equal(len(values_to_monitor), len(formats))
+        assert_equal(len(values_to_monitor),
+                     len(frozenset(values_to_monitor)),
+                     "values_to_monitor contains repeated elements: %s" %
+                     str(values_to_monitor))
 
         for value, fmt in safe_izip(values_to_monitor, formats):
             assert_is_instance(value, theano.gof.Variable)
@@ -200,89 +246,454 @@ class TrainingMonitor(EpochCallback):
 
         self.monitored_values = tuple(values_to_monitor)
         self._formats = tuple(formats)
+        self._callbacks = list(callbacks)
 
     def on_batch(self, input_batches, monitored_value_batches):
+        '''
+        Updates the values to report at the end of the epoch.
+
+        Parameters
+        ----------
+        input_batches: Sequence of numpy.ndarrays
+          The input batches coming in from the dataset's iterator.
+          Typically these are (values, labels)
+
+        monitored_value_batches: Sequence of numpy.ndarrays
+          The numerical values, for this batch, of the values_to_monitor
+          arguments to __init__().
+        '''
         assert_equal(len(monitored_value_batches), len(self._formats))
 
         for batch, fmt in safe_izip(monitored_value_batches, self._formats):
             fmt.check(batch)
 
-        self._on_batch(input_batches, monitored_value_batches)
+        self._on_batch(tuple(input_batches),
+                       tuple(monitored_value_batches))
 
     def _on_batch(self, input_batches, monitored_value_batches):
+        '''
+        Implementation of self.on_batch(). See that method's docs.
+
+        Parameters
+        ----------
+        input_batches: tuple of numpy.ndarrays.
+
+        monitored_value_batches: tuple of numpy.ndarrays.
+        '''
         raise NotImplementedError("%s._on_batch() not yet implemented." %
                                   type(self))
 
-
-class AverageMonitor(TrainingMonitor):
-    def __init__(self, values_to_monitor, formats):
-        super(AverageMonitor, self).__init__(values_to_monitor, formats)
-        assert_greater(values_to_monitor, 0)
-
-        # values must have names
-        for value in values_to_monitor:
-            assert_in('name', value.__dict__)
-            assert_is_instance(value.name, str)
-
-        # value names must be unique
-        if len(frozenset(v.name for v in values_to_monitor)) != \
-           len(values_to_monitor):
-            raise ValueError("There were some duplicate variable names: %s" %
-                             str(tuple(v.name for v in values_to_monitor)))
-
-        self._totals = None
-        self._count = 0
-        self.averages = None
-
-    def _on_batch(self, input_batches, monitored_value_batches):
-
-        # Create _totals if this is the first call in an epoch.
-        if self._totals is None:
-            self._totals = []
-            for batch, fmt in safe_izip(monitored_value_batches,
-                                        self._formats):
-                batch_axis = fmt.axes.index('b')
-                self._totals.append(numpy.sum(batch, axis=batch_axis))
-        # Otherwise, accumulate monitored values into _totals.
-        else:
-            for total, batch, fmt in safe_izip(self._totals,
-                                               monitored_value_batches,
-                                               self._formats):
-                batch_axis = fmt.axes.index('b')
-                total += numpy.sum(batch, axis=batch_axis)
-
-        def get_num_examples(batches, formats):
-            '''
-            Returns the # of examples in a batch of sub-batches.
-
-            Checks that all sub-batches contain the same # of examples.
-            '''
-
-            result = None
-
-            # Checks that all batches have the same number of examples
-            for batch, fmt in safe_izip(batches, formats):
-                batch_axis = fmt.axes.index('b')
-                batch_size = batch.shape[batch_axis]
-
-                if result is None:
-                    result = batch_size
-                else:
-                    assert_equal(batch_size, result)
-
-            assert_is_not(result, None)
-
-            return result
-
-        self._count += get_num_examples(monitored_value_batches, self._formats)
+    def on_start_training(self):
+        pass
 
     def on_epoch(self):
-        if self._count != 0:
-            self.averages = tuple(total / self._count
-                                  for total in self._totals)
+        '''
+        Feeds monitored values to self._callbacks
+        '''
+        # compute values to report
+        values_to_report = self._on_epoch()
 
-        self._totals = None
+        if not isinstance(values_to_report, tuple):
+            raise ValueError("%s._on_epoch() implemented incorrectly. It "
+                             "should return a tuple, but it returned %s."
+                             % (type(self), type(values_to_report)))
+
+        for callback in self._callbacks:
+            callback(values_to_report, self._formats)
+
+    def _on_epoch(self):
+        '''
+        Returns a tuple of values to feed to self._callbacks as arguments.
+
+        Returns
+        -------
+        rval: tuple of numpy.ndarrays
+           Arguments to feed to self._callbacks' __call__(self, *args)
+        '''
+        raise NotImplementedError("%s._on_epoch() not yet implemented")
+
+
+# class AverageMonitor(Monitor):
+
+#     def __init__(self, values_to_monitor, formats):
+#         super(AverageMonitor, self).__init__(values_to_monitor, formats)
+
+#         # # values must have names
+#         # for value in values_to_monitor:
+#         #     assert_in('name', value.__dict__)
+#         #     assert_is_instance(value.name, str)
+
+#         # # value names must be unique
+#         # if len(frozenset(v.name for v in values_to_monitor)) != \
+#         #    len(values_to_monitor):
+#         #     raise ValueError("There were some duplicate variable names: %s" %
+#         #                      str(tuple(v.name for v in values_to_monitor)))
+
+#         for fmt in formats:
+#             assert_in('b', fmt.axes)
+
+#         self._totals = None
+#         self._count = 0
+
+#     def _on_batch(self, input_batches, monitored_value_batches):
+
+#         def get_sums_and_batch_size(batches, formats):
+#             batch_axes = [fmt.axes.index('b') for fmt in formats]
+
+#             sums = [numpy.sum(batch, axis=batch_axis)
+#                     for batch, batch_axis
+#                     in safe_izip(batches, batch_axes)]
+
+#             batch_sizes = numpy.array([batch.shape[batch_axis]
+#                                        for batch, batch_axis
+#                                        in safe_izip(batches, batch_axes)])
+
+#             # Sic. Numpy.all() returns True for empty arrays.
+#             assert_true(numpy.all(batch_sizes[0] == batch_sizes[1:]))
+
+#             return sums, batch_sizes[0]
+
+#         sums, batch_size = get_sums_and_batch_sizes(monitored_value_batches,
+#                                                     self._formats)
+#         if self._totals is None:
+#             self._totals = sums
+#             self._count = batch_size
+#         else:
+#             for total, subtotal in safe_izip(self._totals, sums):
+#                 total += subtotal
+
+#             self._count += batch_size
+
+#     def _on_epoch(self):
+#         totals = self._totals
+#         count = self._count
+#         self._totals = None
+#         self._count = None
+#         return [total / count for total in totals]
+
+
+# class MaxMonitor(Monitor):
+#     def __init__(self, values_to_monitor, formats):
+#         super(MaxMonitor, self).__init__(values_to_monitor, formats)
+
+#         for fmt in formats:
+#             assert_in('b', fmt.axes)
+
+#         self._maxes = None
+
+#     def _on_batch(self, input_batches, monitored_value_batches):
+#         batch_axes = [fmt.axes.index('b') for fmt in self._formats]
+
+#         new_maxes = [numpy.max(batch, axis=batch_axis)
+#                      for batch, batch_axis
+#                      in safe_izip(batches, batch_axes)]
+
+#         for new_max, old_max, batch_axis in safe_izip(new_maxes,
+#                                                       self._maxes,
+#                                                       batch_axes):
+#             stack = numpy.concatenate((new_max, old_max), axis=batch_axis)
+#             old_max[...] = numpy.max(stack, axis=batch_axis, keepdims=True)
+
+#     def _on_epoch(self):
+#         result = self._maxes
+#         self._maxes = None
+#         return result
+
+
+# class MinMonitor(Monitor):
+#     def __init__(self, values_to_monitor, formats):
+#         super(MinMonitor, self).__init__(values_to_monitor, formats)
+
+#         for fmt in formats:
+#             assert_in('b', fmt.axes)
+
+#         self._mins = None
+
+#     def _on_batch(self, input_batches, monitored_value_batches):
+#         batch_axes = [fmt.axes.index('b') for fmt in self._formats]
+
+#         new_mins = [numpy.min(batch, axis=batch_axis)
+#                     for batch, batch_axis
+#                     in safe_izip(batches, batch_axes)]
+
+#         for new_max, old_max, batch_axis in safe_izip(new_mins,
+#                                                       self._mins,
+#                                                       batch_axes):
+#             stack = numpy.concatenate((new_max, old_max), axis=batch_axis)
+#             old_max[...] = numpy.max(stack, axis=batch_axis, keepdims=True)
+
+#     def _on_epoch(self):
+#         result = self._mins
+#         self._mins = None
+#         return result
+
+
+class ReduceMonitor(Monitor):
+    '''
+    An abstract superclass of monitors like MaxMonitor, MinMonitor,
+    that operate by applying a reduction operator (e.g. max, min)
+    along the batch axis for each batch.
+    '''
+
+    def __init__(self, values_to_monitor, formats, callbacks):
+        super(ReduceMonitor, self).__init__(values_to_monitor,
+                                            formats,
+                                            callbacks)
+
+        assert_greater(len(self._formats), 0)
+        assert_greater(len(self._callbacks), 0)
+
+        for fmt in self._formats:
+            assert_in('b', fmt.axes)
+
+        self._tallies = None
+
+    def _reduce_batch(self, input_batch, batch_axis):
+        '''
+        Reduce input_batch along its batch_axis, and return the result.
+        '''
+        raise NotImplementedError("%s._reduce_batch() not yet implemented." %
+                                  type(self))
+
+    def _update_tally(self, reduced_value, batch_axis, tally):
+        '''
+        Updates a tally (one of self._tallies) using a reduced batch.
+        '''
+        raise NotImplementedError("%s._update_tally() not yet implemented." %
+                                  type(self))
+
+    def _on_batch(self, input_batches, monitored_value_batches):
+        batch_axes = [fmt.axes.index('b') for fmt in self._formats]
+
+        new_tallies = []
+        for batch, fmt, batch_axis in safe_izip(monitored_value_batches,
+                                                self._formats,
+                                                batch_axes):
+            new_tally = self._reduce_batch(batch, batch_axis)
+            fmt.check(new_tally)
+            assert_equal(new_tally.shape[batch_axis], 1)
+
+            new_tallies.append(new_tally)
+
+        new_tallies = tuple(new_tallies)
+        # new_tallies = [self._reduce_batch(batch, batch_axis)
+        #                for batch, batch_axis
+        #                in safe_izip(batches, batch_axes)]
+
+        if self._tallies is None:
+            self._tallies = new_tallies
+        else:
+            for new_tally, old_tally, batch_axis in safe_izip(new_tallies,
+                                                              self._tallies,
+                                                              batch_axes):
+                self._update_tally(new_tally, batch_axis, old_tally)
+
+    def _on_epoch(self):
+        assert_is_not(self._tallies, None)
+
+        result = self._tallies
+        self._tallies = None
+
+        return result
+
+
+class MaxMonitor(ReduceMonitor):
+    '''
+    Computes the elementwise maximum of monitored values, over the batch axis.
+    '''
+
+    def __init__(self, values_to_monitor, formats, callbacks):
+        super(AverageMonitor, self).__init__(values_to_monitor, formats)
+
+    def _reduce_batch(self, input_batch, batch_axis):
+        return numpy.max(input_batch, axis=batch_axis)
+
+    def _update_tally(self, reduced_value, batch_axis, tally):
+        stack = numpy.concatenate((reduced_value, tally), axis=batch_axis)
+        tally[...] = numpy.max(stack, axis=batch_axis, keepdims=True)
+
+
+class MinMonitor(ReduceMonitor):
+    '''
+    Computes the elementwise minimum of monitored values, over the batch axis.
+    '''
+
+    def __init__(self, values_to_monitor, formats, callbacks):
+        super(AverageMonitor, self).__init__(values_to_monitor, formats)
+
+    def _reduce_batch(self, input_batch, batch_axis):
+        return numpy.min(input_batch, axis=batch_axis)
+
+    def _update_tally(self, reduced_value, batch_axis, tally):
+        stack = numpy.concatenate((reduced_value, tally), axis=batch_axis)
+        tally[...] = numpy.min(stack, axis=batch_axis, keepdims=True)
+
+
+class SumMonitor(ReduceMonitor):
+    '''
+    Computes the elementwise sum of monitored values over the batch axis.
+    '''
+
+    def __init__(self, values_to_monitor, formats, callbacks):
+        super(SumMonitor, self).__init__(values_to_monitor,
+                                         formats,
+                                         callbacks)
+        self._count = None
+
+    def _reduce_batch(self, input_batch, batch_axis):
+        return numpy.sum(input_batch, axis=batch_axis, keepdims=True)
+
+    def _update_tally(self, reduced_value, batch_axis, tally):
+        tally += reduced_value
+
+
+class AverageMonitor(SumMonitor):
+    '''
+    Computes the elementwise average of monitored values over the batch axis.
+    '''
+
+    def __init__(self, values_to_monitor, formats, callbacks):
+        super(AverageMonitor, self).__init__(values_to_monitor,
+                                             formats,
+                                             callbacks)
         self._count = 0
+
+    def _on_batch(self, input_batches, monitored_value_batches):
+        # Update self._tallies
+        super(AverageMonitor, self)._on_batch(input_batches,
+                                              monitored_value_batches)
+        assert_is_instance(self._tallies, Sequence)
+
+        batch_axes = [fmt.axes.index('b') for fmt in self._formats]
+
+        # Update self._count
+        batch_sizes = numpy.asarray([batch.shape[batch_axis]
+                                     for batch, batch_axis
+                                     in safe_izip(monitored_value_batches,
+                                                  batch_axes)])
+        assert_true(numpy.all(batch_sizes[0] == batch_sizes[1:]),
+                    "Unequal batch sizes: %s" % str(batch_sizes))
+        self._count += batch_sizes[0]
+
+    def _on_epoch(self):
+        totals = super(AverageMonitor, self)._on_epoch()
+        assert_is_instance(totals, Sequence)
+
+        result = tuple(total / self._count for total in totals)
+        self._count = 0
+
+        return result
+
+
+# class AverageMonitor(ReduceMonitor):
+#     def __init__(self, values_to_monitor, formats):
+#         super(AverageMonitor).__init__(values_to_monitor, formats)
+#         self._count = None
+
+#     def _reduce_batch(self, input_batch, batch_axis):
+#         batch_size = input_batch.shape[batch_axis]
+
+#         if self._batch_size is None:
+#             self._batch_size = batch_size
+#         else:
+#             assert_equal(self._batch_size, batch_size)
+
+#         return numpy.sum(input_batch, axis=batch_axis)
+
+#     def _update_tally(self, reduced_value, batch_axis, tally):
+#         tally += reduced_value
+
+#     def _on_batch(self, input_batches, monitored_value_batches):
+#         # Update self._tallies
+#         super(self, AverageMonitor)._on_batch(input_batches,
+#                                               monitored_value_batches)
+
+#         # Update self._count
+#         batch_sizes = [batch.shape[batch_axis]
+#                        for batch, batch_axis
+#                        in safe_izip(monitored_value_batches, batch_axes)]
+#         assert_true(numpy.all(batch_sizes[0] == batch_sizes[1:]))
+#         self._count += batch_sizes[0]
+
+#     def _on_epoch(self):
+#         totals = super(AverageMonitor, self)._on_epoch()
+#         result = [total / self._count for total in totals]
+#         self._count = None
+
+#         return result
+
+
+
+# class AverageMonitor_old(Monitor):
+#     def __init__(self, values_to_monitor, formats):
+#         super(AverageMonitor, self).__init__(values_to_monitor, formats)
+#         assert_greater_equal(len(values_to_monitor), 0)
+
+#         # values must have names
+#         for value in values_to_monitor:
+#             assert_in('name', value.__dict__)
+#             assert_is_instance(value.name, str)
+
+#         # value names must be unique
+#         if len(frozenset(v.name for v in values_to_monitor)) != \
+#            len(values_to_monitor):
+#             raise ValueError("There were some duplicate variable names: %s" %
+#                              str(tuple(v.name for v in values_to_monitor)))
+
+#         self._totals = None
+#         self._count = 0
+#         self.averages = None
+
+#     def _on_batch(self, input_batches, monitored_value_batches):
+
+#         # Create _totals if this is the first call in an epoch.
+#         if self._totals is None:
+#             self._totals = []
+#             for batch, fmt in safe_izip(monitored_value_batches,
+#                                         self._formats):
+#                 batch_axis = fmt.axes.index('b')
+#                 self._totals.append(numpy.sum(batch, axis=batch_axis))
+
+#         # Otherwise, accumulate monitored values into _totals.
+#         else:
+#             for total, batch, fmt in safe_izip(self._totals,
+#                                                monitored_value_batches,
+#                                                self._formats):
+#                 batch_axis = fmt.axes.index('b')
+#                 total += numpy.sum(batch, axis=batch_axis)
+
+#         def get_num_examples(batches, formats):
+#             '''
+#             Returns the # of examples in a batch of sub-batches.
+
+#             Checks that all sub-batches contain the same # of examples.
+#             '''
+
+#             result = None
+
+#             # Checks that all batches have the same number of examples
+#             for batch, fmt in safe_izip(batches, formats):
+#                 batch_axis = fmt.axes.index('b')
+#                 batch_size = batch.shape[batch_axis]
+
+#                 if result is None:
+#                     result = batch_size
+#                 else:
+#                     assert_equal(batch_size, result)
+
+#             assert_is_not(result, None)
+
+#             return result
+
+#         self._count += get_num_examples(monitored_value_batches, self._formats)
+
+#     def on_epoch(self):
+#         if self._count != 0:
+#             self.averages = tuple(total / self._count
+#                                   for total in self._totals)
+
+#         self._totals = None
+#         self._count = 0
 
 
 # class MaxMonitor(TrainingMonitor):
@@ -380,7 +791,6 @@ class AverageMonitor(TrainingMonitor):
 #         for callback in self._callbacks:
 #             callback(average)
 
-
 class StopTraining(Exception):
     """
     An exception thrown to signal the end of training.
@@ -396,81 +806,144 @@ class StopTraining(Exception):
         super(StopTraining, self).__init__(message)
 
 
-class StopsOnStagnation(AverageMonitor):
-    """
-    Halts training if the average of f(x) over an epoch stops decreasing.
-    """
+class StopsOnStagnation(object):
+    '''
+    A callback to Monitor that stops training if the monitored value
+    (e.g. average loss over the epoch) doesn't decrease for N epochs.
+    '''
 
-    def __init__(self,
-                 value_to_monitor,
-                 value_format,
-                 num_epochs,
-                 min_decrease=0.0,
-                 value_name=None):
-        '''
-        Parameters
-        ----------
-        value_to_monitor: theano expression
-          Some f(x) (x is the data iterator output batch).
+    def __init__(self, max_epochs, min_decrease):
+        assert_greater(max_epochs, 0)
+        assert_true(numpy.issubdtype(type(max_epochs), numpy.integer))
 
-        value_format: Format
-          Data format of value_to_monitor
-
-        num_epochs: int
-          maximum number of epochs to wait for average f to decrease.
-
-        min_decrease: float
-          minimum decrease in avg f needed for it to count as a decrease.
-
-        value_name: str
-          If value_to_monitor doesn't have a name, specify it here.
-        '''
-
-        check_is_subdtype(num_epochs, 'num_epochs', numpy.integer)
-        assert_greater(num_epochs, 0)
-        check_is_subdtype(min_decrease, 'min_decrease', numpy.floating)
         assert_greater_equal(min_decrease, 0.0)
-        assert_not_equal(value_to_monitor.name is None,
-                         value_name is None,
-                         ("value_to_monitor.name was specified. No need to "
-                          "provide value_name argument"
-                          if value_to_monitor.name is not None
-                          else ("when value_to_monitor has no name, you must "
-                                "provide a <name> argument.")))
 
-        super(StopsOnStagnation, self).__init__([value_to_monitor],
-                                                [value_format])
-
-        self._max_epochs_since_min = num_epochs
-        self._epochs_since_min = 0
+        self._max_epochs_since_min = max_epochs
         self._min_decrease = min_decrease
-        self._min_value = numpy.inf
-        self._value_name = (value_to_monitor.name
-                            if value_to_monitor.name is not None
-                            else value_name)
+        self._epochs_since_min = 0
+        self._min_value = None
 
-    def on_epoch(self):
-        # Computes average value over epoch
-        super(StopsOnStagnation, self).on_epoch()
+    def __call__(self, values, formats):
+        assert_equal(len(values), 1)
+        assert_equal(len(values), len(formats))
 
-        # There were no batches in the previous epoch
-        if self.averages is None:
-            return
-        else:
-            assert_equal(len(self.averages), 1)
-            average = self.averages[0]
+        fmt = formats[0]
+        assert_equal(fmt.axes, ('b', ))
 
-        if self._min_value - average > self._min_decrease:
-            self._min_value = average
+        assert_equal(values[0].shape, (1, ))
+        value = values[0][0]
+
+        if self._min_value is None:
+            self._min_value = value
+        elif value + self._min_decrease < self._min_value:
             self._epochs_since_min = 0
+            self._min_value = value
         else:
             self._epochs_since_min += 1
 
-        if self._epochs_since_min > self._max_epochs_since_min:
-            raise StopTraining(status='ok',
-                               message=("%s didn't decrease for %d epochs." %
-                                        (self.monitored_values[0].name,
-                                         self._epochs_since_min)))
+        if self._epochs_since_min >= self._max_epochs_since_min:
+            raise StopTraining("ok",
+                               "%s stopping training. Value did not lower "
+                               "below last min value of %g for %d epochs." %
+                               (type(self),
+                                self._min_value,
+                                self._epochs_since_min))
+
+
+class LogsToLists(object):
+    '''
+    A callback to Monitor that logs monitored values to lists.
+    '''
+    def __init__(self):
+        self.logs = None
+
+    def __call__(self, values, formats):
+        assert_equal(len(values), len(formats))
+        assert_greater(len(values), 0)
+
+        if self.logs is None:
+            self.logs = [list() for value in values]
+        else:
+            assert_equal(len(self.logs), len(values))
+
+        for log, value in safe_izip(self.logs, values):
+            log.append(value)
+
+# class StopsOnStagnation(AverageMonitor):
+#     """
+#     Halts training if the average of f(x) over an epoch stops decreasing.
+#     """
+
+#     def __init__(self,
+#                  value_to_monitor,
+#                  value_format,
+#                  num_epochs,
+#                  min_decrease=0.0,
+#                  value_name=None):
+#         '''
+#         Parameters
+#         ----------
+#         value_to_monitor: theano expression
+#           Some f(x) (x is the data iterator output batch).
+
+#         value_format: Format
+#           Data format of value_to_monitor
+
+#         num_epochs: int
+#           maximum number of epochs to wait for average f to decrease.
+
+#         min_decrease: float
+#           minimum decrease in avg f needed for it to count as a decrease.
+
+#         value_name: str
+#           If value_to_monitor doesn't have a name, specify it here.
+#         '''
+
+#         check_is_subdtype(num_epochs, 'num_epochs', numpy.integer)
+#         assert_greater(num_epochs, 0)
+#         check_is_subdtype(min_decrease, 'min_decrease', numpy.floating)
+#         assert_greater_equal(min_decrease, 0.0)
+#         assert_not_equal(value_to_monitor.name is None,
+#                          value_name is None,
+#                          ("value_to_monitor.name was specified. No need to "
+#                           "provide value_name argument"
+#                           if value_to_monitor.name is not None
+#                           else ("when value_to_monitor has no name, you must "
+#                                 "provide a <name> argument.")))
+
+#         super(StopsOnStagnation, self).__init__([value_to_monitor],
+#                                                 [value_format])
+
+#         self._max_epochs_since_min = num_epochs
+#         self._epochs_since_min = 0
+#         self._min_decrease = min_decrease
+#         self._min_value = numpy.inf
+#         self._value_name = (value_to_monitor.name
+#                             if value_to_monitor.name is not None
+#                             else value_name)
+
+#     def on_epoch(self):
+#         # Computes average value over epoch
+#         super(StopsOnStagnation, self).on_epoch()
+
+#         # There were no batches in the previous epoch
+#         if self.averages is None:
+#             return
+#         else:
+#             assert_equal(len(self.averages), 1)
+#             average = self.averages[0]
+
+#         if self._min_value - average > self._min_decrease:
+#             self._min_value = average
+#             self._epochs_since_min = 0
+#         else:
+#             self._epochs_since_min += 1
+
+#         if self._epochs_since_min > self._max_epochs_since_min:
+#             raise StopTraining(status='ok',
+#                                message=("%s didn't decrease for %d epochs." %
+#                                         (self.monitored_values[0].name,
+#                                          self._epochs_since_min)))
 
 
 # class StopsOnStagnation_old(object):
@@ -705,7 +1178,7 @@ class Sgd(object):
         inputs: sequence of theano.gof.Variables
           These are the inputs to cost.
 
-        monitors: (optional) sequence of TrainingMonitors.
+        monitors: (optional) sequence of Monitors.
           These are also used as epoch callbacks.
 
         epoch_callbacks: sequence of EpochCallbacks
@@ -743,13 +1216,13 @@ class Sgd(object):
 
         assert_is_instance(monitors, Sequence)
         for monitor in monitors:
-            assert_is_instance(monitor, TrainingMonitor)
+            assert_is_instance(monitor, Monitor)
 
         assert_is_instance(epoch_callbacks, Sequence)
         for epoch_callback in epoch_callbacks:
             assert_is_instance(epoch_callback, EpochCallback)
-            if isinstance(epoch_callback, TrainingMonitor):
-                warnings.warn("You've passed a TrainingMonitor subclass %s "
+            if isinstance(epoch_callback, Monitor):
+                warnings.warn("You've passed a Monitor subclass %s "
                               "as one of the epoch_callbacks. If you want the "
                               ".on_batch() method to be called on this, you "
                               "need to pass it in as one of the monitors." %
@@ -765,7 +1238,7 @@ class Sgd(object):
         self._monitors = tuple(monitors)
 
         def compile_update_function():
-            outputs = [] #if cost is None else [cost]
+            outputs = []
             for monitor in monitors:
                 outputs.extend(monitor.monitored_values)
 
@@ -816,12 +1289,12 @@ class Sgd(object):
                                "both empty, so this will "
                                "iterate through the training data forever. "
                                "Please add an EpochCallback or "
-                               "TrainingMonitor that will throw a "
+                               "Monitor that will throw a "
                                "StopTraining exception at some point.")
         try:
             all_callbacks = self._monitors + self._epoch_callbacks
             for callback in all_callbacks:
-                callback.on_epoch()
+                callback.on_start_training()
 
             while True:
 
@@ -837,7 +1310,6 @@ class Sgd(object):
                 for monitor in self._monitors:
                     new_output_index = (output_index +
                                         len(monitor.monitored_values))
-                    # pdb.set_trace()
                     assert_less_equal(new_output_index, len(outputs))
                     monitored_values = outputs[output_index:new_output_index]
 
@@ -852,6 +1324,7 @@ class Sgd(object):
 
         except StopTraining, exception:
             if exception.status == 'ok':
+                print("Stopped training with message: %s" % exception.message)
                 return
             else:
                 raise
