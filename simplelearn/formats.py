@@ -1,4 +1,4 @@
-"""Classes that represent different data formats.
+'''Classes that represent different data formats.
 
 "Data format" includes things that don't qualitatively change the
 data, such as memory layout, axis order, and floating point precision.
@@ -6,7 +6,7 @@ data, such as memory layout, axis order, and floating point precision.
 Conversion between two formats should be approximately reversible. For
 example, converting from float64 to float32 is lossy but permitted, while
 converting from float to int, or complex to float, is not.
-"""
+'''
 
 __author__ = "Matthew Koichi Grimes"
 __email__ = "mkg@alum.mit.edu"
@@ -24,7 +24,7 @@ from simplelearn.utils import safe_izip, flatten, check_is_subdtype
 
 
 class Format(object):
-    """
+    '''
     The format of a numeric or symbolic data batch.
 
     "format" means things like axis order, and optionally, dtype.
@@ -38,13 +38,17 @@ class Format(object):
       If None, this format won't specify a dtype. Converting a batch from
       another format will leave the batch's existing dtype unchanged. On the
       other hand, you will need to specify a dtype when calling make_batch.
-    """
+    '''
 
     def __init__(self, dtype=None):
         self.dtype = dtype
 
     @property
     def dtype(self):
+        '''
+        Returns this Format's dtype as a numpy.dtype, or None.
+        '''
+
         if str(self._dtype) == 'floatX':
             result = numpy.dtype(theano.config.floatX)
         else:
@@ -55,6 +59,9 @@ class Format(object):
 
     @dtype.setter
     def dtype(self, new_dtype):
+        '''
+        self.dtype attribute setter. Sets self._dtype.
+        '''
         # pylint: disable=attribute-defined-outside-init
 
         if new_dtype is None or str(new_dtype) == 'floatX':
@@ -64,7 +71,7 @@ class Format(object):
 
     @staticmethod
     def is_symbolic(batch):
-        """
+        '''
         Returns True i.f.f, batch is a (Theano) symbol.
 
         Returns False i.f.f. batch is a (numpy) numeric array.
@@ -78,7 +85,11 @@ class Format(object):
         Returns
         -------
         rval: bool
-        """
+        '''
+
+        # pylint: disable=unidiomatic-typecheck
+        # Check for CudaNdarray using strings instead of isinstance,
+        # to keep loading CudaNdarray optional.
 
         if isinstance(batch, theano.gof.Variable):
             return True
@@ -90,7 +101,7 @@ class Format(object):
 
     @staticmethod
     def is_numeric(batch):
-        """
+        '''
         Returns True i.f.f. batch is a (numpy) numeric array.
 
         Returns False i.f.f. batch is a (Theano) symbol.
@@ -104,18 +115,18 @@ class Format(object):
         Returns
         -------
         rval: bool
-        """
+        '''
         return not Format.is_symbolic(batch)
 
     def requires_conversion(self, target_format):
-        """
+        '''
         Returns True if converting from self to target_format is a no-op.
-        """
-        raise NotImplementedError("%s.requires_conversion() not yet implemented." %
-                                  type(self))
+        '''
+        raise NotImplementedError("%s.requires_conversion() not yet "
+                                  "implemented." % type(self))
 
     def convert(self, batch, output_format, output=None, **kwargs):
-        """
+        '''
         Formats a data batch in this format to the output_format.
 
         Output argument only supported for numeric batches.
@@ -123,7 +134,8 @@ class Format(object):
         This function just calls self._convert(), check()-ing its
         inputs and outputs.
 
-        Note that if output is None and self.requires_conversion(output_format), the
+        Note that if output is None and if
+        self.requires_conversion(output_format) is True, the
         batch is returned as-is without calling self._convert().
 
         Parameters
@@ -142,7 +154,7 @@ class Format(object):
         rval: numpy.ndarray or theano.gof.Variable
           The formatted batch. When formatting between equivalent formats, this
           will be <batch>.
-        """
+        '''
 
         self.check(batch)
 
@@ -166,6 +178,9 @@ class Format(object):
 
         if self.is_symbolic(batch) != self.is_symbolic(result):
             def symbolic_or_numeric(batch):
+                '''
+                Returns 'symbolic' or 'numeric', depending on batch.
+                '''
                 return "symbolic" if self.is_symbolic(batch) else "numeric"
 
             raise TypeError("Expected %(self_type)s._convert(<%(data_type)s "
@@ -178,18 +193,18 @@ class Format(object):
         return result
 
     def _convert(self, batch, output_format, output, **kwargs):
-        """
+        '''
         Implementation of format(). See that method's description for specs.
 
         Must throw an exception (typically TypeError or ValueError) if
         conversion to output_format is not supported.
-        """
+        '''
 
         raise NotImplementedError("%s._convert() not yet implemented." %
                                   self.__class__)
 
     def check(self, batch):
-        """
+        '''
         Checks to see if batch fits this format's specs.
 
         If not, throws a ValueError or TypeError with an informative message.
@@ -201,7 +216,7 @@ class Format(object):
         Returns
         -------
         nothing.
-        """
+        '''
 
         # Checks whether the batch is a known symbolic or numeric type.
         self.is_symbolic(batch)
@@ -214,14 +229,14 @@ class Format(object):
         self._check(batch)
 
     def _check(self, batch):
-        """
+        '''
         Implements check(). See that method's documentation.
-        """
+        '''
         raise NotImplementedError("%s._check() not yet implemented." %
                                   type(self))
 
     def make_batch(self, is_symbolic, batch_size=None, dtype=None, name=None):
-        """
+        '''
         Makes a numeric or symbolic batch.
 
         May later split this into two functions: make_numeric_batch and
@@ -245,7 +260,7 @@ class Format(object):
           Name of the symbolic batch.
           Optional when is_symbolic is True.
           Omit if is_symbolic is False.
-        """
+        '''
 
         assert_is_instance(is_symbolic, bool)
 
@@ -287,7 +302,7 @@ class Format(object):
         return result
 
     def _make_batch(self, is_symbolic, batch_size, dtype, name):
-        """
+        '''
         Implements make_batch. See that method's documentation().
 
         Parameters
@@ -295,13 +310,13 @@ class Format(object):
         dtype: numpy.dtype
           The dtype of the batch to create. Unlike the argument to
           make_batch(), this will never be None, or 'floatX'.
-        """
+        '''
         raise NotImplementedError("%s._make_batch() not yet implemented." %
                                   type(self))
 
 
 class DenseFormat(Format):
-    """Format for fixed-sized dense data.
+    '''Format for fixed-sized dense data.
 
     Example::
 
@@ -323,7 +338,7 @@ class DenseFormat(Format):
       A sequence of dimension sizes. Batch axis gets the dummy size -1.
 
     dtype: see superclass' docs.
-    """
+    '''
 
     def __init__(self, axes, shape, dtype):
         super(DenseFormat, self).__init__(dtype=dtype)
@@ -412,7 +427,8 @@ class DenseFormat(Format):
                 #     n = 1
                 # else:
                 #     batch_size
-                #     # TODO: try to extract constant scalar value from batch_size
+                #     # TODO: try to extract constant scalar value
+                #     #       from batch_size
                 #     n = 4
                 # rval.tag.test_value = self.get_origin_batch(batch_size=n,
                 #                                             dtype=dtype)
@@ -468,12 +484,12 @@ class DenseFormat(Format):
                                       size))
 
     def _convert(self, batch, output_format, output_batch, **kwargs):
-        """
+        '''
         Converts a batch to another format.
 
         Implemented by methods '_convert_to_XXX()' for target format XXX.
         See those methods' documentation for details.
-        """
+        '''
 
         if isinstance(output_format, DenseFormat):
             return self._convert_to_DenseFormat(batch,
@@ -490,7 +506,7 @@ class DenseFormat(Format):
                                 output_format,
                                 output_batch,
                                 **kwargs):
-        """
+        '''
         Converts batch in this format to a DenseFormat.
 
         If the axes of <self> and <output_format> are the same,
@@ -560,7 +576,7 @@ class DenseFormat(Format):
 
           Identity mappings (e.g. 'b':'b') may be omitted. If all mappings are
           identity mappings, the axis_map may be omitted entirely.
-        """
+        '''
 
         if frozenset(self.axes) != frozenset(output_format.axes) and \
            'axis_map' not in kwargs:
@@ -580,10 +596,10 @@ class DenseFormat(Format):
             axis_map = dict()
 
         def get_standardized_axis_map(axis_map, source_axes, target_axes):
-            """
+            '''
             Returns a copy of target_axes, with any omitted identity mappings
             (e.g. 'b':'b') added back in.
-            """
+            '''
 
             flat_keys = frozenset(flatten(axis_map.iterkeys()))
             flat_values = frozenset(flatten(axis_map.itervalues()))

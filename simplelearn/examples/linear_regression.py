@@ -34,30 +34,38 @@ import pdb
 
 
 def parse_args():
+    '''
+    Parses command-line args and returns them as a namespace.
+    '''
+
     parser = argparse.ArgumentParser(
         description=("Simple demo of stochastic gradient descent, "
                      "with and without Nesterov's accelerated "
                      "gradients."))
 
     def positive_int(arg):
+        '''Arg checker for positive ints.'''
         arg = int(arg)
         assert_greater(arg, 0)
 
         return arg
 
     def positive_float(arg):
+        '''Arg checker for positive floats.'''
         arg = float(arg)
         assert_greater(arg, 0)
 
         return arg
 
     def non_negative_float(arg):
+        '''Arg checker for non-negative floats.'''
         arg = float(arg)
         assert_greater_equal(arg, 0)
 
         return arg
 
     def batch_size(arg):
+        '''Checks batch-size argument'''
         arg = int(arg)
         if arg < 1 and arg != -1:
             raise ValueError("Batch size must be positive, or -1, not %d."
@@ -101,11 +109,19 @@ def parse_args():
 
 
 def main():
+    '''
+    Entry point of script.
+    '''
+
     args = parse_args()
 
+    # pylint: disable=invalid-name
     floatX = numpy.dtype(theano.config.floatX)
 
     def affine_transform(matrix, bias, inputs):
+        '''
+        Returns dot(inputs, matrix) + bias.
+        '''
         assert_equal(matrix.ndim, 2)
         assert_equal(bias.ndim, 2)
         assert_equal(bias.shape[0], matrix.shape[1])
@@ -123,6 +139,31 @@ def main():
                             rng,
                             num_points,
                             dtype):
+        '''
+        Returns random inputs X, and targets f(X) + N, where N is noise.
+
+        f is an affine transform dot(X, W) + B
+        N is normally distributed noise with a given variance.
+
+        Parameters
+        ----------
+        matrix: numpy.ndarray
+          W in the above equation.
+        bias: numpy.ndarray
+          B in the above equation.
+        min_input: float
+          Min value of randomly-generated inputs X
+        max_input: float
+          Min value of randomly-generated inputs X
+        output_variance: float
+          Variance of N
+        rng: numpy.random.RandomState
+          Used to generate X, N
+        num_points: int
+          Number of rows in X
+        dtype: numpy.dtype
+          dtype of X and targets.
+        '''
         assert_greater_equal(output_variance, 0.0)
 
         num_dims = matrix.shape[0]
@@ -178,10 +219,30 @@ def main():
                   min_input,
                   max_input,
                   samples_per_dimension):
+        '''
+        Creates a grid plane that can be given to matplotlib's plot_surface()
+
+        Computes z values Z over a grid of X = [x, y] values , as:
+        Z = numpy.dot(X, M) + B
+
+        Parameters
+        ----------
+        matrix: numpy.ndarray
+          M in the above equation. shape = (2, 1)
+        bias: numpy.ndarray
+          B in the above equation. shape = (1, )
+        min_input: numpy.ndarray
+          minimum X values. Shape = (2, )
+        max_output: numpy.ndarray
+          maximum X values. Shape = (2, )
+        samples_per_dimension: int
+          Number of sample points along x or y dimension of grid.
+        '''
         assert_equal(matrix.shape, (2, 1))
         assert_equal(len(min_input), 2)
         assert_equal(len(max_input), 2)
 
+        # pylint: disable=invalid-name
         xs, ys = (numpy.linspace(min_input[i],
                                  max_input[i],
                                  samples_per_dimension)
@@ -269,30 +330,14 @@ def main():
 
     grad = theano.gradient.grad
 
-    #DEBUG
-    # cast = numpy.cast[affine_node.linear_node.params.get_value().dtype]
-    # affine_node.linear_node.params.set_value(cast(matrix))
-    # affine_node.bias_node.params.set_value(cast(bias))
-
     parameter_updaters = [SgdParameterUpdater(p,
                                               grad(batch_loss, p),
-                                              args.learning_rate / training_outputs.shape[0],
+                                              (args.learning_rate /
+                                               training_outputs.shape[0]),
                                               args.momentum,
                                               args.nesterov)
                           for p in (affine_node.linear_node.params,
                                     affine_node.bias_node.params)]
-
-
-    # DEBUG
-    # affine_node.bias_node.params.set_value([[0.5]])
-    # parameter_updaters = [SgdParameterUpdater(affine_node.linear_node.params,
-    #                                           grad(cost.output_symbol,
-    #                                                affine_node.linear_node.params),
-    #                                           args.learning_rate / training_outputs.shape[0],
-    #                                           args.momentum,
-    #                                           args.nesterov)]
-
-    # pdb.set_trace()
 
     def plot_model_surface():
         xs, ys, zs = \
@@ -303,20 +348,19 @@ def main():
                       10)
         model_surface = points_axes.plot_surface(xs, ys, zs,
                                                  color=[1, .5, .5, .5])
-        # print("model normal: %s, %s" %
-        #       (str(affine_node.linear_node.params.get_value().flatten()),
-        #        str(affine_node.bias_node.params.get_value().flatten())))
         return model_surface
 
     model_surface = [plot_model_surface()]
 
     class ModelSurfaceReplotter(Monitor):
+        '''
+        Callback that replots the model surface after each batch.
+        '''
 
         def __init__(self):
             super(ModelSurfaceReplotter, self).__init__([], [], [])
 
         def _on_batch(self, input_batches, monitored_value_batches):
-            # pdb.set_trace()
             model_surface[0].remove()
             del model_surface[0]
             model_surface.append(plot_model_surface())
@@ -402,15 +446,18 @@ def main():
                                            callbacks=[training_loss_logger])
 
     sgd = Sgd(inputs=input_symbols,
+              input_iterator=training_set.iterator(iterator_type='sequential',
+                                                   batch_size=batch_size),
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],
               parameter_updaters=parameter_updaters,
-              input_iterator=training_set.iterator(iterator_type='sequential',
-                                                   batch_size=batch_size),
               monitors=[ModelSurfaceReplotter(), training_loss_monitor],
               epoch_callbacks=[LimitsNumEpochs(100), validation_callback])
 
     def on_key_press(event):
+        '''
+        Key press callback.
+        '''
         if event.key == 'q':
             sys.exit(0)
         if event.key == ' ':

@@ -1,3 +1,8 @@
+* Problem: The ValidationCallback's self._trainer.train() just catches all the StopTraining exceptions, instead of passing them up the chain.
+** Solution 1: Factor out the looping from the train() method, into another method called train_for_one_epoch(). ValidationCallback calls this, not train(). It then explicitly calls the EpochCallbacks.
+*** Pros: No need for the LimitNumEpochs() hack.
+** Solution 2: Factor out train_for_one_epoch() from train, as before, but subclass Sgd to ValidationTrainer, and change the catch: clause in train() to specifically catch only LimitNumEpochs
+** Solution 3: Write a trainer specifically for validation.
 * ValidationCallback: loops through an epoch of data with an Sgd, so that it can re-use any monitor or callback classes.
 ** Common pattern: on_batch computes some function of input_batch (e.g. cost, max/min output of a given layer), while on_epoch reports it (perhaps also computing the average).
 ** StopsOnStagnation currently implemented as a subclass of AverageMonitor. Can stop on stagnation of the average of any f(input).
