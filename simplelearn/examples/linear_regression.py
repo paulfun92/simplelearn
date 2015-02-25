@@ -304,18 +304,6 @@ def main():
         for inputs, outputs in safe_izip((training_inputs, testing_inputs),
                                          (training_outputs, testing_outputs)))
 
-    # training_set = Dataset(names=('inputs', 'targets'),
-    #                        formats=(DenseFormat(axes=('b', 'f'),
-    #                                             shape=(-1, 2),
-    #                                             dtype=floatX),
-    #                                 DenseFormat(axes=['b', 'f'],
-    #                                             shape=[-1, 1],
-    #                                             dtype=floatX)),
-    #                        tensors=(training_inputs, training_outputs))
-
-    # testing_set = Dataset(names=('inputs', 'targets'),
-    #                       formats=
-
     input_node, label_node = training_set.make_input_nodes()
 
     affine_node = AffineTransform(input_node=input_node,
@@ -375,50 +363,6 @@ def main():
 
         def _on_epoch(self):
             return ()
-
-    # class BatchPrinter(TrainingMonitor):
-
-    #     def __init__(self):
-    #         super(BatchPrinter, self).__init__([], [])
-    #         self.batch_number = 0
-    #         self.epoch_number = -1
-
-    #         inputs = [input_node.output_symbol,
-    #                   label_node.output_symbol]
-
-    #         self.lin_func = theano.function(
-    #             inputs[:1],
-    #             affine_node.linear_node.output_symbol)
-    #         self.bias_func = theano.function(
-    #             inputs[:1], affine_node.bias_node.output_symbol)
-    #         self.affine_func = theano.function(
-    #             inputs[:1], affine_node.output_symbol)
-    #         self.cost_func = theano.function(inputs, loss.output_symbol)
-
-    #     def _on_batch(self, input_batches, monitored_value_batches):
-    #         assert_equal(len(input_batches), 2)
-
-    #         input_batches = tuple(b[:, numpy.newaxis, :]
-    #                               for b in input_batches)
-
-    #         print("\nbatch %d:\n" % self.batch_number)
-
-    #         # print("batch cost: %s" % self.cost_func(*input_batches))
-    #         for input, label in safe_izip(*input_batches):
-    #             print("x: %s L(x): %s B(L(x)): %s tgt: %s cost: %s" %
-    #                   (str(input.flatten()),
-    #                    str(self.lin_func(input).flatten()),
-    #                    str(self.bias_func(input).flatten()),
-    #                    str(label.flatten().flatten()),
-    #                    str(self.cost_func(input, label).flatten())))
-
-    #         self.batch_number += 1
-
-    #     def on_epoch(self):
-    #         self.batch_number = 0
-    #         self.epoch_number += 1
-
-    #         print("ending epoch %d" % self.epoch_number)
 
     batch_size = args.batch_size
     if batch_size == -1:

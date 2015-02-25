@@ -17,7 +17,9 @@ from nose.tools import (assert_equal,
 from simplelearn.utils import safe_izip
 from simplelearn.data import DataIterator
 from simplelearn.formats import DenseFormat
-from simplelearn.training import (TrainingMonitor,
+from simplelearn.training import (Monitor,
+                                  AverageMonitor,
+                                  LogsToLists,
                                   LimitsNumEpochs,
                                   StopsOnStagnation,
                                   SgdParameterUpdater,
@@ -26,14 +28,18 @@ import pdb
 
 
 def parse_args():
+    '''
+    Returns command-line args as a namespace.
+    '''
+
     parser = argparse.ArgumentParser(
-                description=("Simple demo of stochastic gradient descent, "
-                             "with and without Nesterov's accelerated "
-                             "gradients."))
+                 description=("Simple demo of stochastic gradient descent, "
+                              "with and without Nesterov's accelerated "
+                              "gradients."))
 
     parser.add_argument("--use-trainer",
                         type=bool,
-                        default=False,
+                        default=True,
                         help=("If True, use simplelearn.training.Sgd trainer. "
                               "If False, use a bare simplelearn.training."
                               "SgdParameterUpdater object. These two should "
@@ -47,13 +53,13 @@ def parse_args():
 
     parser.add_argument("--stagnation-iters",
                         type=int,
-                        default=10,
+                        default=50,
                         help=("Stop optimization after this many iterations "
                               "without improving on the best cost thus far."))
 
     parser.add_argument("--stagnation-threshold",
                         type=int,
-                        default=.0001,
+                        default=0.001,
                         help=("Stop optimization if the cost doesn't improve "
                               "more than this, after <stagnation_iters> "
                               "iterations."))
@@ -100,6 +106,10 @@ def parse_args():
 
 
 class DummyIterator(DataIterator):
+    '''
+    A placeholder DataIterator that does almost nothing.
+    '''
+
     def __init__(self):
         super(DummyIterator, self).__init__()
 
@@ -109,16 +119,19 @@ class DummyIterator(DataIterator):
     def _next(self):
         return ()
 
-class RecordingMonitor(TrainingMonitor):
+
+class RecordingMonitor(Monitor):
     '''
     Logs the values of given symbolic expressions on each training batch.
     '''
 
-    def __init__(self, values_to_record, formats):
-        super(RecordingMonitor, self).__init__(values_to_record, formats)
+    def __init__(self, values_to_record, formats, callbacks):
+        super(RecordingMonitor, self).__init__(values_to_record,
+                                               formats,
+                                               callbacks)
         self.logs = None
         self.epoch_start_indices = None
-        self.clear()  # initializes logs, epoch_start_indices
+        # self.clear()  # initializes logs, epoch_start_indices
 
     def _on_batch(self, _, value_batches):
         assert_greater(len(value_batches), 0)
@@ -130,17 +143,26 @@ class RecordingMonitor(TrainingMonitor):
             for log, batch in safe_izip(self.logs, value_batches):
                 log.append(batch)
 
-    def on_epoch(self):
+    # def on_start_training(self):
+    #     self.on_epoch()
+
+    def _on_epoch(self):
         if self.logs is not None:
             self.epoch_start_indices.append(len(self.logs[0]))
 
-    def clear(self):
+    # def clear(self):
+    def on_start_training(self):
+        '''
+        Resets the logs.
+        '''
         self.logs = None
 
         # Note that these are batch indices, NOT example indices.
         self.epoch_start_indices = [0]
 
         self.num_batches = 0
+
+        self.on_epoch()
 
 
 def matrix_weighted_norm(covariance, batch_of_vectors):
@@ -163,9 +185,24 @@ def matrix_weighted_norm(covariance, batch_of_vectors):
     assert_equal(covariance.ndim, 2)
 
     x_dot_c = theano.dot(batch_of_vectors, covariance)
-    return (x_dot_c * batch_of_vectors).sum(axis=1)  #, keepdims=True)
+    return (x_dot_c * batch_of_vectors).sum(axis=1)  # , keepdims=True)
+
 
 def create_cost_batch(singular_values, angle, point):
+    '''
+    Returns squared mahalanobis norm V^T M V, where V is a point.
+
+    Actually, V is a Nx2 matrix of N 2D points, and this returns a vector
+    of norms.
+
+    Parameters
+    ----------
+    singular_values: numpy.ndarray
+      Singular values of the energy basin. shape=(2,)
+
+    angle: float
+      Rotation angle of the energy basin.
+    '''
     # assert_op = theano.tensor.opt.Assert()
     # eq_op = theano.tensor.eq
 
@@ -204,21 +241,32 @@ def optimize_without_trainer(point, update_function, num_iterations):
     return outputs
 
 
-def optimize_with_trainer(trainer, recording_monitor):
-    recording_monitor.clear()
+# def optimize_with_trainer_old(trainer, recording_monitor):
+#     recording_monitor.clear()
+#     trainer.train()
+
+#     assert_is_not(recording_monitor.logs, None)
+#     assert_equal(recording_monitor.logs[0][0].ndim, 2)
+#     assert_equal(recording_monitor.logs[1][0].ndim, 1)
+
+#     (point_log,
+#      cost_log) = (numpy.concatenate(log, axis=fmt.axes.index('b'))
+#                   for log, fmt in safe_izip(recording_monitor.logs,
+#                                             recording_monitor._formats))
+
+#     cost_log = cost_log[:, numpy.newaxis]
+
+#     return numpy.hstack((point_log, cost_log))
+
+
+def optimize_with_trainer(trainer, logger, formats):
     trainer.train()
 
-    assert_is_not(recording_monitor.logs, None)
-    assert_equal(recording_monitor.logs[0][0].ndim, 2)
-    assert_equal(recording_monitor.logs[1][0].ndim, 1)
-
-    (point_log,
-     cost_log) = (numpy.concatenate(log, axis=fmt.axes.index('b'))
-                  for log, fmt in safe_izip(recording_monitor.logs,
-                                            recording_monitor._formats))
+    point_log, cost_log = (numpy.concatenate(log, axis=fmt.axes.index('b'))
+                           for log, fmt
+                           in safe_izip(logger.logs, formats))
 
     cost_log = cost_log[:, numpy.newaxis]
-
     return numpy.hstack((point_log, cost_log))
 
 
@@ -231,10 +279,7 @@ def main():
                                    point=point)
     cost_batch.name = 'cost_batch'
 
-    cost_sum = cost_batch.sum()
-    cost_sum.name = 'cost_sum'
-
-    gradient = theano.gradient.grad(cost_sum, point)
+    gradient = theano.gradient.grad(cost_batch.sum(), point)
 
     # can't use shared variable <point> as an explicit input to a function;
     # must tell it to replace the shared variable's value with some non-shared
@@ -262,7 +307,7 @@ def main():
                                        figsize=figsize)
 
     # label subplot grid's rows with momenta
-    pad = 5 # in points
+    pad = 5  # in points (the typographical unit of length)
 
     for axes, momentum in zip(all_axes[::2, 0], momenta):
         axes.annotate("momentum=%g" % momentum,
@@ -299,15 +344,13 @@ def main():
 
         return tuple(cast_to_floatX(a) for a in result)
 
-
     initial_point = numpy.array([1.3, .5], dtype=theano.config.floatX)
     aspect_ratio = float(figsize[1]) / float(figsize[0])
     aspect_ratio *= (float(len(momenta)) / float(len(learning_rates)))
-    x_limit = numpy.sqrt((initial_point**2).sum()) * 2.0
+    x_limit = numpy.sqrt((initial_point ** 2).sum()) * 2.0
     contour_data = get_contour_data(cost_function,
                                     x_limit,
                                     x_limit * aspect_ratio)
-
 
     for axes_row in all_axes[::2, :]:
         for axes in axes_row:
@@ -334,36 +377,40 @@ def main():
                 point.set_value(initial_point[numpy.newaxis, :])
 
                 if args.use_trainer:
-                    recording_monitor = \
-                        RecordingMonitor((point, cost_batch),
-                                         (DenseFormat(axes=('b', 'f'),
-                                                      shape=(-1, 2),
-                                                      dtype=floatX),
-                                          DenseFormat(axes=('b',),
-                                                      shape=(-1,),
-                                                      dtype=floatX)))
+                    cost_format = DenseFormat(axes=['b'],
+                                              shape=[-1],
+                                              dtype=floatX)
 
-                    monitors = [recording_monitor,
-                                StopsOnStagnation(cost_batch,
-                                                  DenseFormat(axes=['b'],
-                                                              shape=[-1],
-                                                              dtype=None),
-                                                  args.stagnation_iters,
-                                                  args.stagnation_threshold)]
-                                                  # num_epochs=10,
-                                                  # min_decrease=.0001)]
+                    loss_monitor = AverageMonitor(
+                        cost_batch,
+                        cost_format,
+                        StopsOnStagnation(
+                            max_epochs=args.stagnation_iters,
+                            min_decrease=args.stagnation_threshold))
 
-                    trainer = Sgd(cost=cost_sum,
-                                  inputs=[],
+                    point_format = DenseFormat(axes=['b', 'f'],
+                                               shape=[-1, 2],
+                                               dtype=floatX)
+
+                    logger = LogsToLists()
+                    point_and_loss_monitor = AverageMonitor(
+                        [point, cost_batch],
+                        [point_format, cost_format],
+                        [logger])
+
+                    trainer = Sgd(inputs=[],
                                   parameters=[point],
                                   parameter_updaters=[param_updater],
                                   input_iterator=DummyIterator(),
-                                  monitors=monitors,
+                                  monitors=[loss_monitor,
+                                            point_and_loss_monitor],
                                   epoch_callbacks=[
                                       LimitsNumEpochs(args.max_iters)])
 
                     trajectory = optimize_with_trainer(trainer,
-                                                       recording_monitor)
+                                                       logger,
+                                                       [point_format,
+                                                        cost_format])
                 else:
                     update_function = \
                         theano.function([],
