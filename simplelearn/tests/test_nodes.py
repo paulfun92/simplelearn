@@ -29,11 +29,16 @@ class DummyFunction1dTo1d(Function1dTo1d):
                             input_bf_node,
                             output_bf_format):
         input_format = input_bf_node.output_format
-        assert not input_format._requires_conversion(output_bf_format)
+        assert not input_format.requires_conversion(output_bf_format)
 
         return input_bf_node
 
+
 class Function1dTo1dTester(TestCase):
+    '''
+    Subclass from this to test subclasses of Function1dTo1d.
+    '''
+
     def setUp(self):
         input_format = DenseFormat(axes=('0', 'b', '1'),
                                    shape=(3, -1, 4),
@@ -117,6 +122,7 @@ class BiasTester(Function1dTo1dTester):
 
         return rows + self.node.params.get_value()
 
+
 def test_l2loss():
     rng = numpy.random.RandomState(3523)
 
@@ -138,7 +144,6 @@ def test_l2loss():
         return theano.function([input_node_a.output_symbol,
                                 input_node_b.output_symbol],
                                loss)
-
 
     vec_size = 10
     loss_function = make_loss_function(vec_size)
