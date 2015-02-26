@@ -264,7 +264,9 @@ def main():
     points_axes = figure.add_subplot(1, 2, 1, projection='3d')
     points_axes.set_aspect('equal')
 
-    loss_axes = figure.add_subplot(1, 2, 2)
+    logger_axes = figure.add_subplot(1, 2, 2)
+    logger_axes.set_xlabel('# of epochs')
+    logger_axes.set_ylabel('Average loss per sample')
 
     ground_truth_plane = tuple(make_grid(matrix,
                                          bias,
@@ -300,7 +302,7 @@ def main():
                          DenseFormat(axes=['b', 'f'],
                                      shape=[-1, 1],
                                      dtype=floatX)),
-                tensors=(training_inputs, training_outputs))
+                tensors=(inputs, outputs))
         for inputs, outputs in safe_izip((training_inputs, testing_inputs),
                                          (training_outputs, testing_outputs)))
 
@@ -327,7 +329,18 @@ def main():
                           for p in (affine_node.linear_node.params,
                                     affine_node.bias_node.params)]
 
+    training_loss_logger = LogsToLists()
+    validation_loss_logger = LogsToLists()
+
     def plot_model_surface():
+        '''
+        Plots the surface predicted by the model's current parameters.
+
+        Returns
+        -------
+        model_surface:
+          The matplotlib 3D surface object that got plotted.
+        '''
         xs, ys, zs = \
             make_grid(affine_node.linear_node.params.get_value(),
                       affine_node.bias_node.params.get_value(),
@@ -338,20 +351,24 @@ def main():
                                                  color=[1, .5, .5, .5])
         return model_surface
 
-    model_surface = [plot_model_surface()]
-
-    class ModelSurfaceReplotter(Monitor):
+    class Replotter(Monitor):
         '''
         Callback that replots the model surface after each batch.
         '''
 
         def __init__(self):
-            super(ModelSurfaceReplotter, self).__init__([], [], [])
+            super(Replotter, self).__init__([], [], [])
+            self.model_surface = [plot_model_surface()]
+            self.logger_plots = []
+            points_axes.set_title("Hit space to optimize. q to quit.")
 
         def _on_batch(self, input_batches, monitored_value_batches):
-            model_surface[0].remove()
-            del model_surface[0]
-            model_surface.append(plot_model_surface())
+
+            if len(self.model_surface) > 0:
+                self.model_surface[0].remove()
+                del self.model_surface[0]
+
+            self.model_surface.append(plot_model_surface())
             # points_axes.autoscale_view(tight=True)
             # points_axes.autoscale(enable=True, axis='both')
             # print("updated")
@@ -359,9 +376,26 @@ def main():
 
             # points_axes.relim()
             #points_axes.draw_idle()
+
             figure.canvas.draw()
 
         def _on_epoch(self):
+            for plot in self.logger_plots:
+                plot.remove()
+
+            self.logger_plots = []
+
+            def plot_log(log, color):
+                values = numpy.concatenate(log, axis=0)
+                self.logger_plots.extend(logger_axes.plot(
+                    numpy.arange(1, 1 + values.size),
+                    values,
+                    '%s-' % color))
+
+            plot_log(training_loss_logger.logs[0], 'b')
+            plot_log(validation_loss_logger.logs[0], 'r')
+
+            logger_axes.legend(self.logger_plots, ["train loss", "test loss"])
             return ()
 
     batch_size = args.batch_size
@@ -372,22 +406,22 @@ def main():
 
     input_symbols = [n.output_symbol for n in (input_node, label_node)]
 
-    validation_loss_logger = LogsToLists()
-    training_stopper = StopsOnStagnation(max_epochs=10, min_decrease=.1)
-
-    validation_callback = ValidationCallback(
-        inputs=input_symbols,
-        input_iterator=testing_set.iterator(iterator_type='sequential',
-                                            batch_size=batch_size),
-        monitors=[AverageMonitor(loss_node.output_symbol,
-                                 loss_node.output_format,
-                                 callbacks=[validation_loss_logger,
-                                            training_stopper])])
-
-    training_loss_logger = LogsToLists()
     training_loss_monitor = AverageMonitor(loss_node.output_symbol,
                                            loss_node.output_format,
                                            callbacks=[training_loss_logger])
+
+    training_stopper = StopsOnStagnation(max_epochs=10, min_decrease=.01)
+    validation_loss_monitor = AverageMonitor(
+        loss_node.output_symbol,
+        loss_node.output_format,
+        callbacks=[validation_loss_logger, training_stopper])
+
+    validation_callback = ValidationCallback(
+        inputs=input_symbols,
+        input_iterator=testing_set.iterator(
+            iterator_type='sequential',
+            batch_size=testing_inputs.shape[0]),
+        monitors=[validation_loss_monitor])
 
     sgd = Sgd(inputs=input_symbols,
               input_iterator=training_set.iterator(iterator_type='sequential',
@@ -395,7 +429,7 @@ def main():
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],
               parameter_updaters=parameter_updaters,
-              monitors=[ModelSurfaceReplotter(), training_loss_monitor],
+              monitors=[training_loss_monitor, Replotter()],
               epoch_callbacks=[LimitsNumEpochs(100), validation_callback])
 
     def on_key_press(event):

@@ -33,18 +33,18 @@ def parse_args():
     '''
 
     parser = argparse.ArgumentParser(
-                 description=("Simple demo of stochastic gradient descent, "
-                              "with and without Nesterov's accelerated "
-                              "gradients."))
+        description=("Simple demo of stochastic gradient descent, "
+                     "with and without Nesterov's accelerated "
+                     "gradients."))
 
     parser.add_argument("--use-trainer",
                         type=bool,
                         default=True,
-                        help=("If True, use simplelearn.training.Sgd trainer. "
-                              "If False, use a bare simplelearn.training."
-                              "SgdParameterUpdater object. These two should "
-                              "produce equivalent results if --lambda-scaling "
-                              "and --momentum-scaling aren't provided."))
+                        help=("If True, uses the simplelearn.training.Sgd "
+                              "trainer. If False, uses a bare "
+                              "simplelearn.training.SgdParameterUpdater "
+                              "object, and --stagnation-threshold is "
+                              "ignored."))
 
     parser.add_argument("--max-iters",
                         type=int,
@@ -239,24 +239,6 @@ def optimize_without_trainer(point, update_function, num_iterations):
         output[2] = update_function()
 
     return outputs
-
-
-# def optimize_with_trainer_old(trainer, recording_monitor):
-#     recording_monitor.clear()
-#     trainer.train()
-
-#     assert_is_not(recording_monitor.logs, None)
-#     assert_equal(recording_monitor.logs[0][0].ndim, 2)
-#     assert_equal(recording_monitor.logs[1][0].ndim, 1)
-
-#     (point_log,
-#      cost_log) = (numpy.concatenate(log, axis=fmt.axes.index('b'))
-#                   for log, fmt in safe_izip(recording_monitor.logs,
-#                                             recording_monitor._formats))
-
-#     cost_log = cost_log[:, numpy.newaxis]
-
-#     return numpy.hstack((point_log, cost_log))
 
 
 def optimize_with_trainer(trainer, logger, formats):

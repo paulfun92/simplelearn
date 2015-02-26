@@ -1,84 +1,19 @@
-* Problem: The ValidationCallback's self._trainer.train() just catches all the StopTraining exceptions, instead of passing them up the chain.
-** Solution 1: Factor out the looping from the train() method, into another method called train_for_one_epoch(). ValidationCallback calls this, not train(). It then explicitly calls the EpochCallbacks.
-*** Pros: No need for the LimitNumEpochs() hack.
-** Solution 2: Factor out train_for_one_epoch() from train, as before, but subclass Sgd to ValidationTrainer, and change the catch: clause in train() to specifically catch only LimitNumEpochs
-** Solution 3: Write a trainer specifically for validation.
-* ValidationCallback: loops through an epoch of data with an Sgd, so that it can re-use any monitor or callback classes.
-** Common pattern: on_batch computes some function of input_batch (e.g. cost, max/min output of a given layer), while on_epoch reports it (perhaps also computing the average).
-** StopsOnStagnation currently implemented as a subclass of AverageMonitor. Can stop on stagnation of the average of any f(input).
-** We would also like to print out/plot/log the average that it's computing.
-*** Subclassing is not the answer, since if we're doing more than one thing (stop on stagnation/print/plot/log), each task would be a different subclass of AverageMonitor, each independently and redundantly computing the average.
-**** Solution 1: callbacks
-***** AverageMonitor accumulates in on_batch, computes the average on on_epoch, and feeds it to a list of registered callbacks' __call__ methods.
-***** MaxMonitor/MinMonitor updates max/min during on_batch, and feeds it to a list of registered callbacks' __call__ methods.
-***** StopsOnStagnation is now a Callback for these monitors.
-***** Structurally, this sounds great; a problem is the names. Maybe remap to:
-****** EpochCallback: EpochCallback
-******* on_epoch(self)
-****** TrainingMonitor(EpochCallback): BatchAndEpochCallback(EpochCallback)
-******* __init__(self, value_to_monitor)
-******* on_batch(self, input_batch), in addition to inherited on_epoch(self)
-****** AverageMonitor/MaxMonitor/MinMonitor(TrainingMonitor): as is, suclassing from BatchAndEpochCallback
-****** Callback for the above monitors: MonitorCallback
-******* __call__(self, value)
-
-
-
-Next: flesh out sgd to contain a list of updaters, and build the theano function (with updates) on train().
-
-Sgd._function = theano.function(inputs=input_nodes' inputs,
-                                outputs=monitored_values,
-                                updates=updates)
-* inputs: maybe taken from dataset.make_input_nodes
-monitored_values: a list of expressions that are the actual outputs of the theano.function.
-updates: a dictionary of values and their replacements, that are the "updates" arguments to theano.function
-
-* Get sgd_demo.py working
-** DONE Finish testing Dataset interface
-** Create monitor that monitors cost and raises a StopTraining exception if it fails to increase for N epochs.
-*** NEXT: class: StopsOnStagnation
-**** __call__(self, cost):
-***** if cost + self._margin < prev_cost, self._counter = 0 else self._counter += 1
-***** if self._counter >= self._max_stagnant_epochs: raise StopTraining("%s stagnant for %d epochs." % (self._cost_name, self._max_stagnant_epochs))
-*** DONE class: ComputesAverageOverEpoch
-**** __init__ args: (cost)function, validation_iter, callbacks
-**** __call__(self): compute average value of self._function(*self._data_iterator.next()) over an epoch, pass result to each of self._callbacks
-*** Give ComputesAverageOverEpoch(cost_function, dummy_dataset.iterator(), (StopsOnStagnation('cost'), lambda x : validation_costs.append(x))) to Sgd as epoch callback.
-**** __iter__ args: cost func, validation_iter, margin
-**** __call__(self): sum total cost until validation_iter's epoch increments, divide by # of samples (not batches), see if it decreased more than margin relative to previous avg sum, if so, set counter to 0; if not, increment counter.
-*** Test by feeding it an L2-norm cost, and a dataset that increments an epoch after every sample, where the sample is just a random vector whose magnitude shrinks linearly with epochs, then at some point stops changing at all. Should quit N points into the zero-slope line.
-** Finish sgd demo
-*** Create dummy dataset that repeatedly yields the input shared variable's numeric value for each epoch.
-*** Use Sgd with DummyDataset, QuadraticCost, CostMonitor
-
-
-Brainstorm:
-
-ComputeAverageOverEpoch:
-* Would like to make it work both for training and testing data
-** Option: use a different monitor for computing the average of an epoch of training data.
-*** An updater can monitor the training cost. (how does Pylearn2 do it?
-** (bad) Option: give the training set monitor a fresh iterator, just like the testing set
-*** Bad: for random iterators, there's no guarantee that this measures the training set error over the same data as what the model was trained on.
-** (bad) Option: Overload ComputeAverageOverEpoch.__call__()
-*** If it's called without arguments, compute average of f(x) over iterator passed in through constructor.
-*** If it's called with (input_tuple), then compute f(*input_tuple)?
-*** Messy as hell: assumes that f is a function of input_tuple
-
-
-* (For now, let this be.) DataIterator should have the Nodes, so it can be the sole interface for data consumers.
-** The name DataIterator in this case bothers me.
-** This will be necessary anyway if (if) the iterator ever is to yield a different number of variables than the original dataset. For example, an iterator that yields left and right stereo images as separate variables.
-*** This won't be necessary in the forseeable future. If node L operates on left images and node R operates on right images, they can both take a stereo image as input, and just use their respective parts of it.
-** For now, let it be.
-* DONE Epoch events should be fired after the last datum of the epoch is yielded, not on the first datum of the next epoch.
-** Can't do this by yielding epoch numbers!
-** This could eliminate the present need for batch() and even epoch() methods.
-** Alternatives to epoch numbers:
-*** boolean DataIterator.epoch_done() method
-**** In trainer, get datum, if iterator.epoch_done(), call epoch callbacks.
-*** iterator.next() yields data, epoch_done, where data is always a tuple.
-**** Similar to above, but no need for creating a named iterator variable when looping
-*** register epoch callbacks with iterator itself
-**** This would necessarily trigger during the next() call that yields the final datum in an epoch
-**** This is bad: the callbacks should happen after processing the final datum in train().
+* DONE Get linear_regression.py to live-plot values of interest
+** Average training, testing costs
+* Write unit test for ReLU node.
+* Write unit test for Softmax node, against pylearn2's.
+* Implement CrossEntropy node, unit-test against pylearn2's.
+* Implement Dropout
+* Check out Fuel as a source of dataset wrappers
+** https://github.com/bartvm/fuel
+** If unsatisfactory, Implement data.Mnist, test against pylearn2.datasets.Mnist
+*** Searches for cached mnist memmaps, creates them if necessary.
+* Write examples/mnist_fully_connected.py
+** Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
+* Implement Conv2D node, test against pylearn2's.
+* Write examples/mnist_conv.py
+* Write examples/cifar10.py
+* Write data/norb.py
+* Replicate classification success on big NORB
+* Replicate classification + orientation success.
+* Write classification demo

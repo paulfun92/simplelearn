@@ -19,6 +19,8 @@ from simplelearn.utils import safe_izip
 from simplelearn.formats import Format, DenseFormat
 import pdb
 
+# pylint: disable=too-few-public-methods
+
 
 class Node(object):
 
@@ -68,10 +70,9 @@ class FormatNode(Node):
     def __init__(self, input_node, output_format, axis_map):
         input_symbol = input_node.output_symbol
         input_format = input_node.output_format
-        output_symbol = input_node.output_format.convert(
-            input_symbol,
-            output_format=output_format,
-            axis_map=axis_map)
+        output_symbol = input_format.convert(input_symbol,
+                                             output_format=output_format,
+                                             axis_map=axis_map)
 
         super(FormatNode, self).__init__(input_node,
                                          output_symbol,
@@ -285,68 +286,16 @@ class Bias(Function1dTo1d):
         return Node(input_bf_node, output_symbol, output_bf_format)
 
 
-class L2Loss(Node):
-    '''
-    Computes the total sum-of-squared-differences over a batch of data.
-
-    Does not sum over batch axis. Given a batch of B examples, this will return
-    a size-B vector.
-    '''
-
-    def __init__(self, input_node_a, input_node_b):
-        format_a = input_node_a.output_format
-        format_b = input_node_b.output_format
-
-        if format_a.shape != format_b.shape or \
-           format_a.axes != format_b.axes:
-            raise ValueError("Can't take the L2 loss between different "
-                             "formats: %s vs %s" % (format_a, format_b))
-
-        def make_bf_format(format):
-            batch_size = format.shape[format.axes.index('b')]
-            feature_size = numpy.prod(tuple(size
-                                            for size, axis
-                                            in safe_izip(format.shape,
-                                                         format.axes)
-                                            if axis != 'b'))
-            return DenseFormat(shape=(batch_size, feature_size),
-                               axes=('b', 'f'),
-                               dtype=format.dtype)
-
-        format_a_bf = make_bf_format(format_a)
-        format_b_bf = make_bf_format(format_b)
-
-        symbol_a_bf = format_a.convert(input_node_a.output_symbol, format_a_bf)
-        symbol_b_bf = format_b.convert(input_node_b.output_symbol, format_b_bf)
-
-        diff = symbol_a_bf - symbol_b_bf
-        output_symbol = (diff * diff).sum(axis=1)
-        output_format = DenseFormat(axes=['b'],
-                                    shape=[-1],
-                                    dtype=None)
-
-        # diff = input_node_a.output_symbol - input_node_b.output_symbol
-        # output_symbol = (diff * diff).sum()
-        # output_format = DenseFormat(axes=(),
-        #                             shape=(),
-        #                             dtype=None)
-
-        # DEBUG
-        # Print = theano.printing.Print
-        # output_symbol = Print("cost")(output_symbol)
-
-        super(L2Loss, self).__init__((input_node_a, input_node_b),
-                                     output_symbol,
-                                     output_format)
-
-
 class AffineTransform(Function1dTo1d):
+    '''
+    Implements dot(X, M) + B (multiplying by a matrix, then adding a bias)
+    '''
+
     def __init__(self,
                  input_node,
                  output_format,
                  input_to_bf_map=None,
                  bf_to_output_map=None):
-
         super(AffineTransform, self).__init__(input_node,
                                               output_format,
                                               input_to_bf_map,
@@ -365,8 +314,81 @@ class AffineTransform(Function1dTo1d):
 
 
 class Softmax(Function1dTo1d):
-    def __init__(self, output_format, input_node):
-        super(Softmax, self).__init__(output_format, input_node)
+    '''
+    Softmax node.
+    '''
+
+    def __init__(self,
+                 input_node,
+                 output_format=None,
+                 input_to_bf_map=None,
+                 bf_to_output_map=None):
+
+        if output_format is None:
+            output_format = input_node.output_format
+
+        super(Softmax, self).__init__(input_node,
+                                      output_format,
+                                      input_to_bf_map,
+                                      bf_to_output_map)
 
     def _get_function_of_rows(self, features_symbol):
-        raise NotImplementedError()
+        return theano.tensor.nnet.softmax(features_symbol)
+
+
+class ReLU(Node):
+    '''
+    Elementwise linear rectifier. Zeros any negative elements.
+    '''
+    def __init__(self, input_node):
+        input_symbol = input_node.output_symbol
+        output_symbol = theano.tensor.switch(input_symbol > 0.0,
+                                             input_symbol,
+                                             0.0)
+        super(ReLU, self).__init__([input_node],
+                                   output_symbol,
+                                   input_node.output_format)
+
+
+class L2Loss(Node):
+    '''
+    Computes the total sum-of-squared-differences over a batch of data.
+
+    Does not sum over batch axis. Given a batch of B examples, this will return
+    a size-B vector.
+    '''
+
+    def __init__(self, input_node_a, input_node_b):
+        format_a = input_node_a.output_format
+        format_b = input_node_b.output_format
+
+        if format_a.shape != format_b.shape or \
+           format_a.axes != format_b.axes:
+            raise ValueError("Can't take the L2 loss between different "
+                             "formats: %s vs %s" % (format_a, format_b))
+
+        def make_bf_format(fmt):
+            batch_size = fmt.shape[fmt.axes.index('b')]
+            feature_size = numpy.prod(tuple(size
+                                            for size, axis
+                                            in safe_izip(fmt.shape, fmt.axes)
+                                            if axis != 'b'))
+            return DenseFormat(shape=(batch_size, feature_size),
+                               axes=('b', 'f'),
+                               dtype=fmt.dtype)
+
+        format_a_bf = make_bf_format(format_a)
+        format_b_bf = make_bf_format(format_b)
+
+        symbol_a_bf = format_a.convert(input_node_a.output_symbol, format_a_bf)
+        symbol_b_bf = format_b.convert(input_node_b.output_symbol, format_b_bf)
+
+        diff = symbol_a_bf - symbol_b_bf
+        output_symbol = (diff * diff).sum(axis=1)
+        output_format = DenseFormat(axes=['b'], shape=[-1], dtype=None)
+
+        super(L2Loss, self).__init__((input_node_a, input_node_b),
+                                     output_symbol,
+                                     output_format)
+
+# TODO: cross-entropy

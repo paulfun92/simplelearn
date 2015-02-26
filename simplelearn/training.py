@@ -565,9 +565,12 @@ class StopsOnStagnation(object):
 
         if self._epochs_since_min >= self._max_epochs_since_min:
             raise StopTraining("ok",
-                               "%s stopping training. Value did not lower "
+                               "%s stopping training. Value did not lower %s"
                                "below last min value of %g for %d epochs." %
                                (type(self),
+                                ("more than %g " % self._min_decrease
+                                 if self._min_decrease > 0.0
+                                 else ""),
                                 self._min_value,
                                 self._epochs_since_min))
 
