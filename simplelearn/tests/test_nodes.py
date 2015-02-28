@@ -158,3 +158,8 @@ def test_l2loss():
         loss = loss_function(arg0, arg1)
 
         assert_allclose(loss, expected_loss)
+
+
+def test_ReLU():
+    rng = numpy.random.RandomState(234)
+    assert False
