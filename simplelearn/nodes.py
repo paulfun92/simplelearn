@@ -338,7 +338,9 @@ class Softmax(Function1dTo1d):
 
 class ReLU(Node):
     '''
-    Elementwise linear rectifier. Zeros any negative elements.
+    Elementwise linear rectifier (zeros any negative elements).
+
+    Preserves format.
     '''
     def __init__(self, input_node):
         input_symbol = input_node.output_symbol
@@ -352,10 +354,9 @@ class ReLU(Node):
 
 class L2Loss(Node):
     '''
-    Computes the total sum-of-squared-differences over a batch of data.
+    Computes ||x_i - y_i||^2 for each x_i, y_i in a batch of data.
 
-    Does not sum over batch axis. Given a batch of B examples, this will return
-    a size-B vector.
+    Input nodes must have a batch axis.
     '''
 
     def __init__(self, input_node_a, input_node_b):
@@ -367,21 +368,33 @@ class L2Loss(Node):
             raise ValueError("Can't take the L2 loss between different "
                              "formats: %s vs %s" % (format_a, format_b))
 
-        def make_bf_format(fmt):
-            batch_size = fmt.shape[fmt.axes.index('b')]
-            feature_size = numpy.prod(tuple(size
-                                            for size, axis
-                                            in safe_izip(fmt.shape, fmt.axes)
-                                            if axis != 'b'))
-            return DenseFormat(shape=(batch_size, feature_size),
-                               axes=('b', 'f'),
-                               dtype=fmt.dtype)
+        def convert_to_bf(node):
+            '''
+            Returns a node's output_symbol reshaped to have axes=('b', 'f').
+            '''
 
-        format_a_bf = make_bf_format(format_a)
-        format_b_bf = make_bf_format(format_b)
+            def make_bf_format(fmt):
+                batch_size = fmt.shape[fmt.axes.index('b')]
+                feature_size = numpy.prod(tuple(size
+                                                for size, axis
+                                                in safe_izip(fmt.shape,
+                                                             fmt.axes)
+                                                if axis != 'b'))
+                return DenseFormat(shape=(batch_size, feature_size),
+                                   axes=('b', 'f'),
+                                   dtype=fmt.dtype)
 
-        symbol_a_bf = format_a.convert(input_node_a.output_symbol, format_a_bf)
-        symbol_b_bf = format_b.convert(input_node_b.output_symbol, format_b_bf)
+            bf_format = make_bf_format(node.output_format)
+            return node.output_format.convert(node.output_symbol, bf_format)
+
+
+        # format_a_bf = make_bf_format(format_a)
+        # format_b_bf = make_bf_format(format_b)
+
+        # symbol_a_bf = format_a.convert(input_node_a.output_symbol, format_a_bf)
+        # symbol_b_bf = format_b.convert(input_node_b.output_symbol, format_b_bf)
+        symbol_a_bf = convert_to_bf(input_node_a)
+        symbol_b_bf = convert_to_bf(input_node_b)
 
         diff = symbol_a_bf - symbol_b_bf
         output_symbol = (diff * diff).sum(axis=1)

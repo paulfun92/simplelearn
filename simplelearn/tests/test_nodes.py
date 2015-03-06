@@ -4,13 +4,14 @@ Tests for simplelearn.nodes
 
 import numpy
 import theano
-from numpy.testing import assert_allclose
+from numpy.testing import assert_allclose, assert_array_equal
 from nose.tools import assert_is_instance, assert_equal
 from simplelearn.nodes import (Node,
                                InputNode,
                                Linear,
                                Bias,
-                               Function1dTo1d)
+                               Function1dTo1d,
+                               ReLU)
 from simplelearn.formats import DenseFormat
 
 from unittest import TestCase
@@ -162,4 +163,23 @@ def test_l2loss():
 
 def test_ReLU():
     rng = numpy.random.RandomState(234)
-    assert False
+    input_format = DenseFormat(axes=('b', '0', '1', 'c'),
+                               shape=(-1, 2, 3, 4),
+                               dtype='floatX')
+
+    input_node = InputNode(fmt=input_format)
+    relu = ReLU(input_node)
+    relu_function = theano.function([input_node.output_symbol],
+                                    relu.output_symbol)
+
+    for batch_size in (1, 5):
+        input_batch = input_format.make_batch(is_symbolic=False,
+                                              batch_size=batch_size)
+        input_batch[...] = rng.uniform(input_batch.size)
+
+        output_batch = relu_function(input_batch)
+
+        expected_output_batch = numpy.copy(output_batch)
+        expected_output_batch[expected_output_batch < 0.0] = 0.0
+
+        assert_array_equal(output_batch, expected_output_batch)
