@@ -216,6 +216,8 @@ class Function1dTo1d(Node):
         output_bf_node = self._get_output_bf_node(input_to_bf_node,
                                                   output_bf_format)
 
+        assert_is_instance(output_bf_node, Node)
+
         bf_to_output_node = FormatNode(output_bf_node,
                                        output_format,
                                        bf_to_output_map)
@@ -332,8 +334,9 @@ class Softmax(Function1dTo1d):
                                       input_to_bf_map,
                                       bf_to_output_map)
 
-    def _get_function_of_rows(self, features_symbol):
-        return theano.tensor.nnet.softmax(features_symbol)
+    def _get_output_bf_node(self, input_bf_node, output_bf_format):
+        softmaxes = theano.tensor.nnet.softmax(input_bf_node.output_symbol)
+        return Node(input_bf_node, softmaxes, output_bf_format)
 
 
 class ReLU(Node):

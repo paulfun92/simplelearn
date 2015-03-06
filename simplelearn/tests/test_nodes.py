@@ -5,13 +5,14 @@ Tests for simplelearn.nodes
 import numpy
 import theano
 from numpy.testing import assert_allclose, assert_array_equal
-from nose.tools import assert_is_instance, assert_equal
+from nose.tools import assert_is_instance, assert_equal, assert_greater_equal
 from simplelearn.nodes import (Node,
                                InputNode,
                                Linear,
                                Bias,
                                Function1dTo1d,
-                               ReLU)
+                               ReLU,
+                               Softmax)
 from simplelearn.formats import DenseFormat
 
 from unittest import TestCase
@@ -22,9 +23,6 @@ import pdb
 class DummyFunction1dTo1d(Function1dTo1d):
     def __init__(self, output_format, input_node):
         super(DummyFunction1dTo1d, self).__init__(input_node, output_format)
-
-    # def _get_function_of_rows(self, input_rows):
-    #     return input_rows
 
     def _get_output_bf_node(self,
                             input_bf_node,
@@ -53,6 +51,11 @@ class Function1dTo1dTester(TestCase):
 
         self.node = self._make_node(self.input_node, output_format)
         assert_is_instance(self.node, Node)
+
+        # kwargs to feed to assert_allclose (e.g. rtol=0.001).
+        # Change in subclasses' setUp methods (don't forget to call
+        # this superclass' setUp, though)
+        self.allclose_kwargs = {}
 
     def _make_node(self, input_node, output_format):
         return DummyFunction1dTo1d(output_format, input_node)
@@ -100,7 +103,11 @@ class Function1dTo1dTester(TestCase):
             output_batch = node_function(input_batch)
             expected_output_batch = self.expected_function(input_batch)
 
-            assert_allclose(output_batch, expected_output_batch)
+            args = (output_batch, expected_output_batch)
+
+            assert_allclose(output_batch,
+                            expected_output_batch,
+                            **self.allclose_kwargs)
 
 
 class LinearTester(Function1dTo1dTester):
@@ -123,6 +130,22 @@ class BiasTester(Function1dTo1dTester):
 
         return rows + self.node.params.get_value()
 
+
+class SoftmaxTester(Function1dTo1dTester):
+    def setUp(self):
+        super(SoftmaxTester, self).setUp()
+        self.allclose_kwargs = {'rtol': 1e-6}
+
+    def _make_node(self, input_node, output_format):
+        return Softmax(input_node, output_format)
+
+    def expected_function1dTo1d(self, rows):
+        # For numerical stability.
+        # Equiv. to dividing numerator and denominator by max exponent.
+        rows -= numpy.max(rows, axis=1, keepdims=True)
+        exp_rows = numpy.exp(rows)
+        denominators = numpy.sum(exp_rows, axis=1, keepdims=True)
+        return exp_rows / denominators
 
 def test_l2loss():
     rng = numpy.random.RandomState(3523)
