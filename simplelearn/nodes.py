@@ -420,16 +420,14 @@ class CrossEntropy(Node):
     the index of the one in a one-hot vector.
     '''
 
-    def __init__(self, softmax_node, targets_node):
+    def __init__(self, softmax_node, target_node):
         assert_equal(softmax_node.output_format.axes, ('b', 'f'))
-        assert_in(targets_node.output_format.axes, [('b', 'f'), 'b'])
+        assert_in(target_node.output_format.axes, (('b', 'f'), ('b', )))
 
         output = theano.tensor.nnet.categorical_crossentropy(
             softmax_node.output_symbol,
             target_node.output_symbol)
 
-        super(CrossEntropy, self).__init__((softmax_node, targets_node),
+        super(CrossEntropy, self).__init__((softmax_node, target_node),
                                            output,
                                            softmax_node.output_format)
-
-# TODO: cross-entropy

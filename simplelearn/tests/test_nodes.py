@@ -13,12 +13,19 @@ from simplelearn.nodes import (Node,
                                Function1dTo1d,
                                ReLU,
                                Softmax,
-                               L2Loss)
+                               L2Loss,
+                               CrossEntropy)
 from simplelearn.formats import DenseFormat
 from simplelearn.utils import safe_izip
 from unittest import TestCase
 
 import pdb
+
+
+def _make_random_batch(rng, fmt, batch_size):
+    batch = fmt.make_batch(is_symbolic=False, batch_size=batch_size)
+    batch.flat[:] = rng.uniform(batch.size)
+    return batch
 
 
 class DummyFunction1dTo1d(Function1dTo1d):
@@ -97,10 +104,7 @@ class Function1dTo1dTester(TestCase):
         input_format = self.input_node.output_format
 
         for _ in range(3):
-            input_batch = input_format.make_batch(is_symbolic=False,
-                                                  batch_size=batch_size)
-            input_batch[...] = rng.uniform(size=input_batch.shape)
-
+            input_batch = _make_random_batch(rng, input_format, batch_size)
             output_batch = node_function(input_batch)
             expected_output_batch = self.expected_function(input_batch)
 
@@ -148,6 +152,28 @@ class SoftmaxTester(Function1dTo1dTester):
         denominators = numpy.sum(exp_rows, axis=1, keepdims=True)
         return exp_rows / denominators
 
+
+def test_ReLU():
+    rng = numpy.random.RandomState(234)
+    input_format = DenseFormat(axes=('b', '0', '1', 'c'),
+                               shape=(-1, 2, 3, 4),
+                               dtype='floatX')
+
+    input_node = InputNode(fmt=input_format)
+    relu = ReLU(input_node)
+    relu_function = theano.function([input_node.output_symbol],
+                                    relu.output_symbol)
+
+    for batch_size in (1, 5):
+        input_batch = _make_random_batch(rng, input_format, batch_size)
+        output_batch = relu_function(input_batch)
+
+        expected_output_batch = numpy.copy(output_batch)
+        expected_output_batch[expected_output_batch < 0.0] = 0.0
+
+        assert_array_equal(output_batch, expected_output_batch)
+
+
 def test_l2loss():
     rng = numpy.random.RandomState(3523)
 
@@ -178,67 +204,77 @@ def test_l2loss():
                                     loss_node.output_symbol)
 
     for batch_size in xrange(4):
-        batch_a = input_format.make_batch(is_symbolic=False,
-                                          batch_size=batch_size)
-        batch_a.flat[:] = rng.uniform(batch_a.size)
-
-        batch_b = input_format.make_batch(is_symbolic=False,
-                                          batch_size=batch_size)
-        batch_b.flat[:] = rng.uniform(batch_b.size)
+        batch_a = _make_random_batch(rng, input_format, batch_size)
+        batch_b = _make_random_batch(rng, input_format, batch_size)
 
         actual_loss = loss_function(batch_a, batch_b)
         expected_loss = expected_loss_function(batch_a, batch_b, input_format)
+
         assert_equal(actual_loss.shape, expected_loss.shape)
         assert_allclose(actual_loss, expected_loss, rtol=1e-6)
 
 
-# def test_crossentropy():
-#     rng = numpy.random.RandomState(9239)
+def test_crossentropy():
+    rng = numpy.random.RandomState(9239)
 
-#     def expected_loss_function(softmax, targets):
-#         if targets.ndim == 1:
-#             targets = make_onehots(targets)
+    def expected_loss_function(softmaxes, targets):
+        def make_onehots(hot_indices):
+            vec_size = softmaxes.shape[1]
+            result = numpy.zeros(softmaxes.shape, dtype=softmaxes.dtype)
+            for row, hot_index in safe_izip(result, hot_indices):
+                row[hot_index] = 1.0
 
-#         return numpy.sum(numpy.log(softmax) * targets, axis=1)
+            return result
 
-#     def make_loss_function(vec_size, use_integer_targets):
-#         softmax_format = DenseFormat(axes=('b', 'f'),
-#                                      shape=(-1, vec_size),
-#                                      dtype='floatX')
+        if targets.ndim == 1:
+            targets = make_onehots(targets)
 
-#         if use_integer_targets:
-#             target_format = DenseFormat(axes=['b'],
-#                                         shape=[-1],
-#                                         dtype='int')
-#         else:
-#             target_format = DenseFormat(axes=['b', 'f'],
-#                                         shape=(-1, vec_size),
-#                                         dtype='int')
+        return -numpy.sum(numpy.log(softmaxes) * targets, axis=1)
 
-#         CrossEntropy
+    def make_loss_function(vec_size, softmax_format, target_format):
 
-#         softmax_node = InputNode(fmt)
+        softmax_node = InputNode(fmt=softmax_format)
+        target_node = InputNode(fmt=target_format)
+        cross_entropy = CrossEntropy(softmax_node, target_node)
+        return theano.function([x.output_symbol for x in (softmax_node,
+                                                          target_node)],
+                        cross_entropy.output_symbol)
 
 
-def test_ReLU():
-    rng = numpy.random.RandomState(234)
-    input_format = DenseFormat(axes=('b', '0', '1', 'c'),
-                               shape=(-1, 2, 3, 4),
-                               dtype='floatX')
 
-    input_node = InputNode(fmt=input_format)
-    relu = ReLU(input_node)
-    relu_function = theano.function([input_node.output_symbol],
-                                    relu.output_symbol)
+    for use_integer_targets in (True, False):
+        for vec_size in (1, 2):
+            if use_integer_targets:
+                target_format = DenseFormat(axes=['b'],
+                                            shape=[-1],
+                                            dtype='int')
+            else:
+                target_format = DenseFormat(axes=['b', 'f'],
+                                            shape=(-1, vec_size),
+                                            dtype='int')
 
-    for batch_size in (1, 5):
-        input_batch = input_format.make_batch(is_symbolic=False,
-                                              batch_size=batch_size)
-        input_batch[...] = rng.uniform(input_batch.size)
+            softmax_format = DenseFormat(axes=('b', 'f'),
+                                         shape=(-1, vec_size),
+                                         dtype='floatX')
 
-        output_batch = relu_function(input_batch)
 
-        expected_output_batch = numpy.copy(output_batch)
-        expected_output_batch[expected_output_batch < 0.0] = 0.0
+            loss_function = make_loss_function(vec_size,
+                                               softmax_format,
+                                               target_format)
 
-        assert_array_equal(output_batch, expected_output_batch)
+            for batch_size in range(3):
+                softmaxes = _make_random_batch(rng, softmax_format, batch_size)
+                targets = target_format.make_batch(batch_size=batch_size,
+                                                   is_symbolic=False)
+
+                hot_indices = rng.randint(0, vec_size, batch_size)
+
+                if use_integer_targets:
+                    targets[:] = hot_indices
+                else:
+                    targets[...] = 0.0
+                    targets[:, hot_indices] = 1.0
+
+                actual_losses = loss_function(softmaxes, targets)
+                expected_losses = expected_loss_function(softmaxes, targets)
+                assert_allclose(actual_losses, expected_losses)

@@ -2,7 +2,7 @@
 ** Average training, testing costs
 * DONE Write unit test for ReLU node.
 * DONE Write unit test for Softmax node, against pylearn2's.
-* Implement CrossEntropy node, unit-test against pylearn2's.
+* DONE Implement CrossEntropy node, unit-test against pylearn2's.
 * Implement Dropout
 * Check out Fuel as a source of dataset wrappers
 ** https://github.com/bartvm/fuel
@@ -17,3 +17,26 @@
 * Replicate classification success on big NORB
 * Replicate classification + orientation success.
 * Write classification demo
+
+
+Dropout brainstorm:
+* Requirements:
+** For a given unit, include its inputs with probability p (aka zero out with prob. 1-p).
+** Scale the inputs by 1/p to compensate for lowered output vector magnitude.
+** If the inputs are the output of some parameterized function, the parameters' learning rates should be scaled by p^2 (lowered), to compensate for heightend gradient due to scaling by 1/p above.
+* What pylearn2 does
+** dropout is a cost object, with its own rng. Evaluating it causes it to call mlp.dropout_fprop() instead of mlp.fprop().
+** This in turn causes it to loop through layers, calling:
+*** state_below = MLP.apply_dropout(state_below)
+**** The core of dropout is here. It just masks and scales state_below.
+*** state_below = layer.fprop(state_below)
+**** fprops (the masked and scaled) input as usual.
+** model.fprop_dropout() zero-masks and scales the inputs, but scaling the learning rate of the prior layer is the responsibility of the user.
+* strat 1: leave learning rate change to user (ew)
+** Dropout is a wrapper Node around a Node. No need to know the node's type; it just masks and scales node.output_symbol.
+*** InputNode: applies mask, scales output
+*** Linear: applies mask, scales output
+*** Bias: error or warning
+*** AffineTransform: applies mask, scales output
+* strat 2: let Dropout be a flag for the Sgd trainer.
+**
