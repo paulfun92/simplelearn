@@ -12,9 +12,10 @@ from simplelearn.nodes import (Node,
                                Bias,
                                Function1dTo1d,
                                ReLU,
-                               Softmax)
+                               Softmax,
+                               L2Loss)
 from simplelearn.formats import DenseFormat
-
+from simplelearn.utils import safe_izip
 from unittest import TestCase
 
 import pdb
@@ -150,38 +151,73 @@ class SoftmaxTester(Function1dTo1dTester):
 def test_l2loss():
     rng = numpy.random.RandomState(3523)
 
-    def expected_loss_function(arg0, arg1):
+    def expected_loss_function(arg0, arg1, arg_format):
         diff = arg0 - arg1
-        return (diff * diff).sum()
+        feature_size = numpy.prod([size for size, axis in
+                                   safe_izip(arg_format.shape, arg_format.axes)
+                                   if axis != 'b'])
+        bf_format = DenseFormat(axes=('b', 'f'),
+                                shape=(-1, feature_size),
+                                dtype=None)
+        non_b_axes = tuple(axis for axis in arg_format.axes if axis != 'b')
+        axis_map = {non_b_axes : 'f'}
+        diff = arg_format.convert(diff, bf_format, axis_map=axis_map)
 
-    def make_loss_function(vec_size):
-        fmt = DenseFormat(axes=('b', 'f'),
-                          shape=(-1, vec_size),
-                          dtype=theano.config.floatX)
+        return (diff * diff).sum(axis=1)
 
-        input_node_a = InputNode(fmt)
-        input_node_b = InputNode(fmt)
 
-        diff = input_node_a.output_symbol - input_node_b.output_symbol
-        loss = (diff * diff).sum()
+    input_format = DenseFormat(axes=('c', '0', 'b', '1'),
+                               shape=(1, 2, -1, 3),
+                               dtype='floatX')
+    input_node_a = InputNode(fmt=input_format)
+    input_node_b = InputNode(fmt=input_format)
+    loss_node = L2Loss(input_node_a, input_node_b)
 
-        return theano.function([input_node_a.output_symbol,
-                                input_node_b.output_symbol],
-                               loss)
-
-    vec_size = 10
-    loss_function = make_loss_function(vec_size)
-
-    cast_to_floatX = numpy.cast[theano.config.floatX]
+    loss_function = theano.function([input_node_a.output_symbol,
+                                     input_node_b.output_symbol],
+                                    loss_node.output_symbol)
 
     for batch_size in xrange(4):
-        arg0 = cast_to_floatX(rng.uniform(size=(batch_size, vec_size)))
-        arg1 = cast_to_floatX(rng.uniform(size=(batch_size, vec_size)))
+        batch_a = input_format.make_batch(is_symbolic=False,
+                                          batch_size=batch_size)
+        batch_a.flat[:] = rng.uniform(batch_a.size)
 
-        expected_loss = expected_loss_function(arg0, arg1)
-        loss = loss_function(arg0, arg1)
+        batch_b = input_format.make_batch(is_symbolic=False,
+                                          batch_size=batch_size)
+        batch_b.flat[:] = rng.uniform(batch_b.size)
 
-        assert_allclose(loss, expected_loss)
+        actual_loss = loss_function(batch_a, batch_b)
+        expected_loss = expected_loss_function(batch_a, batch_b, input_format)
+        assert_equal(actual_loss.shape, expected_loss.shape)
+        assert_allclose(actual_loss, expected_loss, rtol=1e-6)
+
+
+# def test_crossentropy():
+#     rng = numpy.random.RandomState(9239)
+
+#     def expected_loss_function(softmax, targets):
+#         if targets.ndim == 1:
+#             targets = make_onehots(targets)
+
+#         return numpy.sum(numpy.log(softmax) * targets, axis=1)
+
+#     def make_loss_function(vec_size, use_integer_targets):
+#         softmax_format = DenseFormat(axes=('b', 'f'),
+#                                      shape=(-1, vec_size),
+#                                      dtype='floatX')
+
+#         if use_integer_targets:
+#             target_format = DenseFormat(axes=['b'],
+#                                         shape=[-1],
+#                                         dtype='int')
+#         else:
+#             target_format = DenseFormat(axes=['b', 'f'],
+#                                         shape=(-1, vec_size),
+#                                         dtype='int')
+
+#         CrossEntropy
+
+#         softmax_node = InputNode(fmt)
 
 
 def test_ReLU():

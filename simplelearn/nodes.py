@@ -360,6 +360,8 @@ class L2Loss(Node):
     Computes ||x_i - y_i||^2 for each x_i, y_i in a batch of data.
 
     Input nodes must have a batch axis.
+
+    Output axes: ['b']
     '''
 
     def __init__(self, input_node_a, input_node_b):
@@ -383,19 +385,21 @@ class L2Loss(Node):
                                                 in safe_izip(fmt.shape,
                                                              fmt.axes)
                                                 if axis != 'b'))
+
+                non_b_axes = tuple(axis for axis in fmt.axes if axis != 'b')
                 return DenseFormat(shape=(batch_size, feature_size),
                                    axes=('b', 'f'),
-                                   dtype=fmt.dtype)
+                                   dtype=fmt.dtype), non_b_axes
 
-            bf_format = make_bf_format(node.output_format)
-            return node.output_format.convert(node.output_symbol, bf_format)
+            bf_format, non_b_axes = make_bf_format(node.output_format)
+            axis_map = {'b': 'b',
+                        non_b_axes: 'f'}
+
+            return node.output_format.convert(node.output_symbol,
+                                              bf_format,
+                                              axis_map=axis_map)
 
 
-        # format_a_bf = make_bf_format(format_a)
-        # format_b_bf = make_bf_format(format_b)
-
-        # symbol_a_bf = format_a.convert(input_node_a.output_symbol, format_a_bf)
-        # symbol_b_bf = format_b.convert(input_node_b.output_symbol, format_b_bf)
         symbol_a_bf = convert_to_bf(input_node_a)
         symbol_b_bf = convert_to_bf(input_node_b)
 
@@ -406,5 +410,26 @@ class L2Loss(Node):
         super(L2Loss, self).__init__((input_node_a, input_node_b),
                                      output_symbol,
                                      output_format)
+
+class CrossEntropy(Node):
+    '''
+    Computes the cross-entropy between model outputs and target labels.
+
+    Target labels can either be one-hot vectors (vectors with all zeros except
+    for a single 1), or ints. In the latter case, the ints are interpreted as
+    the index of the one in a one-hot vector.
+    '''
+
+    def __init__(self, softmax_node, targets_node):
+        assert_equal(softmax_node.output_format.axes, ('b', 'f'))
+        assert_in(targets_node.output_format.axes, [('b', 'f'), 'b'])
+
+        output = theano.tensor.nnet.categorical_crossentropy(
+            softmax_node.output_symbol,
+            target_node.output_symbol)
+
+        super(CrossEntropy, self).__init__((softmax_node, targets_node),
+                                           output,
+                                           softmax_node.output_format)
 
 # TODO: cross-entropy

@@ -1,7 +1,7 @@
 * DONE Get linear_regression.py to live-plot values of interest
 ** Average training, testing costs
-* Write unit test for ReLU node.
-* Write unit test for Softmax node, against pylearn2's.
+* DONE Write unit test for ReLU node.
+* DONE Write unit test for Softmax node, against pylearn2's.
 * Implement CrossEntropy node, unit-test against pylearn2's.
 * Implement Dropout
 * Check out Fuel as a source of dataset wrappers
