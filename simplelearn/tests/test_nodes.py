@@ -4,19 +4,22 @@ Tests for simplelearn.nodes
 
 import numpy
 import theano
+from theano.tensor.shared_randomstreams import RandomStreams
+# from theano.sandbox.rng_mrg import MRG_RandomStreams
 from numpy.testing import assert_allclose, assert_array_equal
-from nose.tools import assert_is_instance, assert_equal, assert_greater_equal
+from nose.tools import assert_is_instance, assert_equal
+from simplelearn.formats import DenseFormat
+from simplelearn.utils import safe_izip
 from simplelearn.nodes import (Node,
                                InputNode,
                                Linear,
                                Bias,
                                Function1dTo1d,
                                ReLU,
+                               Dropout,
                                Softmax,
                                L2Loss,
                                CrossEntropy)
-from simplelearn.formats import DenseFormat
-from simplelearn.utils import safe_izip
 from unittest import TestCase
 
 import pdb
@@ -108,8 +111,6 @@ class Function1dTo1dTester(TestCase):
             output_batch = node_function(input_batch)
             expected_output_batch = self.expected_function(input_batch)
 
-            args = (output_batch, expected_output_batch)
-
             assert_allclose(output_batch,
                             expected_output_batch,
                             **self.allclose_kwargs)
@@ -174,6 +175,46 @@ def test_ReLU():
         assert_array_equal(output_batch, expected_output_batch)
 
 
+def test_dropout():
+    rng = numpy.random.RandomState(4352)
+    theano_rng = RandomStreams(8482)
+
+    input_format = DenseFormat(axes=('k', 'd', 'b', 'f'),
+                               shape=(20, 1, -1, 30),
+                               dtype='floatX')
+
+    input_node = InputNode(fmt=input_format)
+
+    include_probability = .7
+    dropout = Dropout(input_node, include_probability, theano_rng)
+
+    dropout_and_mask_function = theano.function([input_node.output_symbol],
+                                                [dropout.output_symbol,
+                                                 dropout.mask])
+
+    def get_actual_and_expected_values(input_batch):
+        actual, mask = dropout_and_mask_function(input_batch)
+        scale = numpy.cast[input_format.dtype](1.0 / include_probability)
+        expected = input_batch * mask * scale
+
+        return actual, expected
+
+    for batch_size in range(3):
+        input_batch = _make_random_batch(rng, input_format, batch_size)
+        input_batch[input_batch == 0.0] = 0.1  # no zeros in input batch
+
+        actual, expected = get_actual_and_expected_values(input_batch)
+        assert_allclose(actual, expected)
+
+        if batch_size > 0:
+            num_included = numpy.count_nonzero(actual != 0.0)
+            actual_include_fraction = (float(num_included) /
+                                       float(input_batch.size))
+            assert_allclose(actual_include_fraction,
+                            include_probability,
+                            atol=.05)
+
+
 def test_l2loss():
     rng = numpy.random.RandomState(3523)
 
@@ -219,7 +260,6 @@ def test_crossentropy():
 
     def expected_loss_function(softmaxes, targets):
         def make_onehots(hot_indices):
-            vec_size = softmaxes.shape[1]
             result = numpy.zeros(softmaxes.shape, dtype=softmaxes.dtype)
             for row, hot_index in safe_izip(result, hot_indices):
                 row[hot_index] = 1.0
@@ -231,8 +271,7 @@ def test_crossentropy():
 
         return -numpy.sum(numpy.log(softmaxes) * targets, axis=1)
 
-    def make_loss_function(vec_size, softmax_format, target_format):
-
+    def make_loss_function(softmax_format, target_format):
         softmax_node = InputNode(fmt=softmax_format)
         target_node = InputNode(fmt=target_format)
         cross_entropy = CrossEntropy(softmax_node, target_node)
@@ -258,9 +297,7 @@ def test_crossentropy():
                                          dtype='floatX')
 
 
-            loss_function = make_loss_function(vec_size,
-                                               softmax_format,
-                                               target_format)
+            loss_function = make_loss_function(softmax_format, target_format)
 
             for batch_size in range(3):
                 softmaxes = _make_random_batch(rng, softmax_format, batch_size)

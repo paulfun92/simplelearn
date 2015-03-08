@@ -38,5 +38,7 @@ Dropout brainstorm:
 *** Linear: applies mask, scales output
 *** Bias: error or warning
 *** AffineTransform: applies mask, scales output
-* strat 2: let Dropout be a flag for the Sgd trainer.
-**
+* strat 2: let Dropout be a flag for functions in models.py that create CNN/NNs
+** arg: dropout_include_rates
+** No need for DropoutSgdParameterUpdater for now.
+** Adds dropout nodes after each layer for which dropout_include_rate is not None, and scales that layer's weights (not biases) by p^2

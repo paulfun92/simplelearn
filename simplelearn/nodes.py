@@ -11,7 +11,8 @@ __license__ = "Apache 2.0"
 import collections
 import numpy
 import theano
-from nose.tools import (assert_false,
+from theano.tensor import Rebroadcast
+from nose.tools import (assert_true,
                         assert_equal,
                         assert_is_instance,
                         assert_in)
@@ -353,6 +354,68 @@ class ReLU(Node):
         super(ReLU, self).__init__([input_node],
                                    output_symbol,
                                    input_node.output_format)
+
+class Dropout(Node):
+    '''
+    Randomly zeros some fraction (1-P) of the input, and scales it by 1/P.
+
+    P is chosen as the include_probability constructor arg.
+
+    It is the user's responsibility to also scale the learning rate of the
+    input node's weights by P^2. The model-constructing functions in
+    simplelearn/models.py do this.
+
+    The same mask is applied to all elements in a batch.
+    (To apply different dropout masks, we'd need to know the batch size at
+    theano funciton compilation time, which is possible, but would make the
+    code messier. I'm therefore not implementing it for now.)
+    '''
+    def __init__(self, input_node, include_probability, theano_rng):
+        '''
+        Parameters
+        ----------
+        input_node: Node
+        include_probability: float
+        theano_rng: theano.rng.shared_randomstreams.RandomStreams
+        '''
+        assert_true(numpy.issubdtype(type(include_probability),
+                                     numpy.floating))
+        assert_is_instance(theano_rng,
+                           theano.tensor.shared_randomstreams.RandomStreams)
+        assert_in('b', input_node.output_format.axes)
+
+        self._include_probability = float(include_probability)
+
+        example_shape = list(input_node.output_format.shape)
+        b_index = input_node.output_format.axes.index('b')
+        example_shape[b_index] = 1
+
+        input_symbol = input_node.output_symbol
+
+        # Evaluates to a different random mask on every function evaluation.
+        # Within a single evaluation, the mask is the same even if it comes up
+        # in multiple places.
+        mask = theano_rng.binomial(p=self._include_probability,
+                                   size=example_shape,
+                                   dtype=input_symbol.dtype)
+
+        # makes the mask's batch axis broadcastable
+        def rebroadcast_batch_axis(arg, fmt):
+            rebroadcast = Rebroadcast(*tuple(enumerate(axis == 'b'
+                                                       for axis
+                                                       in fmt.axes)))
+            return rebroadcast(arg)
+
+        self.mask = rebroadcast_batch_axis(mask, input_node.output_format)
+
+        cast = numpy.cast[input_symbol.dtype]
+        input_scale = cast(1.0 / self._include_probability)
+
+        output_symbol = input_symbol * self.mask * input_scale
+
+        super(Dropout, self).__init__([input_node],
+                                      output_symbol,
+                                      input_node.output_format)
 
 
 class L2Loss(Node):
