@@ -7,6 +7,28 @@ __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2014"
 __license__ = "Apache 2.0"
 
+import os
+from simplelearn.formats import Format
+
+def _get_data_path():
+    env_variable = 'SIMPLELEARN_DATA_PATH'
+
+    if env_variable not in os.environ:
+        raise RuntimeError("Environment variable %s not "
+                           "defined." % env_variable)
+
+    result = os.environ[env_variable]
+
+    if not os.path.isdir(result):
+        raise RuntimeError("Couldn't find %s directory "
+                           "(%s). Please create it." %
+                           (env_variable, result))
+
+    return result
+
+
+data_path = _get_data_path()
+
 
 class DataSource(object):
     """

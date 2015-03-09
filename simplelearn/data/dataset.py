@@ -28,7 +28,7 @@ class Dataset(DataSource):
     memmap).
     """
 
-    def __init__(self, names, formats, tensors):
+    def __init__(self, names, tensors, formats):
         if len(names) != len(formats) or len(names) != len(tensors):
             raise ValueError("Names, formats, and tensors must all have the "
                              "same length, but got %d, %d, and %d "
@@ -36,7 +36,7 @@ class Dataset(DataSource):
                              tuple(len(names), len(formats), len(tensors)))
 
         for name in names:
-            if not isinstance(name, str):
+            if not isinstance(name, basestring):
                 raise TypeError("names must be strings, not %s." % type(name))
 
         for tensor, fmt in safe_izip(tensors, formats):
@@ -68,6 +68,7 @@ class Dataset(DataSource):
     def make_input_nodes(self):
         NamedTupleOfNodes = collections.namedtuple('NamedNodes', self._names)
         nodes = tuple(InputNode(fmt) for fmt in self._formats)
+        # pylint: disable=star-args
         return NamedTupleOfNodes(*nodes)
 
 
@@ -130,7 +131,7 @@ class SequentialIterator(DataIterator):
                              "'tensors' arguments.")
 
         for name in names:
-            if not isinstance(name, str):
+            if not isinstance(name, basestring):
                 raise TypeError("Expected names to be strings, but got a %s."
                                 % type(name))
 
@@ -187,6 +188,8 @@ class SequentialIterator(DataIterator):
         self._tensors = tensors
         self.Batch = collections.namedtuple('Batch', names)
 
+        super(SequentialIterator, self).__init__()
+
     def next_is_new_epoch(self):
         num_samples = self._tensors[0].shape[self._formats[0].axes.index('b')]
         assert_less(self._next_batch_start, num_samples)
@@ -196,7 +199,7 @@ class SequentialIterator(DataIterator):
         else:
             return self._next_batch_start == 0
 
-    def next(self):
+    def _next(self):
         num_samples = \
             self._tensors[0].shape[self._formats[0].axes.index('b')]
 
@@ -287,4 +290,5 @@ class SequentialIterator(DataIterator):
         if self._next_batch_start == num_samples:
             self._next_batch_start = 0
 
+        # pylint: disable=star-args
         return self.Batch(*subbatches)

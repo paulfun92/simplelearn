@@ -94,7 +94,8 @@ class Format(object):
         if isinstance(batch, theano.gof.Variable):
             return True
         elif (isinstance(batch, (numpy.ndarray, numpy.memmap)) or
-              type(batch) == 'CudaNdarray'):
+              any(x in str(type(batch))
+                  for x in ('CudaNdarray', 'h5py._hl.dataset.Dataset'))):
             return False
         else:
             raise TypeError("Unrecognized batch type %s." % type(batch))
@@ -467,9 +468,9 @@ class DenseFormat(Format):
             for val in get_debug_values(batch):
                 self._check(val)
 
-        if batch.ndim != len(self.axes):
+        if len(batch.shape) != len(self.axes):
             raise ValueError("Expected a %d-D tensor, but batch had %d "
-                             "dimensions" % (len(self.axes), batch.ndim))
+                             "dimensions" % (len(self.axes), len(batch.shape)))
 
         if not is_symbolic:
             for expected_size, size, axis in safe_izip(self.shape,
@@ -676,6 +677,12 @@ class DenseFormat(Format):
                 return theano.tensor.cast(batch, str(output_format.dtype))
             else:
                 return numpy.cast[output_format.dtype](batch)
+
+    def __eq__(self, other):
+        return (type(self) == type(other) and
+                self.dtype == other.dtype and
+                self.axes == other.axes and
+                self.shape == other.shape)
 
     def requires_conversion(self, target_format):
         for fmt in (self, target_format):
