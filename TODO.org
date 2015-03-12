@@ -3,11 +3,14 @@
 * DONE Write unit test for ReLU node.
 * DONE Write unit test for Softmax node, against pylearn2's.
 * DONE Implement CrossEntropy node, unit-test against pylearn2's.
-* Implement Dropout
-* Check out Fuel as a source of dataset wrappers
+* DONE Implement Dropout
+* DONE Check out Fuel as a source of dataset wrappers
 ** https://github.com/bartvm/fuel
 ** If unsatisfactory, Implement data.Mnist, test against pylearn2.datasets.Mnist
 *** Searches for cached mnist memmaps, creates them if necessary.
+* DONE Write mnist.py
+* Write models.py
+** write add_fc_layer(input_node, output_size)
 * Write examples/mnist_fully_connected.py
 ** Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
 * Implement Conv2D node, test against pylearn2's.

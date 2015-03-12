@@ -9,6 +9,7 @@ __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
+import os
 import warnings
 from collections import Sequence, OrderedDict
 import numpy
@@ -79,6 +80,41 @@ class LimitsNumEpochs(EpochCallback):
                                message=('Reached max # of epochs %d.' %
                                         self._max_num_epochs))
 
+class PicklesOnEpoch(EpochCallback):
+    '''
+    A callback that saves a list of objects at the start of training, and
+    again on each epoch.
+    '''
+    def __init__(self, objects, filepath, overwrite=True):
+        path, filename = os.path.split(filepath)
+        assert_true(os.path.isdir(path))
+        assert_equal(os.path.splitext(filename)[1], '.pkl')
+
+        self._filepath = filepath
+        self._overwrite = overwrite
+        self._num_epochs_seen = 0
+
+    def on_start_training(self):
+        self.on_epoch()
+
+    def on_epoch(self):
+        if self._overwrite:
+            filepath = self._filepath
+        else:
+            path, filename = os.path.split(self._filepath)
+            basename, extension = os.path.splitext(filename)
+            filename = '%s_%05d%s' % (filename,
+                                      self._num_epochs_seen,
+                                      extension)
+
+            filepath = os.path.join(path, filename)
+
+        pickle_file = file(filepath, 'wb')
+
+        for obj in self._objects:
+            cPickle.dump(obj, pickle_file, protocol=cPickle.HIGHEST_PROTOCOL)
+
+        self._num_epochs_seen += 1
 
 class ValidationCallback(EpochCallback):
     '''
@@ -734,7 +770,7 @@ class Sgd(object):
     At each iteration this computes the gradients of each parameter with
     respect to the cost function, then updates the parameter value using
     the gradients. How this update is performed (e.g. learning rate,
-    momentum value & type, etc) is up to the GradientBasedParameterUpdater
+    momentum value & type, etc) is up to the SgdParameterUpdater
     objects passed into the constructor.
     '''
 
