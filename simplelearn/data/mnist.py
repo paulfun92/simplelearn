@@ -16,7 +16,20 @@ from nose.tools import (assert_true,
                         assert_is_instance)
 from simplelearn.formats import DenseFormat
 from simplelearn.data import data_path
-from simplelearn.data.dataset import Dataset
+from simplelearn.data.hdf5_dataset import add_tensor, Hdf5Dataset
+
+# class __Mnist(Hdf5Dataset):
+#     '''
+#     Do not construct directly. Use the load_mnist() function instead.
+#     '''
+
+#     def __init__(self, file_path, which_set):
+#         assert_in(which_set, ('test', 'train'))
+#         self._which_set = which_set
+#         super(__Mnist, self).__init__(file_path)
+
+#     def _get_dataset_group(self, hdf5):
+#         return hdf5[self.which_set]
 
 
 def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
@@ -91,16 +104,29 @@ def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
 
         raw_images_path = join(raw_mnist_dir, '%s-images-idx3-ubyte' % prefix)
         raw_images = read_raw_images(raw_images_path)
-        images = group.create_dataset('images',
-                                      raw_images.shape,
-                                      dtype=raw_images.dtype)
+        images = add_tensor('images',
+                            raw_images.shape,
+                            raw_images.dtype,
+                            ('b', '0', '1'),
+                            group)
+
+        # images = group.create_dataset('images',
+        #                               raw_images.shape,
+        #                               dtype=raw_images.dtype)
         images[...] = raw_images
 
         raw_labels_path = join(raw_mnist_dir, '%s-labels-idx1-ubyte' % prefix)
         raw_labels = read_raw_labels(raw_labels_path)
-        labels = group.create_dataset('labels',
-                                      raw_labels.shape,
-                                      dtype=raw_labels.dtype)
+
+        labels = add_tensor('labels',
+                            raw_labels.shape,
+                            raw_labels.dtype,
+                            ('b',),
+                            group)
+
+        # labels = group.create_dataset('labels',
+        #                               raw_labels.shape,
+        #                               dtype=raw_labels.dtype)
         labels[...] = raw_labels
 
     with h5py.File(hdf5_path, 'w-') as writeable_hdf5_file:
@@ -129,7 +155,8 @@ def load_mnist(raw_mnist_dir=None):
     Returns
     -------
     rval: tuple
-      A tuple of two simplelearn.data.Datasets, the training and testing set.
+      A tuple of two simplelearn.data.Hdf5Datasets, the training and testing
+      set.
     '''
     default_mnist_dir = join(data_path, 'mnist')
     cache_path = join(default_mnist_dir, 'mnist_cache.h5')
@@ -140,8 +167,8 @@ def load_mnist(raw_mnist_dir=None):
                           "cached copy of MNIST already exists at %s." %
                           (raw_mnist_dir, cache_path))
 
-        hdf_file = h5py.File(cache_path, 'r')
-    else:
+        # hdf_file = h5py.File(cache_path, 'r')
+    else:  # Construct cache file
 
         if raw_mnist_dir is None:
             raw_mnist_dir = default_mnist_dir
@@ -150,19 +177,22 @@ def load_mnist(raw_mnist_dir=None):
 
         hdf_file = _copy_raw_mnist_to_hdf5(raw_mnist_dir, cache_path)
 
-    def group_to_dataset(group):
-        assert_equal(group.keys(), ['images', 'labels'])
-        images = group['images']
-        labels = group['labels']
 
-        formats = [DenseFormat(axes=('b', '0', '1'),
-                               shape=[-1, images.shape[1], images.shape[2]],
-                               dtype=images.dtype),
-                   DenseFormat(axes=['b'],
-                               shape=[-1],
-                               dtype=labels.dtype)]
+    return tuple(Hdf5Dataset(cache_path, u'/%s' % which_set)
+                 for which_set in ('train', 'test'))
+    # def group_to_dataset(group):
+    #     assert_equal(group.keys(), ['images', 'labels'])
+    #     images = group['images']
+    #     labels = group['labels']
 
-        return Dataset(group.keys(), group.values(), formats)
+    #     formats = [DenseFormat(axes=('b', '0', '1'),
+    #                            shape=[-1, images.shape[1], images.shape[2]],
+    #                            dtype=images.dtype),
+    #                DenseFormat(axes=['b'],
+    #                            shape=[-1],
+    #                            dtype=labels.dtype)]
 
-    return tuple(group_to_dataset(hdf_file[set_name])
-                 for set_name in ('train', 'test'))
+    #     return Dataset(group.keys(), group.values(), formats)
+
+    # return tuple(group_to_dataset(hdf_file[set_name])
+    #              for set_name in ('train', 'test'))
