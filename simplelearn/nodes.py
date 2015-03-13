@@ -8,6 +8,7 @@ __copyright__ = "Copyright 2014"
 __license__ = "Apache 2.0"
 
 
+import copy
 import collections
 import numpy
 import theano
@@ -63,6 +64,51 @@ class Node(object):
         self.output_format = output_format
         self.output_symbol = output_symbol
 
+
+class RescaleImage(Node):
+    '''
+    Converts a int image to a floating-point image.
+    Remaps pixel value range from [0, 255] to [0.0, 1.0].
+    '''
+
+    def __init__(self, input_node, output_dtype='floatX'):
+        #
+        # Sanity-check args
+        #
+
+        # Check number of axes, to see if it's really an image
+        non_batch_axes = tuple(a for a in input_node.output_format.axes
+                               if a != 'b')
+        if len(non_batch_axes) not in (2, 3):
+            raise ValueError("Expected input_node.format to have 2 or 3 "
+                             "non-batch axes, but got %d: %s" %
+                             (len(non_batch_axes), str(input_node.axes)))
+
+        assert_true(numpy.issubdtype(input_node.output_symbol.dtype,
+                                     numpy.integer))
+
+        dtype = str(theano.config.floatX
+                    if str(output_dtype) == 'floatX'
+                    else output_dtype)
+
+        assert_true(numpy.issubdtype(dtype, numpy.floating))
+
+        # TODO: theano-assert that all values are between 0 and 255.
+
+        #
+        # Actual work starts here
+        #
+
+        output_format = copy.deepcopy(input_node.output_format)
+        output_format.dtype = dtype
+
+        normalizer = numpy.asarray(255, dtype=dtype)
+        output_symbol = (theano.tensor.cast(input_node.output_symbol, dtype) /
+                         normalizer)
+
+        super(RescaleImage, self).__init__(input_node,
+                                           output_symbol,
+                                           output_format)
 
 class FormatNode(Node):
     '''
@@ -487,9 +533,12 @@ class CrossEntropy(Node):
         assert_equal(softmax_node.output_format.axes, ('b', 'f'))
         assert_in(target_node.output_format.axes, (('b', 'f'), ('b', )))
 
+        target_symbol = theano.tensor.cast(target_node.output_symbol,
+                                           'int64')
+
         output = theano.tensor.nnet.categorical_crossentropy(
             softmax_node.output_symbol,
-            target_node.output_symbol)
+            target_symbol)
 
         super(CrossEntropy, self).__init__((softmax_node, target_node),
                                            output,

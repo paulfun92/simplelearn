@@ -9,9 +9,8 @@
 ** If unsatisfactory, Implement data.Mnist, test against pylearn2.datasets.Mnist
 *** Searches for cached mnist memmaps, creates them if necessary.
 * DONE Write mnist.py
-* Write models.py
-** write add_fc_layer(input_node, output_size)
 * Write examples/mnist_fully_connected.py
+** We need to make a subclass of Dataset for MNIST, so it knows how to (not) serialize itself. This can be general; call it HdfDataset.
 ** Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
 * Implement Conv2D node, test against pylearn2's.
 * Write examples/mnist_conv.py

@@ -468,7 +468,20 @@ class DenseFormat(Format):
             for val in get_debug_values(batch):
                 self._check(val)
 
-        if len(batch.shape) != len(self.axes):
+        def get_ndim(batch):
+            '''
+            Returns the # of dimensions of the batch.
+
+            This is a workaround to the fact that you can't use batch.ndim if
+            batch is a h4py.Dataset, and you can't use len(batch.shape) if
+            batch is a theano.tensor.TensorVariable.
+            '''
+            if hasattr(batch, 'ndim'):
+                return batch.ndim
+            else:
+                return len(batch.shape)
+
+        if get_ndim(batch) != len(self.axes):
             raise ValueError("Expected a %d-D tensor, but batch had %d "
                              "dimensions" % (len(self.axes), len(batch.shape)))
 

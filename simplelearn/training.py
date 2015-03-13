@@ -11,6 +11,7 @@ __license__ = "Apache 2.0"
 
 import os
 import warnings
+import cPickle
 from collections import Sequence, OrderedDict
 import numpy
 import theano
@@ -86,9 +87,30 @@ class PicklesOnEpoch(EpochCallback):
     again on each epoch.
     '''
     def __init__(self, objects, filepath, overwrite=True):
+        '''
+        Parameters
+        ----------
+        objects: anything
+          An object, or a sequence of objects, to pickle at each epoch.
+
+        filepath: str
+          The file path to save the objects to. Must end in '.pkl'
+
+        overwrite: bool
+          Overwrite the file at each epoch. If False, and filepath is
+          'path/to/file.pkl', this saves a separate file for each epoch,
+          of the form 'path/to/file_00000.pkl', 'path/to/file_00001.pkl',
+          etc. The first file stores the state of <objects> before any epochs.
+        '''
         path, filename = os.path.split(filepath)
         assert_true(os.path.isdir(path))
         assert_equal(os.path.splitext(filename)[1], '.pkl')
+
+        if isinstance(objects, Sequence) and \
+           not isinstance(objects, basestring):
+            self.objects = objects
+        else:
+            self.objects = [objects]
 
         self._filepath = filepath
         self._overwrite = overwrite
@@ -111,7 +133,7 @@ class PicklesOnEpoch(EpochCallback):
 
         pickle_file = file(filepath, 'wb')
 
-        for obj in self._objects:
+        for obj in self.objects:
             cPickle.dump(obj, pickle_file, protocol=cPickle.HIGHEST_PROTOCOL)
 
         self._num_epochs_seen += 1
@@ -570,14 +592,23 @@ class StopsOnStagnation(object):
     (e.g. average loss over the epoch) doesn't decrease for N epochs.
     '''
 
-    def __init__(self, max_epochs, min_decrease):
+    def __init__(self, max_epochs, min_proportional_decrease):
+        '''
+        max_epochs: int
+          Wait for max this many epochs for the monitored value to decrease.
+
+        min_proportional_decrease: float
+          If this value is T, the monitored value is V, and the last known
+          minimum of V is Vm, then V is considered a decrease only if
+          V < (1.0 - T) * Vm
+        '''
         assert_greater(max_epochs, 0)
         assert_true(numpy.issubdtype(type(max_epochs), numpy.integer))
 
-        assert_greater_equal(min_decrease, 0.0)
+        assert_greater_equal(min_proportional_decrease, 0.0)
 
         self._max_epochs_since_min = max_epochs
-        self._min_decrease = min_decrease
+        self._min_proportional_decrease = min_proportional_decrease
         self._epochs_since_min = 0
         self._min_value = None
 
@@ -593,22 +624,23 @@ class StopsOnStagnation(object):
 
         if self._min_value is None:
             self._min_value = value
-        elif value + self._min_decrease < self._min_value:
+        elif value < (1.0 - self._min_proportional_decrease) * self._min_value:
             self._epochs_since_min = 0
             self._min_value = value
         else:
             self._epochs_since_min += 1
 
         if self._epochs_since_min >= self._max_epochs_since_min:
-            raise StopTraining("ok",
-                               "%s stopping training. Value did not lower %s"
-                               "below last min value of %g for %d epochs." %
-                               (type(self),
-                                ("more than %g " % self._min_decrease
-                                 if self._min_decrease > 0.0
-                                 else ""),
-                                self._min_value,
-                                self._epochs_since_min))
+            message = ("%s stopping training. Value did not lower %s"
+                       "below last min value of %g for %d epochs." %
+                       (type(self),
+                        ("more than %g " % self._min_proportional_decrease
+                         if self._min_proportional_decrease > 0.0
+                         else ""),
+                        self._min_value,
+                        self._epochs_since_min))
+
+            raise StopTraining("ok", message)
 
 
 class LogsToLists(object):
@@ -880,7 +912,7 @@ class Sgd(object):
         # These get called once before any training, and after each epoch
         # thereafter. One of them must halt the training at some point by
         # throwing a StopTraining exception.
-        self._epoch_callbacks = tuple(epoch_callbacks)
+        self.epoch_callbacks = tuple(epoch_callbacks)
 
         self._train_called = False
 
@@ -905,15 +937,15 @@ class Sgd(object):
 
         self._train_called = True
 
-        if len(self._epoch_callbacks) + len(self._monitors) == 0:
-            raise RuntimeError("self._monitors and self._epoch_callbacks are "
+        if len(self.epoch_callbacks) + len(self._monitors) == 0:
+            raise RuntimeError("self._monitors and self.epoch_callbacks are "
                                "both empty, so this will "
                                "iterate through the training data forever. "
                                "Please add an EpochCallback or "
                                "Monitor that will throw a "
                                "StopTraining exception at some point.")
         try:
-            all_callbacks = self._monitors + self._epoch_callbacks
+            all_callbacks = self._monitors + tuple(self.epoch_callbacks)
             for callback in all_callbacks:
                 callback.on_start_training()
 

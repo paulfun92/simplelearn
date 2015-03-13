@@ -1,12 +1,37 @@
-from simplelearn.nodes import AffineTransform, ReLU, CrossEntropy
+#! /usr/bin/env python
+
+import argparse
+import numpy
+import theano
+from nose.tools import assert_greater, assert_equal
+from simplelearn.nodes import (AffineTransform,
+                               ReLU,
+                               CrossEntropy,
+                               Softmax,
+                               RescaleImage)
 from simplelearn.utils import safe_izip
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
+                                  LogsToLists,
+                                  AverageMonitor,
                                   LimitsNumEpochs,
+                                  PicklesOnEpoch,
                                   ValidationCallback,
                                   StopsOnStagnation)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=("Trains multilayer perceptron to classify MNIST digits."))
+
+    parser.add_argument("--output_file",
+                        type=str,
+                        required=True,
+                        help=("Filename to save the trainer & log to."))
+
+    return parser.parse_args()
 
 
 def build_fc_classifier(input_node,
@@ -65,7 +90,7 @@ def build_fc_classifier(input_node,
         pylearn2.models.mlp.Linear.set_input_space()
         '''
 
-        params = shared_variable.get_values()
+        params = shared_variable.get_value()
         params[...] = 0.0
 
         indices = rng.choice(params.size,
@@ -73,15 +98,17 @@ def build_fc_classifier(input_node,
                              replace=False)
 
         # normal dist with stddev=1.0
-        params.flat[indices] = rng.randn(size=num_nonzeros)
+        params.flat[indices] = rng.randn(num_nonzeros)
 
-        shared_variable.set_values(params)
+        shared_variable.set_value(params)
 
 
     # Initialize the first N-1 affine layer weights (not biases)
     for sparse_init_count, affine_node in safe_izip(sparse_init_counts,
                                                     affine_nodes[:-1]):
-        init_sparse(affine_node.weights, sparse_init_count, rng)
+        for params in (affine_node.linear_node.params,
+                       affine_node.bias_node.params):
+            init_sparse(params, sparse_init_count, rng)
 
     output_node = Softmax(input_node, DenseFormat(axes=('b', 'f'),
                                                   shape=(-1, sizes[-1]),
@@ -91,6 +118,8 @@ def build_fc_classifier(input_node,
 
 
 def main():
+    args = parse_args()
+
     sizes = [500, 500, 10]
     sparse_init_counts = [15, 15]
 
@@ -98,11 +127,15 @@ def main():
 
     mnist_training, mnist_testing = load_mnist()
 
-    image_node, label_node = dataset.get_input_nodes()
+    image_node, label_node = mnist_training.make_input_nodes()
+    image_node = RescaleImage(image_node)
 
-    affine_nodes, output_node = build_fc_classifier(input_node,
+    rng = numpy.random.RandomState(34523)
+
+    affine_nodes, output_node = build_fc_classifier(image_node,
                                                     sizes,
-                                                    sparse_init_counts)
+                                                    sparse_init_counts,
+                                                    rng)
 
     loss_node = CrossEntropy(output_node, label_node)
     loss_sum = loss_node.output_symbol.sum()
@@ -115,7 +148,7 @@ def main():
     momentum = .05
     use_nesterov = False
     max_epochs = 10000
-
+    batch_size = 100
 
     #
     # Makes parameter updaters
@@ -127,12 +160,12 @@ def main():
         for params in (affine_node.linear_node.params,
                        affine_node.bias_node.params):
             parameters.append(params)
-            gradients = theano.tensor.gradient(loss_sum, params)
+            gradients = theano.gradient.grad(loss_sum, params)
             parameter_updaters.append(SgdParameterUpdater(params,
                                                           gradients,
                                                           learning_rate,
                                                           momentum,
-                                                          use_neseterov))
+                                                          use_nesterov))
 
     #
     # Makes batch and epoch callbacks
@@ -146,29 +179,41 @@ def main():
 
     # epoch callbacks
     validation_loss_logger = LogsToLists()
-    training_stopper = StopsOnStagnation(max_epochs=10, min_decrease=.01)
+    training_stopper = StopsOnStagnation(max_epochs=10,
+                                         min_proportional_decrease=0.0)
+
+    def print_loss(values, _):  # 2nd argument: formats
+        print("Loss: %s" % str(values))
 
     validation_loss_monitor = AverageMonitor(
         loss_node.output_symbol,
         loss_node.output_format,
-        callbacks=[validation_loss_logger, training_stopper])
+        callbacks=[print_loss, validation_loss_logger, training_stopper])
 
     validation_callback = ValidationCallback(
-        inputs=input_symbols,
+        inputs=[image_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_testing.iterator(iterator_type='sequential',
                                               batch_size=batch_size),
         monitors=[validation_loss_monitor])
 
-    trainer = Sgd((image_node, label_node),
-                  dataset.get_input_iterator(),
+    trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
+                  mnist_training.iterator(iterator_type='sequential',
+                                          batch_size=batch_size),
                   parameters,
                   parameter_updaters,
                   monitors=[training_loss_monitor],
                   epoch_callbacks=[])
 
-    trainer.epoch_callbacks = [PicklesOnEpoch(trainer),
-                               valiation_callback,
+    stuff_to_pickle = {'trainer': trainer,
+                       'validation_loss_logger': validation_loss_logger}
+
+    trainer.epoch_callbacks = [PicklesOnEpoch(stuff_to_pickle,
+                                              args.output_file,
+                                              overwrite=True),
+                               validation_callback,
                                LimitsNumEpochs(max_epochs)]
+
+    trainer.train()
 
 if __name__ == '__main__':
     main()

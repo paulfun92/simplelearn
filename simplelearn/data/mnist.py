@@ -128,9 +128,8 @@ def load_mnist(raw_mnist_dir=None):
 
     Returns
     -------
-    rval: OrderedDict
-      {'train': TRAIN, 'test': TEST}, where TRAIN and TEST are
-      simplelearn.data.Datasets.
+    rval: tuple
+      A tuple of two simplelearn.data.Datasets, the training and testing set.
     '''
     default_mnist_dir = join(data_path, 'mnist')
     cache_path = join(default_mnist_dir, 'mnist_cache.h5')
@@ -165,9 +164,5 @@ def load_mnist(raw_mnist_dir=None):
 
         return Dataset(group.keys(), group.values(), formats)
 
-    result = OrderedDict()
-    for set_name in ('train', 'test'):
-        assert_in(set_name, hdf_file.keys())
-        result[set_name] = group_to_dataset(hdf_file[set_name])
-
-    return result
+    return tuple(group_to_dataset(hdf_file[set_name])
+                 for set_name in ('train', 'test'))
