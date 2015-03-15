@@ -10,6 +10,7 @@ __copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
 import os
+import copy
 import warnings
 import cPickle
 from collections import Sequence, OrderedDict
@@ -134,7 +135,14 @@ class PicklesOnEpoch(EpochCallback):
         pickle_file = file(filepath, 'wb')
 
         for obj in self.objects:
-            cPickle.dump(obj, pickle_file, protocol=cPickle.HIGHEST_PROTOCOL)
+            try:
+                cPickle.dump(obj,
+                             pickle_file,
+                             protocol=cPickle.HIGHEST_PROTOCOL)
+            except cPickle.PicklingError, pe:
+                print("error pickling %s" % str(obj))
+                raise
+
 
         self._num_epochs_seen += 1
 
@@ -411,7 +419,8 @@ class Monitor(EpochCallback):
         rval: tuple of numpy.ndarrays
            Arguments to feed to self._callbacks' __call__(self, *args)
         '''
-        raise NotImplementedError("%s._on_epoch() not yet implemented")
+        raise NotImplementedError("%s._on_epoch() not yet implemented" %
+                                  type(self))
 
 
 class ReduceMonitor(Monitor):
@@ -521,13 +530,44 @@ class SumMonitor(ReduceMonitor):
     '''
 
     def __init__(self, values_to_monitor, formats, callbacks):
+        if not isinstance(formats, Sequence):
+            formats = [formats]
+            assert not isinstance(values_to_monitor, Sequence)
+            values_to_monitor = [values_to_monitor]
+
+        # _reduce_batch() upgrades small int dtypes (e.g. uint8) to larger int
+        # dtypes to avoid over/underflow when summing large numbers of them.
+        # We need to make their corresponding formats agnostic to dtype, so
+        # that they don't raise a stink about batch/tally dtypes being
+        # different from the format's expected dtype.
+        def remove_small_int_dtype(fmt):
+            if fmt.dtype is not None and numpy.issubdtype(fmt.dtype,
+                                                          numpy.integer):
+                result = copy.deepcopy(fmt)
+                result.dtype = None
+                return result
+            else:
+                return fmt
+
+        formats = [remove_small_int_dtype(fmt) for fmt in formats]
+
         super(SumMonitor, self).__init__(values_to_monitor,
                                          formats,
                                          callbacks)
         self._count = None
 
     def _reduce_batch(self, input_batch, batch_axis):
-        return numpy.sum(input_batch, axis=batch_axis, keepdims=True)
+
+        # Lower risk of integer over/underflow (esp. if dtype is uint8)
+        def upcast_if_integer(input_batch):
+            if numpy.issubdtype(input_batch.dtype, numpy.integer):
+                return numpy.cast['int64'](input_batch)
+            else:
+                return input_batch
+
+        return numpy.sum(upcast_if_integer(input_batch),
+                         axis=batch_axis,
+                         keepdims=True)
 
     def _update_tally(self, reduced_value, batch_axis, tally):
         tally += reduced_value
@@ -565,7 +605,7 @@ class AverageMonitor(SumMonitor):
         totals = super(AverageMonitor, self)._on_epoch()
         assert_is_instance(totals, Sequence)
 
-        result = tuple(total / self._count for total in totals)
+        result = tuple(total / float(self._count) for total in totals)
         self._count = 0
 
         return result
@@ -812,7 +852,8 @@ class Sgd(object):
                  parameters,
                  parameter_updaters,
                  monitors,
-                 epoch_callbacks):
+                 epoch_callbacks,
+                 theano_function_mode=None):
 
         '''
         Parameters
@@ -839,6 +880,10 @@ class Sgd(object):
         epoch_callbacks: sequence of EpochCallbacks
           One of these must throw a StopTraining exception for the training to
           halt.
+
+        theano_function_mode: theano.compile.Mode
+          Optional. The 'mode' argument to pass to theano.function().
+          An example: pylearn2.devtools.nan_guard.NanGuard()
         '''
 
         #
@@ -899,7 +944,10 @@ class Sgd(object):
                 assert_is_instance(updater.updates, OrderedDict)
                 updates.update(updater.updates)
 
-            return theano.function(inputs, outputs, updates=updates)
+            return theano.function(inputs,
+                                   outputs,
+                                   updates=updates,
+                                   mode=theano_function_mode)
 
         self._update_function = compile_update_function()
 

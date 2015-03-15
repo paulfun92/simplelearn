@@ -21,7 +21,7 @@ from theano.gof.op import get_debug_values
 from theano.tensor import TensorType
 from theano.sandbox.cuda.type import CudaNdarrayType
 from simplelearn.utils import safe_izip, flatten, check_is_subdtype
-
+import pdb
 
 class Format(object):
     '''
@@ -368,9 +368,10 @@ class DenseFormat(Format):
                                  "shape: %s axes: %s" %
                                  (b_size, str(shape), str(axes)))
 
-        if any(size < 0 and axis is not 'b'
+        if any(size < 0 and axis != 'b'
                for size, axis
                in safe_izip(shape, axes)):
+            # pdb.set_trace()
             raise ValueError("Negative size in non-batch dimension. "
                              "shape: %s, axes: %s" %
                              (str(shape), str(axes)))
@@ -482,8 +483,11 @@ class DenseFormat(Format):
                 return len(batch.shape)
 
         if get_ndim(batch) != len(self.axes):
-            raise ValueError("Expected a %d-D tensor, but batch had %d "
-                             "dimensions" % (len(self.axes), len(batch.shape)))
+            pdb.set_trace()
+            raise ValueError("Expected a %d-D tensor, with axes %s, but batch "
+                             "had %d dimensions." % (len(self.axes),
+                                                     str(self.axes),
+                                                     len(batch.shape)))
 
         if not is_symbolic:
             for expected_size, size, axis in safe_izip(self.shape,

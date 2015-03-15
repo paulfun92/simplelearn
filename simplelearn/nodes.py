@@ -540,6 +540,40 @@ class CrossEntropy(Node):
             softmax_node.output_symbol,
             target_symbol)
 
+        output_format = DenseFormat(axes=['b'], shape=[-1], dtype=None)
         super(CrossEntropy, self).__init__((softmax_node, target_node),
                                            output,
-                                           softmax_node.output_format)
+                                           output_format)
+
+class Misclassification(Node):
+    '''
+    Returns 1 if a softmax and a target label disagree, and a 0 otherwise.
+
+    Not smoothly differentiable. Don't use this as a loss function to minimize.
+
+    The average value of this is useful as a value to monitor.
+    '''
+
+    def __init__(self, softmax_node, target_node):
+        assert_equal(softmax_node.output_format.axes, ('b', 'f'))
+        assert_in(target_node.output_format.axes, (('b', 'f'), ('b', )))
+
+        target_symbol = theano.tensor.cast(target_node.output_symbol,
+                                           'int64')
+
+        # If targets are one-hot vectors, convert them to target indices
+        if len(target_node.output_format.axes) == 2:
+            target_indices = theano.tensor.argmax(target_node.output_symbol,
+                                                  axis=1)
+        else:
+            assert_equal(target_node.output_symbol.ndim, 1)
+            target_indices = target_node.output_symbol
+
+        softmax_indices = theano.tensor.argmax(softmax_node.output_symbol,
+                                               axis=1)
+
+        result = theano.tensor.neq(softmax_indices, target_indices)
+        result_format = DenseFormat(axes=['b'], shape=[-1], dtype='int8')
+        super(Misclassification, self).__init__((softmax_node, target_node),
+                                                result,
+                                                result_format)

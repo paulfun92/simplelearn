@@ -410,7 +410,8 @@ def main():
                                            loss_node.output_format,
                                            callbacks=[training_loss_logger])
 
-    training_stopper = StopsOnStagnation(max_epochs=10, min_decrease=.01)
+    training_stopper = StopsOnStagnation(max_epochs=10,
+                                         min_proportional_decrease=.01)
     validation_loss_monitor = AverageMonitor(
         loss_node.output_symbol,
         loss_node.output_format,

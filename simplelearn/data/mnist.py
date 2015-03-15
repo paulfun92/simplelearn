@@ -18,6 +18,8 @@ from simplelearn.formats import DenseFormat
 from simplelearn.data import data_path
 from simplelearn.data.hdf5_dataset import add_tensor, Hdf5Dataset
 
+import pdb
+
 # class __Mnist(Hdf5Dataset):
 #     '''
 #     Do not construct directly. Use the load_mnist() function instead.
@@ -167,7 +169,6 @@ def load_mnist(raw_mnist_dir=None):
                           "cached copy of MNIST already exists at %s." %
                           (raw_mnist_dir, cache_path))
 
-        # hdf_file = h5py.File(cache_path, 'r')
     else:  # Construct cache file
 
         if raw_mnist_dir is None:
@@ -178,8 +179,9 @@ def load_mnist(raw_mnist_dir=None):
         hdf_file = _copy_raw_mnist_to_hdf5(raw_mnist_dir, cache_path)
 
 
-    return tuple(Hdf5Dataset(cache_path, u'/%s' % which_set)
-                 for which_set in ('train', 'test'))
+    result = tuple(Hdf5Dataset(cache_path, u'/%s' % which_set)
+                   for which_set in ('train', 'test'))
+    return result
     # def group_to_dataset(group):
     #     assert_equal(group.keys(), ['images', 'labels'])
     #     images = group['images']

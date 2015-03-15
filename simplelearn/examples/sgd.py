@@ -368,7 +368,7 @@ def main():
                         cost_format,
                         StopsOnStagnation(
                             max_epochs=args.stagnation_iters,
-                            min_decrease=args.stagnation_threshold))
+                            min_proportional_decrease=args.stagnation_threshold))
 
                     point_format = DenseFormat(axes=['b', 'f'],
                                                shape=[-1, 2],

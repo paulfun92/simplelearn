@@ -7,7 +7,7 @@ import theano
 from theano.tensor.shared_randomstreams import RandomStreams
 # from theano.sandbox.rng_mrg import MRG_RandomStreams
 from numpy.testing import assert_allclose, assert_array_equal
-from nose.tools import assert_is_instance, assert_equal
+from nose.tools import assert_is_instance, assert_equal, assert_true
 from simplelearn.formats import DenseFormat
 from simplelearn.utils import safe_izip
 from simplelearn.nodes import (Node,
@@ -27,7 +27,7 @@ import pdb
 
 def _make_random_batch(rng, fmt, batch_size):
     batch = fmt.make_batch(is_symbolic=False, batch_size=batch_size)
-    batch.flat[:] = rng.uniform(batch.size)
+    batch[...] = rng.uniform(size=batch.shape)
     return batch
 
 
@@ -260,9 +260,9 @@ def test_crossentropy():
 
     def expected_loss_function(softmaxes, targets):
         def make_onehots(hot_indices):
+            assert_true(numpy.issubdtype(hot_indices.dtype, numpy.integer))
             result = numpy.zeros(softmaxes.shape, dtype=softmaxes.dtype)
-            for row, hot_index in safe_izip(result, hot_indices):
-                row[hot_index] = 1.0
+            result[xrange(result.shape[0]), hot_indices] = 1.0
 
             return result
 
@@ -310,8 +310,10 @@ def test_crossentropy():
                     targets[:] = hot_indices
                 else:
                     targets[...] = 0.0
-                    targets[:, hot_indices] = 1.0
+                    targets[xrange(targets.shape[0]), hot_indices] = 1.0
 
                 actual_losses = loss_function(softmaxes, targets)
                 expected_losses = expected_loss_function(softmaxes, targets)
+                print("actual: %s, expected: %s" % (str(actual_losses),
+                                                    str(expected_losses)))
                 assert_allclose(actual_losses, expected_losses)

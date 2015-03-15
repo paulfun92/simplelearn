@@ -186,7 +186,7 @@ class SequentialIterator(DataIterator):
         self._names = names
         self._formats = formats
         self._tensors = tensors
-        self.Batch = collections.namedtuple('Batch', names)
+        # self.Batch = collections.namedtuple('Batch', names)
 
         super(SequentialIterator, self).__init__()
 
@@ -239,10 +239,14 @@ class SequentialIterator(DataIterator):
                              (num_samples, self._batch_size))
 
             if self._loop_style == 'wrap':
-                batch = \
-                    self.Batch(*(fmt.make_batch(is_symbolic=False,
-                                                batch_size=self._batch_size)
-                                 for fmt in self._formats))
+                # batch = \
+                #     self.Batch(*(fmt.make_batch(is_symbolic=False,
+                #                                 batch_size=self._batch_size)
+                #                  for fmt in self._formats))
+
+                batch = (fmt.make_batch(is_symbolic=False,
+                                        batch_size=self._batch_size)
+                         for fmt in self._formats)
 
                 chunk_size = num_samples - self._next_batch_start
                 assert_greater(chunk_size, 0)
@@ -290,5 +294,6 @@ class SequentialIterator(DataIterator):
         if self._next_batch_start == num_samples:
             self._next_batch_start = 0
 
+        return subbatches
         # pylint: disable=star-args
-        return self.Batch(*subbatches)
+        # return self.Batch(*subbatches)

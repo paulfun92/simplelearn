@@ -10,8 +10,11 @@
 *** Searches for cached mnist memmaps, creates them if necessary.
 * DONE Write mnist.py
 * Write examples/mnist_fully_connected.py
-** We need to make a subclass of Dataset for MNIST, so it knows how to (not) serialize itself. This can be general; call it HdfDataset.
-** Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
+** DONE We need to make a subclass of Dataset for MNIST, so it knows how to (not) serialize itself. This can be general; call it HdfDataset.
+** DONE Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
+** Debug the weight updates shrinking to zero (or being zero most of the time).
+*** Copy-past mlp tutorial #3's yaml file to examples/tests/test_mnist_fully_connected.yaml
+*** In examples/tests/test_mnist_fully_connected.py
 * Implement Conv2D node, test against pylearn2's.
 * Write examples/mnist_conv.py
 * Write examples/cifar10.py
