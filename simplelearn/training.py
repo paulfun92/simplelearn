@@ -91,8 +91,12 @@ class PicklesOnEpoch(EpochCallback):
         '''
         Parameters
         ----------
-        objects: anything
-          An object, or a sequence of objects, to pickle at each epoch.
+        objects: OrderedDict
+          Maps names to picklable objects. This dict is pickled at each epoch.
+          Note that dynamically created functions (e.g. inner functions that
+          aren't publically accessible by name) are not picklable.
+          module-level An object, or a sequence of objects, to pickle at each
+          epoch.
 
         filepath: str
           The file path to save the objects to. Must end in '.pkl'
@@ -103,16 +107,21 @@ class PicklesOnEpoch(EpochCallback):
           of the form 'path/to/file_00000.pkl', 'path/to/file_00001.pkl',
           etc. The first file stores the state of <objects> before any epochs.
         '''
+        assert_is_instance(objects, OrderedDict)
+        for key in objects.keys():
+            assert_is_instance(key, basestring)
+
         path, filename = os.path.split(filepath)
         assert_true(os.path.isdir(path))
         assert_equal(os.path.splitext(filename)[1], '.pkl')
 
-        if isinstance(objects, Sequence) and \
-           not isinstance(objects, basestring):
-            self.objects = objects
-        else:
-            self.objects = [objects]
+        # if isinstance(objects, Sequence) and \
+        #    not isinstance(objects, basestring):
+        #     self.objects = objects
+        # else:
+        #     self.objects = [objects]
 
+        self._objects_to_pickle = objects
         self._filepath = filepath
         self._overwrite = overwrite
         self._num_epochs_seen = 0
@@ -134,14 +143,27 @@ class PicklesOnEpoch(EpochCallback):
 
         pickle_file = file(filepath, 'wb')
 
-        for obj in self.objects:
-            try:
-                cPickle.dump(obj,
-                             pickle_file,
-                             protocol=cPickle.HIGHEST_PROTOCOL)
-            except cPickle.PicklingError, pe:
-                print("error pickling %s" % str(obj))
-                raise
+        cPickle.dump(self._objects_to_pickle,
+                     pickle_file,
+                     protocol=cPickle.HIGHEST_PROTOCOL)
+
+        # for obj in self.objects:
+        #     try:
+        #         cPickle.dump(obj,
+        #                      pickle_file,
+        #                      protocol=cPickle.HIGHEST_PROTOCOL)
+        #     except cPickle.PicklingError, pe:
+        #         print("error pickling %s" % str(obj))
+        #         raise
+
+        # for obj in self.objects:
+        #     try:
+        #         cPickle.dump(obj,
+        #                      pickle_file,
+        #                      protocol=cPickle.HIGHEST_PROTOCOL)
+        #     except cPickle.PicklingError, pe:
+        #         print("error pickling %s" % str(obj))
+        #         raise
 
 
         self._num_epochs_seen += 1

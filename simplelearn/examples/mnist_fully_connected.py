@@ -1,9 +1,14 @@
 #! /usr/bin/env python
 
+import os
 import argparse
 import numpy
 import theano
-from nose.tools import assert_greater, assert_equal
+from collections import OrderedDict
+from nose.tools import (assert_true,
+                        assert_greater,
+                        assert_greater_equal,
+                        assert_equal)
 from simplelearn.nodes import (AffineTransform,
                                FormatNode,
                                ReLU,
@@ -12,6 +17,7 @@ from simplelearn.nodes import (AffineTransform,
                                Softmax,
                                RescaleImage)
 from simplelearn.utils import safe_izip
+from simplelearn.io import SerializableModel
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
@@ -27,14 +33,61 @@ import pdb
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description=("Trains multilayer perceptron to classify MNIST digits."))
+        description=("Trains multilayer perceptron to classify MNIST digits. "
+                     "Default arguments are the ones used by Pylearn2's mlp "
+                     "tutorial #3."))
 
-    parser.add_argument("--output_file",
-                        type=str,
+    def positive_float(arg):
+        result = float(arg)
+        assert_greater(arg, 0.0)
+        return result
+
+    def non_negative_float(arg):
+        result = float(arg)
+        assert_greater_equal(arg, 0.0)
+        return result
+
+    def non_negative_int(arg):
+        result = int(arg)
+        assert_greater_equal(arg, 0)
+        return result
+
+    def legit_prefix(arg):
+        abs_path = os.path.abspath(arg)
+        assert_true(os.path.isdir(os.path.split(abs_path)[0]))
+        assert_equal(os.path.splitext(abs_path)[1], "")
+        return arg
+
+    parser.add_argument("--output_prefix",
+                        type=legit_prefix,
                         required=True,
-                        help=("Filename to save the trainer & log to."))
+                        help=("Directory and optional prefix of filename to "
+                              "save the log to."))
+
+    parser.add_argument("--learning-rate",
+                        type=positive_float,
+                        default=0.01,
+                        help=("Learning rate."))
+
+    parser.add_argument("--momentum",
+                        type=non_negative_float,
+                        default=0.5,
+                        help=("Momentum."))
+
+    parser.add_argument("--nesterov",
+                        default=False,
+                        action="store_true",
+                        help=("Use Nesterov accelerated gradients (default: "
+                              "False)."))
+
+    parser.add_argument("--batch_size",
+                        type=non_negative_int,
+                        default=100,
+                        help="batch size")
 
     return parser.parse_args()
+
+
 
 
 def build_fc_classifier(input_node,
@@ -198,8 +251,8 @@ def main():
 
     mnist_training, mnist_testing = load_mnist()
 
-    image_node, label_node = mnist_training.make_input_nodes()
-    image_node = RescaleImage(image_node)
+    image_uint8_node, label_node = mnist_training.make_input_nodes()
+    image_node = RescaleImage(image_uint8_node)
 
     rng = numpy.random.RandomState(34523)
 
@@ -217,11 +270,11 @@ def main():
     loss_sum = loss_node.output_symbol.mean()
     # loss_sum = loss_node.output_symbol.sum()
 
-    learning_rate = .01
-    momentum = 0 #.5
-    use_nesterov = False
+    # learning_rate = .01
+    # momentum = .5
+    # use_nesterov = True
     max_epochs = 10000
-    batch_size = 100
+    # batch_size = 100
 
     #
     # Makes parameter updaters
@@ -236,9 +289,9 @@ def main():
             gradients = theano.gradient.grad(loss_sum, params)
             parameter_updaters.append(SgdParameterUpdater(params,
                                                           gradients,
-                                                          learning_rate,
-                                                          momentum,
-                                                          use_nesterov))
+                                                          args.learning_rate,
+                                                          args.momentum,
+                                                          args.nesterov))
 
     updates = [updater.updates.values()[0] - updater.updates.keys()[0]
                for updater in parameter_updaters]
@@ -256,15 +309,18 @@ def main():
 
     misclassification_node = Misclassification(output_node, label_node)
     mcr_logger = LogsToLists()
+    training_stopper = StopsOnStagnation(max_epochs=10,
+                                         min_proportional_decrease=0.0)
     mcr_monitor = AverageMonitor(misclassification_node.output_symbol,
                                  misclassification_node.output_format,
-                                 callbacks=[print_mcr, mcr_logger])
+                                 callbacks=[print_mcr, mcr_logger, training_stopper])
 
     # batch callback (monitor)
     training_loss_logger = LogsToLists()
     training_loss_monitor = AverageMonitor(loss_node.output_symbol,
                                            loss_node.output_format,
-                                           callbacks=[print_loss, training_loss_logger])
+                                           callbacks=[print_loss,
+                                                      training_loss_logger])
 
     # print out 10-D feature vector
     feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
@@ -273,25 +329,26 @@ def main():
 
     # epoch callbacks
     validation_loss_logger = LogsToLists()
-    training_stopper = StopsOnStagnation(max_epochs=10,
-                                         min_proportional_decrease=0.0)
+    # training_stopper = StopsOnStagnation(max_epochs=10,
+    #                                      min_proportional_decrease=0.0)
 
     # pdb.set_trace()
     validation_loss_monitor = AverageMonitor(
         loss_node.output_symbol,
         loss_node.output_format,
-        callbacks=[validation_loss_logger, training_stopper])
+        callbacks=[validation_loss_logger])
+        # callbacks=[validation_loss_logger, training_stopper])
 
     validation_callback = ValidationCallback(
         inputs=[image_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_testing.iterator(iterator_type='sequential',
-                                              batch_size=batch_size),
+                                              batch_size=args.batch_size),
         monitors=[validation_loss_monitor, mcr_monitor])
         # monitors=[validation_loss_monitor, feature_vector_monitor])
 
     trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
                   mnist_training.iterator(iterator_type='sequential',
-                                          batch_size=batch_size),
+                                          batch_size=args.batch_size),
                   parameters,
                   parameter_updaters,
                   monitors=[training_loss_monitor],
@@ -299,11 +356,30 @@ def main():
                   # monitors=[training_loss_monitor, feature_vector_monitor],
                   epoch_callbacks=[])
 
-    stuff_to_pickle = {'trainer': trainer,
-                       'validation_loss_logger': validation_loss_logger}
+    stuff_to_pickle = OrderedDict(
+        (('trainer', trainer),
+         ('validation_loss_logger', validation_loss_logger),
+         ('model', SerializableModel([image_uint8_node, label_node],
+                                     [output_node]))))
+
+    def make_output_filename(args):
+        assert_equal(os.path.splitext(args.output_prefix)[1], "")
+
+        output_dir, output_prefix = os.path.split(args.output_prefix)
+        if output_prefix != "":
+            output_prefix = output_prefix + "_"
+
+        output_prefix = os.path.join(output_dir, output_prefix)
+
+        return ("%slr-%g_mom-%g_nesterov-%s_bs-%d.pkl" %
+                (output_prefix,
+                 args.learning_rate,
+                 args.momentum,
+                 args.nesterov,
+                 args.batch_size))
 
     trainer.epoch_callbacks = [PicklesOnEpoch(stuff_to_pickle,
-                                              args.output_file,
+                                              make_output_filename(args),
                                               overwrite=False),
                                validation_callback,
                                LimitsNumEpochs(max_epochs)]
