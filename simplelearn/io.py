@@ -11,8 +11,8 @@ class SerializableModel(object):
         assert_is_instance(input_nodes, Sequence)
         assert_is_instance(output_nodes, Sequence)
 
-        self._input_nodes = input_nodes
-        self._output_nodes = output_nodes
+        self.input_nodes = input_nodes
+        self.output_nodes = output_nodes
 
     def compile_function(self):
         def get_symbols(nodes):

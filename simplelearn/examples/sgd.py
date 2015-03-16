@@ -15,7 +15,7 @@ from nose.tools import (assert_equal,
                         assert_greater_equal,
                         assert_is_instance)
 from simplelearn.utils import safe_izip
-from simplelearn.data import DataIterator
+from simplelearn.data import DataIterator, DummyIterator
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (Monitor,
                                   AverageMonitor,
@@ -103,21 +103,6 @@ def parse_args():
         assert_greater(singular_value, 0.0)
 
     return result
-
-
-class DummyIterator(DataIterator):
-    '''
-    A placeholder DataIterator that does almost nothing.
-    '''
-
-    def __init__(self):
-        super(DummyIterator, self).__init__()
-
-    def next_is_new_epoch(self):
-        return True
-
-    def _next(self):
-        return ()
 
 
 class RecordingMonitor(Monitor):

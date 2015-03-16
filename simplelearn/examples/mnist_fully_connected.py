@@ -350,7 +350,7 @@ def main():
                  args.batch_size,
                  "_best" if best else ""))
 
-    model = SerializableModel([image_uint8_node, label_node], [output_node])
+    model = SerializableModel([image_uint8_node], [output_node])
     saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
 
     # pdb.set_trace()

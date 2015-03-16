@@ -122,3 +122,22 @@ class DataIterator(object):
         """
         raise NotImplementedError("%s._next() not yet implemented." %
                                   type(self))
+
+
+class DummyIterator(DataIterator):
+    '''
+    A placeholder DataIterator that returns empty batches.
+
+    Provide this to training.Sgd as the iterator, when optimizing a function
+    with no explicit inputs (e.g. when the inputs themselves are the parameters
+    being optimized.)
+    '''
+
+    def __init__(self):
+        super(DummyIterator, self).__init__()
+
+    def next_is_new_epoch(self):
+        return True
+
+    def _next(self):
+        return ()

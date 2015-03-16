@@ -111,7 +111,12 @@ class PicklesOnEpoch(EpochCallback):
         for key in objects.keys():
             assert_is_instance(key, basestring)
 
-        path, filename = os.path.split(filepath)
+        if os.path.isdir(filepath):
+            path = filepath
+            filename = ""
+        else:
+            path, filename = os.path.split(filepath)
+
         assert_true(os.path.isdir(path))
         assert_equal(os.path.splitext(filename)[1], '.pkl')
 
