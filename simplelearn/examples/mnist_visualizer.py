@@ -18,6 +18,9 @@ from simplelearn.nodes import Softmax, RescaleImage, InputNode
 from simplelearn.training import Sgd, SgdParameterUpdater, LimitsNumEpochs
 from simplelearn.utils import safe_izip
 
+import pdb
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=("Visualizes the thoughts of the best model outputted by "
@@ -39,6 +42,7 @@ def parse_args():
 
     parser.add_argument("--model",
                         type=pkl_file,
+                        required=True,
                         help=("The '..._best.pkl' file outputted by "
                               "./mnist_fully_connected.py"))
 
@@ -131,21 +135,26 @@ def main():
 
     def get_optimized_images(float_image):
 
-        optimized_images = input_float_node.make_batch(batch_size=10)
+        optimized_images = input_float_node.output_format.make_batch(
+            is_symbolic=False,
+            batch_size=10)
 
         for i in xrange(model.output_nodes[0].output_format.shape[1]):
-            param_updater = SgdParameterUpdater(shared_input_float,
-                                                jacobian[i, ...].reshape([1, 28, 28]),
-                                                learning_rate=args.learning_rate,
-                                                momentum=args.momentum,
-                                                use_nesterov=args.nesterov)
+            print("optimizing image w.r.t. '%d' label" % i)
+            param_updater = SgdParameterUpdater(
+                shared_input_float,
+                jacobian[i, :, :, :],
+                # jacobian[i, ...].reshape([1, 28, 28]),
+                learning_rate=args.learning_rate,
+                momentum=args.momentum,
+                use_nesterov=args.nesterov)
 
             sgd = Sgd(inputs=[],
                       parameters=[shared_input_float],
-                      parameter_updaters=param_updater,
+                      parameter_updaters=[param_updater],
                       input_iterator=DummyIterator(),
                       monitors=[],
-                      epoch_callbacks=[LimitsNumEpochs(30)])
+                      epoch_callbacks=[LimitsNumEpochs(100)])
 
             shared_input_float.set_value(float_image)
             sgd.train()
@@ -184,9 +193,9 @@ def main():
 
         image_axes.imshow(float_image[0, ...], cmap='gray', norm=norm)
 
-        # optimized_images = get_optimized_images(float_image)
-        # for image, axes in safe_izip(optimized_images, optimized_image_axes):
-        #     axes.imshow(image[0, ...])
+        optimized_images = get_optimized_images(float_image)
+        for image, axes in safe_izip(optimized_images, optimized_image_axes):
+            axes.imshow(image)
 
         figure.canvas.draw()
 

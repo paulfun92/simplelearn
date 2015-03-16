@@ -16,10 +16,12 @@
 *** I fixed it by replacing cost=cross_entropies.sum() with cost=cross_entropies.mean()
 ** DONE Write save-on-best callback, put it in mnist demo
 ** DONE Save best model trained on MNIST
-** Write demo that:
-*** On arrow right or left, shows the trained model the next/previous MNIST test digit.
+* Write examples/visualize_mnist.py
+*** DONE On arrow right or left, shows the trained model the next/previous MNIST test digit.
 *** Shows softmax, the argmax of the softmax, the target label, and 10 images:
-**** The i'th image is what you get if you optimize output_softmax[i], starting from the displayed image.
+**** DONE The i'th image is what you get if you optimize output_softmax[i], starting from the displayed image.
+** Debug "optimized" images
+*** Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
 * Implement Conv2D node, test against pylearn2's.
 * Write examples/mnist_conv.py
 * Write examples/cifar10.py
