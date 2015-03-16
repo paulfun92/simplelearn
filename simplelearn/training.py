@@ -648,6 +648,45 @@ class StopTraining(Exception):
         super(StopTraining, self).__init__(message)
 
 
+class SavesAtMinimum(object):
+    '''
+    A callback to Monitor that pickles an object (typically the model)
+    when some monitored scalar value hits an all-time low.
+    '''
+
+    def __init__(self, object_to_save, output_filepath):
+        def check_path(path):
+            abspath = os.path.abspath(path)
+
+        check_path(output_filepath)
+
+
+        self._object_to_save = object_to_save
+        self._output_filepath = output_filepath
+        self._min_value = None
+
+
+    def __call__(self, values, formats):
+        assert_equal(len(values), 1)
+        assert_equal(len(values), len(formats))
+
+        fmt = formats[0]
+        assert_equal(fmt.axes, ('b', ))
+
+        assert_equal(values[0].shape, (1, ))
+        value = values[0][0]
+
+        old_min_value = self._min_value
+
+        if self._min_value is None or value < self._min_value:
+            self._min_value = value
+
+        if old_min_value != self._min_value:
+            pickle_file = file(self._output_filepath, 'wb')
+            cPickle.dump(self._object_to_save,
+                         pickle_file,
+                         protocol=cPickle.HIGHEST_PROTOCOL)
+
 class StopsOnStagnation(object):
     '''
     A callback to Monitor that stops training if the monitored value

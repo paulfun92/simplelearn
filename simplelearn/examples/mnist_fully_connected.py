@@ -23,6 +23,7 @@ from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
                                   LogsToLists,
+                                  SavesAtMinimum,
                                   Monitor,
                                   AverageMonitor,
                                   LimitsNumEpochs,
@@ -332,11 +333,31 @@ def main():
     # training_stopper = StopsOnStagnation(max_epochs=10,
     #                                      min_proportional_decrease=0.0)
 
+    def make_output_filename(args, best=False):
+        assert_equal(os.path.splitext(args.output_prefix)[1], "")
+
+        output_dir, output_prefix = os.path.split(args.output_prefix)
+        if output_prefix != "":
+            output_prefix = output_prefix + "_"
+
+        output_prefix = os.path.join(output_dir, output_prefix)
+
+        return ("%slr-%g_mom-%g_nesterov-%s_bs-%d%s.pkl" %
+                (output_prefix,
+                 args.learning_rate,
+                 args.momentum,
+                 args.nesterov,
+                 args.batch_size,
+                 "_best" if best else ""))
+
+    model = SerializableModel([image_uint8_node, label_node], [output_node])
+    saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
+
     # pdb.set_trace()
     validation_loss_monitor = AverageMonitor(
         loss_node.output_symbol,
         loss_node.output_format,
-        callbacks=[validation_loss_logger])
+        callbacks=[validation_loss_logger, saves_best])
         # callbacks=[validation_loss_logger, training_stopper])
 
     validation_callback = ValidationCallback(
@@ -359,24 +380,7 @@ def main():
     stuff_to_pickle = OrderedDict(
         (('trainer', trainer),
          ('validation_loss_logger', validation_loss_logger),
-         ('model', SerializableModel([image_uint8_node, label_node],
-                                     [output_node]))))
-
-    def make_output_filename(args):
-        assert_equal(os.path.splitext(args.output_prefix)[1], "")
-
-        output_dir, output_prefix = os.path.split(args.output_prefix)
-        if output_prefix != "":
-            output_prefix = output_prefix + "_"
-
-        output_prefix = os.path.join(output_dir, output_prefix)
-
-        return ("%slr-%g_mom-%g_nesterov-%s_bs-%d.pkl" %
-                (output_prefix,
-                 args.learning_rate,
-                 args.momentum,
-                 args.nesterov,
-                 args.batch_size))
+         ('model', model)))
 
     trainer.epoch_callbacks = [PicklesOnEpoch(stuff_to_pickle,
                                               make_output_filename(args),

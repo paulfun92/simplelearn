@@ -14,8 +14,8 @@
 ** DONE Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
 ** DONE Debug the weight updates shrinking to zero (or being zero most of the time).
 *** I fixed it by replacing cost=cross_entropies.sum() with cost=cross_entropies.mean()
-** Implement model serialization
-** Save model trained on MNIST
+** DONE Write save-on-best callback, put it in mnist demo
+** DONE Save best model trained on MNIST
 ** Write demo that:
 *** On arrow right or left, shows the trained model the next/previous MNIST test digit.
 *** Shows softmax, the argmax of the softmax, the target label, and 10 images:
