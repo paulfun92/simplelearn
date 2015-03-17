@@ -14,7 +14,7 @@ from nose.tools import (assert_greater,
 from simplelearn.io import SerializableModel
 from simplelearn.data import DummyIterator
 from simplelearn.data.mnist import load_mnist
-from simplelearn.nodes import Softmax, RescaleImage, InputNode
+from simplelearn.nodes import Softmax, RescaleImage, InputNode, CrossEntropy
 from simplelearn.training import Sgd, SgdParameterUpdater, LimitsNumEpochs
 from simplelearn.utils import safe_izip
 
@@ -120,18 +120,37 @@ def main():
         return output_node
 
     input_float_node = get_input_float_node(output_node)
+    mnist_train = load_mnist()[1]
+    label_node = mnist_train.make_input_nodes()[1]
+
+    cross_entropy = CrossEntropy(output_node, label_node)
+
+    #
+    # Create shared-variable versions of the float image and label nodes,
+    # and swap them into the computational graph.
+    #
 
     shared_input_float = theano.shared(
         input_float_node.output_format.make_batch(is_symbolic=False,
                                                   batch_size=1))
 
-    # replace the float input nodes with shared variables
-    output_symbol = theano.clone(
-        output_node.output_symbol,
-        replace={input_float_node.output_symbol: shared_input_float})
+    shared_label = theano.shared(
+        label_node.output_format.make_batch(batch_size=1, is_symbolic=False))
 
-    jacobian = theano.gradient.jacobian(output_symbol.flatten(),
-                                        wrt=shared_input_float)
+    cross_entropy.output_symbol = theano.clone(
+        cross_entropy.output_symbol,
+        replace={input_float_node.output_symbol: shared_input_float,
+                 label_node.output_symbol: shared_label})
+
+    loss_symbol = cross_entropy.output_symbol.mean()
+    output_node.output_format.check(output_node.output_symbol)
+
+
+    gradient_symbol = theano.gradient.grad(loss_symbol, shared_input_float)
+
+
+    # jacobian = theano.gradient.jacobian(output_symbol.flatten(),
+    #                                     wrt=shared_input_float)
 
     def get_optimized_images(float_image):
 
@@ -143,8 +162,7 @@ def main():
             print("optimizing image w.r.t. '%d' label" % i)
             param_updater = SgdParameterUpdater(
                 shared_input_float,
-                jacobian[i, :, :, :],
-                # jacobian[i, ...].reshape([1, 28, 28]),
+                gradient_symbol,
                 learning_rate=args.learning_rate,
                 momentum=args.momentum,
                 use_nesterov=args.nesterov)
@@ -154,9 +172,10 @@ def main():
                       parameter_updaters=[param_updater],
                       input_iterator=DummyIterator(),
                       monitors=[],
-                      epoch_callbacks=[LimitsNumEpochs(100)])
+                      epoch_callbacks=[LimitsNumEpochs(1000)])
 
             shared_input_float.set_value(float_image)
+            shared_label.set_value(numpy.asarray([i], dtype=shared_label.dtype))
             sgd.train()
 
             optimized_images[i, ...] = shared_input_float.get_value()[0, ...]
@@ -178,14 +197,13 @@ def main():
     # image_axes = all_axes[0, 0]
     # optimized_image_axes = all_axes[1:, :].flatten()
 
-    mnist_train = load_mnist()[1]
     mnist_iterator = mnist_train.iterator(iterator_type='sequential',
                                           batch_size=1)
 
     get_float_image = theano.function([input_uint8_node.output_symbol],
                                       input_float_node.output_symbol)
 
-    def update_display(uint8_image):
+    def update_display(uint8_image, target_label):
         float_image = get_float_image(uint8_image)
         normalize_images = False
         norm = (None if normalize_images
@@ -195,19 +213,19 @@ def main():
 
         optimized_images = get_optimized_images(float_image)
         for image, axes in safe_izip(optimized_images, optimized_image_axes):
-            axes.imshow(image)
+            axes.imshow(image, cmap='gray', norm=matplotlib.colors.NoNorm())
 
         figure.canvas.draw()
 
     def on_key_press(event):
         if event.key == ' ':
-            update_display(mnist_iterator.next()[0])
+            update_display(*mnist_iterator.next())
         elif event.key == 'q':
             sys.exit(0)
 
     figure.canvas.mpl_connect('key_press_event', on_key_press)
 
-    update_display(mnist_iterator.next()[0])
+    update_display(*mnist_iterator.next())
     pyplot.show()
 
 

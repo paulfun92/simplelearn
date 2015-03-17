@@ -18,10 +18,13 @@
 ** DONE Save best model trained on MNIST
 * Write examples/visualize_mnist.py
 *** DONE On arrow right or left, shows the trained model the next/previous MNIST test digit.
-*** Shows softmax, the argmax of the softmax, the target label, and 10 images:
+*** Shows softmax, the argmax of the softmax, the target label, and 10 optimized images
+*** Show a softmax below each of the optimized images
 **** DONE The i'th image is what you get if you optimize output_softmax[i], starting from the displayed image.
 ** Debug "optimized" images
-*** Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
+*** DONE Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
+**** Yeah that looks to be making better progress
+*** Try using StopOnStagnation rather than a fixed number of iterations
 * Implement Conv2D node, test against pylearn2's.
 * Write examples/mnist_conv.py
 * Write examples/cifar10.py
