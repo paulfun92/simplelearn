@@ -11,7 +11,7 @@ __license__ = "Apache 2.0"
 import collections
 import numpy
 from itertools import chain
-
+from nose.tools import assert_is_instance, assert_equal
 
 def safe_izip(*iterables):
     """
@@ -49,15 +49,67 @@ def flatten(iterable):
             yield element
 
 
+def assert_is_integer(arg):
+    '''
+    Checks that arg is a scalar of integral type.
+    '''
+    assert_true(numpy.issubdtype(type(arg), numpy.integer),
+                "%s is not an integer" % type(arg))
+
+
+def assert_are_integers(arg, size=None):
+    '''
+    Checks that arg is a Sequence of integral-typed scalars.
+
+    Parameters
+    ----------
+    args: Sequence
+
+    size: int
+      Optional. If specified, this checks that len(arg) == size.
+    '''
+    if size is not None:
+        assert_equal(len(arg), size)
+
+    assert_is_instance(arg, Sequence)
+
+    for element, index in enumerate(arg):
+        assert_is_integer(arg,
+                          "Element %d (%s) is not an integer." %
+                          (index, element))
+
+
+def assert_are_greater_equal(arg, scalar):
+    '''
+    Checks that arg is a Sequence of scalars greater than or equal to <scalar>.
+    '''
+
+    for element, index in enumerate(arg):
+        assert_greater_equal(arg,
+                             scalar,
+                             "Element %d (%s) was less than %s." %
+                             (index, element, scalar))
+
+
 def check_is_subdtype(arg, name, expected_dtype):
     """
     Throws a TypeError if arg is not a sub-dtype of expected_type.
 
-    For example, this:
+    This function accepts a number of arg types:
+
+    Works on                         Example
+    -----------------------------------------------
+    scalars                          1.0
+    dtypes                           numpy.float32
+    strings                          'float32'
+    objects with a 'dtype' member    numpy.zeros(3)
+
+
+    Usage example:
 
       check_is_subdtype(1.0, "some_float", numpy.integer)
 
-    Throws a TypeError with message "Expected some_float to be a
+    This throws a TypeError with message "Expected some_float to be a
     <type 'numpy.integer'>, but got a <type 'float'>."
 
     Parameters

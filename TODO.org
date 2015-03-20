@@ -9,6 +9,8 @@
 ** If unsatisfactory, Implement data.Mnist, test against pylearn2.datasets.Mnist
 *** Searches for cached mnist memmaps, creates them if necessary.
 * DONE Write mnist.py
+* Write LinearScale(EpochCallback)
+** __init__(self, shared_var, final_value, num_epochs)
 * Write examples/mnist_fully_connected.py
 ** DONE We need to make a subclass of Dataset for MNIST, so it knows how to (not) serialize itself. This can be general; call it HdfDataset.
 ** DONE Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
@@ -16,6 +18,7 @@
 *** I fixed it by replacing cost=cross_entropies.sum() with cost=cross_entropies.mean()
 ** DONE Write save-on-best callback, put it in mnist demo
 ** DONE Save best model trained on MNIST
+** Add LinearScale to learning rate and momentum to the demo.
 * Write examples/visualize_mnist.py
 *** DONE On arrow right or left, shows the trained model the next/previous MNIST test digit.
 *** Shows softmax, the argmax of the softmax, the target label, and 10 optimized images
@@ -25,6 +28,7 @@
 *** DONE Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
 **** Yeah that looks to be making better progress
 *** Try using StopOnStagnation rather than a fixed number of iterations
+* install CUDNN, confirm that Theano's using it
 * Implement Conv2D node, test against pylearn2's.
 * Write examples/mnist_conv.py
 * Write examples/cifar10.py
