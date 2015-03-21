@@ -10,8 +10,16 @@ __license__ = "Apache 2.0"
 
 import collections
 import numpy
-from itertools import chain
-from nose.tools import assert_is_instance, assert_equal
+import itertools
+from nose.tools import (assert_is_instance,
+                        assert_equal,
+                        assert_greater,
+                        assert_greater_equal,
+                        assert_less,
+                        assert_less_equal,
+                        assert_true)
+
+import pdb
 
 def safe_izip(*iterables):
     """
@@ -21,7 +29,7 @@ def safe_izip(*iterables):
 
     sentinel = object()
 
-    iterators = tuple(chain(x, (sentinel,)) for x in iterables)
+    iterators = tuple(itertools.chain(x, (sentinel,)) for x in iterables)
 
     while iterators:
         items = tuple(next(iterator) for iterator in iterators)
@@ -57,9 +65,9 @@ def assert_is_integer(arg):
                 "%s is not an integer" % type(arg))
 
 
-def assert_are_integers(arg, size=None):
+def assert_all_integers(arg, size=None):
     '''
-    Checks that arg is a Sequence of integral-typed scalars.
+    Checks that arg is an Iterable of integral-typed scalars.
 
     Parameters
     ----------
@@ -71,24 +79,89 @@ def assert_are_integers(arg, size=None):
     if size is not None:
         assert_equal(len(arg), size)
 
-    assert_is_instance(arg, Sequence)
+    assert_is_instance(arg, collections.Iterable)
+
+    # pdb.set_trace()
 
     for element, index in enumerate(arg):
-        assert_is_integer(arg,
-                          "Element %d (%s) is not an integer." %
-                          (index, element))
+        assert_true(numpy.issubdtype(type(element), numpy.integer),
+                    "Element %d (%s) is not an integer, but a %s." %
+                    (index, element, type(element)))
 
 
-def assert_are_greater_equal(arg, scalar):
+def assert_all_greater_equal(arg0, arg1):
     '''
-    Checks that arg is a Sequence of scalars greater than or equal to <scalar>.
+    Checks that arg0 is a Iterable of scalars greater than or equal to arg1.
+
+    arg1 may be a scalar, or an Iterable of equal length as arg0.
     '''
 
-    for element, index in enumerate(arg):
-        assert_greater_equal(arg,
-                             scalar,
-                             "Element %d (%s) was less than %s." %
-                             (index, element, scalar))
+    assert_is_instance(arg0, collections.Iterable)
+
+    for (index,
+         elem0,
+         elem1) in safe_izip(xrange(len(arg0)),
+                             arg0,
+                             (arg1 if isinstance(arg1, collections.Iterable)
+                              else itertools.repeat(arg1, len(arg0)))):
+        assert_greater_equal(elem0,
+                             elem1,
+                             "Element %d: %s was less than %s." %
+                             (index, elem0, elem1))
+
+
+def assert_all_greater(arg0, arg1):
+    '''
+    Checks that all elements of arg0 are less than arg1.
+
+    arg1 may be a scalar or an Iterable of equal length as arg0.
+    '''
+    for (index,
+         elem0,
+         elem1) in safe_izip(xrange(len(arg0)),
+                             arg0,
+                             arg1 if isinstance(arg1, collections.Iterable)
+                             else itertools.repeat(arg1, len(arg0))):
+        assert_greater(elem0,
+                       elem1,
+                       "Element %d: %s was not greater than %s." %
+                       (index, elem0, elem1))
+
+
+def assert_all_less(arg0, arg1):
+    '''
+    Checks that all elements of arg0 are less than arg1.
+
+    arg1 may be a scalar or an Iterable of equal length as arg0.
+    '''
+    for (index,
+         elem0,
+         elem1) in safe_izip(xrange(len(arg0)),
+                             arg0,
+                             arg1 if isinstance(arg1, collections.Iterable)
+                             else itertools.repeat(arg1, len(arg0))):
+        assert_less(elem0,
+                    elem1,
+                    "Element %d: %s was not less than %s." %
+                    (index, elem0, elem1))
+
+
+def assert_all_less_equal(arg0, arg1):
+    '''
+    Checks that all elements of arg0 are less than arg1.
+
+    arg1 may be a scalar or an Iterable of equal length as arg0.
+    '''
+    for (index,
+         elem0,
+         elem1) in safe_izip(xrange(len(arg0)),
+                             arg0,
+                             arg1 if isinstance(arg1, collections.Iterable)
+                             else itertools.repeat(arg1, len(arg0))):
+        assert_less_equal(elem0,
+                          elem1,
+                          "Element %d: %s was greater than %s." %
+                          (index, elem0, elem1))
 
 
 def check_is_subdtype(arg, name, expected_dtype):

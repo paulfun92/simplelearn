@@ -15,12 +15,13 @@ import theano
 from theano.tensor import Rebroadcast
 from nose.tools import (assert_true,
                         assert_equal,
+                        assert_greater_equal,
                         assert_is_instance,
                         assert_in)
 from simplelearn.utils import (safe_izip,
                                assert_is_integer,
-                               assert_are_integers,
-                               assert_are_greater_equal)
+                               assert_all_integers,
+                               assert_all_greater_equal)
 from simplelearn.formats import Format, DenseFormat
 import pdb
 
@@ -389,17 +390,18 @@ def _make_bc01_format_node(i_node, i2t_axis_map):
     if i2t_axis_map is None:
         i2t_axis_map = {'b':'b', 'c':'c', '0':'0', '1':'1'}
 
-    t2i_axis_map = dict((v, k) for k, v in axis_map)
+    t2i_axis_map = dict((v, k) for k, v in i2t_axis_map.iteritems())
 
     t_axes = ('b', 'c', '0', '1')
     t_axes_with_i_names = [t2i_axis_map[a] for a in t_axes]
 
-    i_shape = input_node.output_format.axes
+    i_shape = i_node.output_format.shape
     t_shape = [i_shape[i_axes.index(a)] for a in t_axes_with_i_names]
 
     assert_equal(t_shape[0], -1)
-    for s in t_shape:
-        assert_greater_equal(s, 0)
+    for size, axis in safe_izip(t_shape, t_axes):
+        if axis != 'b':
+            assert_greater_equal(size, 0)
 
     t_format = DenseFormat(axes=t_axes,
                            shape=t_shape,
@@ -409,8 +411,8 @@ def _make_bc01_format_node(i_node, i2t_axis_map):
 
 
 def _assert_is_shape2d(arg):
-    assert_are_integers(arg, 2)
-    assert_are_greater_equal(arg, 0)
+    assert_all_integers(arg, 2)
+    assert_all_greater_equal(arg, 0)
 
 
 def _make_shape_reserving_pad(window_shape):
@@ -449,11 +451,11 @@ def _make_bc01_output_format(bc01_input_format,
         o_img_shape = i_img_shape - filter_shape + 1
     elif pad == 'full':
         o_img_shape = i_img_shape + filter_shape + 1
-    elif pad = 'same_shape':
+    elif pad == 'same_shape':
         o_img_shape = copy.deepcopy(i_img_shape)
         pad = _make_shape_preserving_pad(filter_shape)
     else:
-        assert_is_shape2d(pad)
+        _assert_is_shape2d(pad)
         o_img_shape = i_img_shape - filter_shape + 1 + pad
 
     return DenseFormat(axes=('b', 'c', '0', '1'),
@@ -517,7 +519,7 @@ class Conv2D(Node):
         if isinstance(pad, basestring):
             assert_in(pad, ('valid', 'full', 'same_size'))
         else:
-            assert_is_shape(pad)
+            _assert_is_shape2d(pad)
 
         if stride is not None:
             _assert_is_shape2d(stride)
@@ -570,7 +572,6 @@ class Pool2D(Node):
                  window_shape,
                  strides,
                  mode=None,
-                 pad=None,
                  axis_map=None):
         '''
         cuDNN spatial pooling over image maps.
@@ -588,21 +589,6 @@ class Pool2D(Node):
 
         mode: str
           'max' or 'average' (default: 'max')
-
-        pad: str, or Sequence
-          'valid', 'full', 'same_size', or a Sequence of 2 ints.
-
-          'valid': no zero-padding
-                   output_shape: input_shape - window_shape + 1
-
-          'full': maximal zero-padding
-                  output_shape: input_shape + filter_shape + 1
-
-          'same_size': Enough padding to preserve image shape.
-                       output_shape: image_shape
-
-          (R, C): Pad rows and colums by this many zeros on each side.
-                  output_shape = (input_shape[0] + 2R, input_shape[1] + 2C)
 
         axis_map: dict
           Maps the axis names in input_node.output_format.axes to
@@ -623,24 +609,13 @@ class Pool2D(Node):
             strides,
             window_shape,
             input_format_node.output_format.shape[1],  # num channels unchanged
-            pad)
-
-        if isinstance(pad, basestring):
-            if pad == 'valid':
-                pad = (0, 0)
-            elif pad == 'full':
-                pad = window_shape - 1
-            elif pad == 'same_size':
-                pad = _make_shape_preserving_pad(window_shape)
-            else:
-                _assert_is_shape2d(pad)
+            (0, 0))  # dnn_pool always uses zero padding
 
         output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
             img=input_format_node.output_symbol,
             ws=window_shape,
             stride=strides,
-            mode=mode,
-            pad=pad)
+            mode=mode)
 
         super(Pool2D, self).__init__([input_node],
                                      output_symbol,

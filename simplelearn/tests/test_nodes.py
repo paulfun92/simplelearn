@@ -2,24 +2,34 @@
 Tests for simplelearn.nodes
 '''
 
+import itertools
 import numpy
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
-# from theano.sandbox.rng_mrg import MRG_RandomStreams
 from numpy.testing import assert_allclose, assert_array_equal
-from nose.tools import assert_is_instance, assert_equal, assert_true
+from nose.tools import (assert_is_instance,
+                        assert_equal,
+                        assert_greater,
+                        assert_true)
 from simplelearn.formats import DenseFormat
-from simplelearn.utils import safe_izip
+from simplelearn.utils import (safe_izip,
+                               assert_all_greater,
+                               assert_all_greater_equal,
+                               assert_all_less_equal)
 from simplelearn.nodes import (Node,
                                InputNode,
                                Linear,
                                Bias,
                                Function1dTo1d,
+                               Pool2D,
+                               Conv2D,
                                ReLU,
                                Dropout,
                                Softmax,
                                L2Loss,
-                               CrossEntropy)
+                               CrossEntropy,
+                               _assert_is_shape2d)
+
 from unittest import TestCase
 
 import pdb
@@ -314,6 +324,147 @@ def test_crossentropy():
 
                 actual_losses = loss_function(softmaxes, targets)
                 expected_losses = expected_loss_function(softmaxes, targets)
-                print("actual: %s, expected: %s" % (str(actual_losses),
-                                                    str(expected_losses)))
                 assert_allclose(actual_losses, expected_losses)
+
+
+def test_pool2d():
+    def average_pool(subwindow):
+        assert_equal(subwindow.ndim, 4)
+
+        num_pixels = numpy.prod(subwindow.shape[2:])
+        assert_greater(num_pixels, 0)
+        subwindow = subwindow.reshape((subwindow.shape[0],
+                                       subwindow.shape[1],
+                                       num_pixels))
+        return subwindow.sum(axis=-1) / float(num_pixels)
+
+    def max_pool(subwindow):
+        assert_equal(subwindow.ndim, 4)
+
+        subwindow = subwindow.reshape((subwindow.shape[0],
+                                       subwindow.shape[1],
+                                       -1))
+        return subwindow.max(axis=-1)
+
+    def make_node(input_node,
+                  window_shape,
+                  strides,
+                  pad,  # ignored
+                  mode,
+                  axis_map):
+        return Pool2D(input_node=input_node,
+                      window_shape=window_shape,
+                      strides=strides,
+                      mode=mode,
+                      axis_map=axis_map)
+
+    def apply_subwindow_func(subwindow_func,
+                             max_padded_images,
+                             max_pad,
+                             actual_pad,
+                             window_shape,
+                             strides):
+        assert_equal(max_padded_images.ndim, 4)
+        assert_all_less_equal(actual_pad, max_pad)
+        assert_all_greater(max_padded_images.shape[2:], max_pad)
+        _assert_is_shape2d(window_shape)
+        _assert_is_shape2d(strides)
+
+        max_pad, actual_pad, window_shape, strides = tuple(numpy.asarray(a)
+                                                           for a in
+                                                           (max_pad,
+                                                            actual_pad,
+                                                            window_shape,
+                                                            strides))
+        offsets = max_pad - actual_pad
+        image_shape = numpy.asarray(max_padded_images.shape[2:]) - max_pad
+        assert_all_greater(image_shape, 0)
+
+        rows, cols = tuple(range(offsets[i],
+                                 offsets[i] + image_shape[i] + actual_pad[i],
+                                 strides[i])
+                           for i in (0, 1))
+        # pdb.set_trace()
+        output_image = None
+
+        for out_r, in_r in enumerate(rows):
+            for out_c, in_c in enumerate(cols):
+                subwindow = max_padded_images[:,
+                                              :,
+                                              in_r:(in_r + window_shape[0]),
+                                              in_c:(in_c + window_shape[1])]
+                output = subwindow_func(subwindow)
+                assert_equal(output.ndim, 2)
+
+                # check that subwindow_func preserved the batch size
+                assert_equal(output.shape[0], max_padded_images.shape[0])
+                assert_greater(output.shape[1], 0)
+
+                if output_image is None:
+                    output_image = numpy.zeros((output.shape[0],
+                                                output.shape[1],
+                                                len(rows),
+                                                len(cols)),
+                                               dtype=output.dtype)
+
+                output_image[:, :, out_r, out_c] = output
+
+        return output_image
+
+    max_stride = 1 #2
+    max_pad = 4
+    max_window_size = 1 # next: 2, then finally 3
+    batch_size = 1  # next: 2
+    num_channels = 1  # next: 2
+    input_dtype = numpy.dtype('int')
+
+    assert_greater(max_pad, max_window_size)  # to test case where pad > window
+
+    rng = numpy.random.RandomState(352)
+
+    max_padded_images = numpy.zeros((batch_size,
+                                     num_channels,
+                                     max_pad*2 + max_window_size + 1,
+                                     max_pad*2 + max_window_size + 4),
+                                    dtype=input_dtype)
+    images = max_padded_images[:, :, max_pad:-max_pad, max_pad:-max_pad]
+    images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
+
+    axis_map = None  # TODO: rename axes (to 'bee' 'zero' 'one' 'see')
+    # TODO: rename as above, shuffle axes
+    input_node = InputNode(DenseFormat(axes=('b', 'c', '0', '1'),
+                                       shape=(-1, ) + images.shape[1:],
+                                       dtype=input_dtype))
+    images = images.transpose([input_node.output_format.axes.index(a)
+                               for a in ('b', 'c', '0', '1')])  # TODO: rename but keep order
+    assert_all_greater(images.shape, 0)
+
+    prod = itertools.product
+
+    for mode, expected_func in safe_izip(('average', 'max'),
+                                         (average_pool, max_pool)):
+
+        # Loops through all possible window_shapes, pads, and strides
+        for window_shape in prod(range(1, max_window_size + 1), repeat=2):
+            for pads in prod(range(max_pad + 1), repeat=2):
+                for strides in prod(range(1, max_stride + 1), repeat=2):
+                    node = make_node(input_node,
+                                     window_shape=window_shape,
+                                     strides=strides,
+                                     pad=pads,
+                                     mode=mode,
+                                     axis_map=axis_map)
+
+                    node_func = theano.function([input_node.output_symbol],
+                                                node.output_symbol)
+
+                    expected_images = apply_subwindow_func(expected_func,
+                                                           max_padded_images,
+                                                           max_pad,
+                                                           pads,
+                                                           window_shape,
+                                                           strides)
+
+                    actual_images = node_func(images)
+
+                    assert_allclose(actual_images, expected_images)
