@@ -367,6 +367,11 @@ class AffineTransform(Function1dTo1d):
         return self.bias_node
 
 
+def _assert_is_shape2d(arg):
+    assert_all_integers(arg, 2)
+    assert_all_greater_equal(arg, 0)
+
+
 def _make_bc01_format_node(i_node, i2t_axis_map):
     '''
     Returns a FormatNode that converts a 4-D input to "bc01-floatX" format.
@@ -406,23 +411,8 @@ def _make_bc01_format_node(i_node, i2t_axis_map):
     t_format = DenseFormat(axes=t_axes,
                            shape=t_shape,
                            dtype=theano.config.floatX)
-
     return FormatNode(i_node, t_format, i2t_axis_map)
 
-
-def _assert_is_shape2d(arg):
-    assert_all_integers(arg, 2)
-    assert_all_greater_equal(arg, 0)
-
-
-def _make_shape_reserving_pad(window_shape):
-    '''
-    Returns padding amount that preserves the image shape under convolution.
-    '''
-    _assert_is_shape2d(window_shape)
-
-    return tuple((ws - 1) // 2 if ws % 2 == 0 else ws // 2
-                 for ws in window_shape)
 
 def _make_bc01_output_format(bc01_input_format,
                              strides,
@@ -442,6 +432,15 @@ def _make_bc01_output_format(bc01_input_format,
     assert_equal(bc01_input_format.axes, ('b', 'c', '0', '1'))
     _assert_is_shape2d(strides)
     _assert_is_shape2d(filter_shape)
+
+    def make_shape_preserving_pad(window_shape):
+        '''
+        Returns padding amount that preserves the image shape under convolution.
+        '''
+        _assert_is_shape2d(window_shape)
+
+        return tuple((ws - 1) // 2 if ws % 2 == 0 else ws // 2
+                     for ws in window_shape)
 
     strides = numpy.asarray(strides)
     i_img_shape = numpy.asarray(bc01_input_format.shape[2:]) // strides

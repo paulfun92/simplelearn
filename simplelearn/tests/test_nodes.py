@@ -18,6 +18,7 @@ from simplelearn.utils import (safe_izip,
                                assert_all_greater_equal,
                                assert_all_less_equal)
 from simplelearn.nodes import (Node,
+                               FormatNode,
                                InputNode,
                                Linear,
                                Bias,
@@ -53,6 +54,45 @@ class DummyFunction1dTo1d(Function1dTo1d):
         assert not input_format.requires_conversion(output_bf_format)
 
         return input_bf_node
+
+
+def test_format_node():
+    '''
+    A simple test for FormatNode.
+    '''
+    input_node = InputNode(fmt=DenseFormat(axes=('b', 'zero', 'see', 'one'),
+                                           shape=(-1, 4, 3, 5),
+                                           dtype=int))
+
+    output_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                                shape=(-1, 3, 4, 5),
+                                dtype=float)
+
+    format_node = FormatNode(input_node, output_format, {'zero': '0',
+                                                         'see': 'c',
+                                                         'one': '1'})
+
+
+    format_func = theano.function([input_node.output_symbol],
+                                  format_node.output_symbol)
+
+    def format_batch(batch):
+        batch = batch.transpose(0, 2, 1, 3)
+        if output_format.dtype is None:
+            return batch
+        else:
+            return numpy.cast[output_format.dtype](batch)
+
+    batch = input_node.output_format.make_batch(is_symbolic=False,
+                                                batch_size=2)
+
+    rng = numpy.random.RandomState(33215)
+    batch[...] = rng.random_integers(low=-5, high=5, size=batch.shape)
+
+    actual_formatted_batch = format_func(batch)
+    expected_formatted_batch = format_batch(batch)
+
+    assert_array_equal(actual_formatted_batch, expected_formatted_batch)
 
 
 class Function1dTo1dTester(TestCase):
@@ -371,7 +411,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
     def apply_subwindow_func(subwindow_func,
                              padded_images,
-                             actual_pad,
+                             pads,
                              window_shape,
                              strides):
         '''
@@ -394,16 +434,16 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
         '''
         assert_equal(padded_images.ndim, 4)
-        assert_all_greater(padded_images.shape[2:], actual_pad)
+        assert_all_greater(padded_images.shape[2:], pads)
         _assert_is_shape2d(window_shape)
         _assert_is_shape2d(strides)
 
-        actual_pad, window_shape, strides = (numpy.asarray(a)
-                                             for a in (actual_pad,
-                                                       window_shape,
-                                                       strides))
+        pads, window_shape, strides = (numpy.asarray(a) for a in (pads,
+                                                                  window_shape,
+                                                                  strides))
 
-        assert_all_greater(numpy.asarray(padded_images.shape[2:]), 2 * actual_pad)
+        assert_all_greater(numpy.asarray(padded_images.shape[2:]), 2 * pads)
+
         rows, cols = (range(0,
                             padded_images.shape[i+2] - window_shape[i] + 1,
                             strides[i])
@@ -476,13 +516,20 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
         images = unpad(max_padded_images, pads)
         images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
 
-        axis_map = None  # TODO: rename axes (to 'bee' 'zero' 'one' 'see')
-        # TODO: rename as above, shuffle axes
-        input_node = InputNode(DenseFormat(axes=('b', 'c', '0', '1'),
-                                           shape=(-1, ) + images.shape[1:],
+        axis_map = {'b': 'b',
+                    'see': 'c',
+                    'zero': '0',
+                    'one': '1'}
+
+        input_node_axes = ('b', 'zero', 'see', 'one')
+        transpose_indices = [('b', 'see', 'zero', 'one').index(a)
+                             for a in input_node_axes]
+        input_node_shape = [images.shape[t] for t in transpose_indices]
+        input_node_shape[input_node_axes.index('b')] = -1
+        input_node = InputNode(DenseFormat(axes=input_node_axes,
+                                           shape=input_node_shape,
                                            dtype=input_dtype))
-        images = images.transpose([input_node.output_format.axes.index(a)
-                                   for a in ('b', 'c', '0', '1')])  # TODO: rename but keep order
+
         assert_all_greater(images.shape, 0)
 
         for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
@@ -491,22 +538,23 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
             # Loops through all possible window_shapes, pads, and strides
             for window_shape in prod(range(1, max_window_size + 1), repeat=2):
                 for strides in prod(range(1, max_stride + 1), repeat=2):
-                    node = make_node_func(input_node,
-                                          window_shape=window_shape,
-                                          strides=strides,
-                                          pads=pads,
-                                          axis_map=axis_map)
-
-                    node_func = theano.function([input_node.output_symbol],
-                                                node.output_symbol)
-
                     expected_images = apply_subwindow_func(expected_func,
                                                            images,
                                                            pads,
                                                            window_shape,
                                                            strides)
 
-                    actual_images = node_func(images)
+                    node = make_node_func(input_node,
+                                          window_shape=window_shape,
+                                          strides=strides,
+                                          pads=pads,
+                                          axis_map=axis_map)
+
+
+                    node_func = theano.function([input_node.output_symbol],
+                                                node.output_symbol)
+                    transposed_images = images.transpose(transpose_indices)
+                    actual_images = node_func(transposed_images)
 
                     assert_allclose(actual_images, expected_images)
 
