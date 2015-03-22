@@ -370,8 +370,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     '''
 
     def apply_subwindow_func(subwindow_func,
-                             max_padded_images,
-                             max_pad,
+                             padded_images,
                              actual_pad,
                              window_shape,
                              strides):
@@ -394,27 +393,19 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
           side of the image.
 
         '''
-        assert_equal(max_padded_images.ndim, 4)
-        assert_all_less_equal(actual_pad, max_pad)
-        assert_all_greater(max_padded_images.shape[2:], max_pad)
+        assert_equal(padded_images.ndim, 4)
+        assert_all_greater(padded_images.shape[2:], actual_pad)
         _assert_is_shape2d(window_shape)
         _assert_is_shape2d(strides)
 
-        max_pad, actual_pad, window_shape, strides = (numpy.asarray(a)
-                                                      for a in (max_pad,
-                                                                actual_pad,
-                                                                window_shape,
-                                                                strides))
-        offsets = max_pad - actual_pad
-        image_shape = numpy.asarray(max_padded_images.shape[2:]) - 2 * max_pad
-        assert_all_greater(image_shape, 0)
+        actual_pad, window_shape, strides = (numpy.asarray(a)
+                                             for a in (actual_pad,
+                                                       window_shape,
+                                                       strides))
 
-        rows, cols = (range(offsets[i],
-                            (offsets[i] +
-                             image_shape[i] +
-                             actual_pad[i] -
-                             window_shape[i] +
-                             1),
+        assert_all_greater(numpy.asarray(padded_images.shape[2:]), 2 * actual_pad)
+        rows, cols = (range(0,
+                            padded_images.shape[i+2] - window_shape[i] + 1,
                             strides[i])
                       for i in (0, 1))
         output_image = None
@@ -443,10 +434,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
         return output_image
 
-    # supports_padding = False # TODO: make this an arg, set to Falseonly for test_pool2d
-
     max_stride = 2  # 3?
-    max_window_size = 3 # next: 2, then finally 3
+    max_window_size = 3
     batch_size = 2
     num_channels = 2
     input_dtype = numpy.dtype('int')
@@ -466,30 +455,41 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                      max_pad*2 + max_window_size + 1,
                                      max_pad*2 + max_window_size + 4),
                                     dtype=input_dtype)
-    if max_pad > 0:
-        images = max_padded_images[:, :, max_pad:-max_pad, max_pad:-max_pad]
-    else:
-        images = max_padded_images[...]
 
-    images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
+    def unpad(max_padded_images, pads):
+        def pad_to_slice(pad):
+            assert_greater_equal(pad, 0)
+            if pad == 0:
+                return slice(None, None)
+            else:
+                return slice(pad, -pad)
 
-    axis_map = None  # TODO: rename axes (to 'bee' 'zero' 'one' 'see')
-    # TODO: rename as above, shuffle axes
-    input_node = InputNode(DenseFormat(axes=('b', 'c', '0', '1'),
-                                       shape=(-1, ) + images.shape[1:],
-                                       dtype=input_dtype))
-    images = images.transpose([input_node.output_format.axes.index(a)
-                               for a in ('b', 'c', '0', '1')])  # TODO: rename but keep order
-    assert_all_greater(images.shape, 0)
+        return max_padded_images[:,
+                                 :,
+                                 pad_to_slice(pads[0]),
+                                 pad_to_slice(pads[1])]
+
 
     prod = itertools.product
 
-    for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
-                                                   make_node_funcs):
+    for pads in prod(range(max_pad + 1), repeat=2):
+        images = unpad(max_padded_images, pads)
+        images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
 
-        # Loops through all possible window_shapes, pads, and strides
-        for window_shape in prod(range(1, max_window_size + 1), repeat=2):
-            for pads in prod(range(max_pad + 1), repeat=2):
+        axis_map = None  # TODO: rename axes (to 'bee' 'zero' 'one' 'see')
+        # TODO: rename as above, shuffle axes
+        input_node = InputNode(DenseFormat(axes=('b', 'c', '0', '1'),
+                                           shape=(-1, ) + images.shape[1:],
+                                           dtype=input_dtype))
+        images = images.transpose([input_node.output_format.axes.index(a)
+                                   for a in ('b', 'c', '0', '1')])  # TODO: rename but keep order
+        assert_all_greater(images.shape, 0)
+
+        for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
+                                                       make_node_funcs):
+
+            # Loops through all possible window_shapes, pads, and strides
+            for window_shape in prod(range(1, max_window_size + 1), repeat=2):
                 for strides in prod(range(1, max_stride + 1), repeat=2):
                     node = make_node_func(input_node,
                                           window_shape=window_shape,
@@ -501,8 +501,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                                 node.output_symbol)
 
                     expected_images = apply_subwindow_func(expected_func,
-                                                           max_padded_images,
-                                                           max_pad,
+                                                           images,
                                                            pads,
                                                            window_shape,
                                                            strides)
@@ -552,38 +551,6 @@ def test_pool2d():
                       strides=strides,
                       mode='max',
                       axis_map=axis_map)
-
-    # make_average_pool_node, make_max_pool_node = (
-    #     lambda input_node, window_shape, strides, pad, axis_map: \
-    #     return Pool2D(input_node=input_node,
-    #                   window_shape=window_shape,
-    #                   strides=strides,
-    #                   mode=mode,
-    #                   axis_map=axis_map)
-    #     for mode in ('average', 'max'))
-
-    # def make_maxpool_node(input_node,
-    #                       window_shape,
-    #                       strides,
-    #                       pad,  # ignored
-    #                       axis_map):
-    #     return Pool2D(input_node=input_node,
-    #                   window_shape=window_shape,
-    #                   strides=strides,
-    #                   mode=mode,
-    #                   axis_map=axis_map)
-
-    # def make_node(input_node,
-    #               window_shape,
-    #               strides,
-    #               pad,  # ignored
-    #               mode,
-    #               axis_map):
-    #     return Pool2D(input_node=input_node,
-    #                   window_shape=window_shape,
-    #                   strides=strides,
-    #                   mode=mode,
-    #                   axis_map=axis_map)
 
     _sliding_window_2d_testimpl([average_pool, max_pool],
                                 [make_average_pool_node, make_max_pool_node],
