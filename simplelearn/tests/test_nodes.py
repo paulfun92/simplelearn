@@ -328,36 +328,46 @@ def test_crossentropy():
                 assert_allclose(actual_losses, expected_losses)
 
 
-def test_pool2d():
-    def average_pool(subwindow):
-        assert_equal(subwindow.ndim, 4)
+def _sliding_window_2d_testimpl(expected_subwindow_funcs,
+                                make_node_funcs,
+                                supports_padding):
+    '''
+    Implementation of tests for 2D sliding-window nodes like Pool2D and Conv2D.
 
-        num_pixels = numpy.prod(subwindow.shape[2:])
-        assert_greater(num_pixels, 0)
-        subwindow = subwindow.reshape((subwindow.shape[0],
-                                       subwindow.shape[1],
-                                       num_pixels))
-        return subwindow.sum(axis=-1) / float(num_pixels)
+    Parameters
+    ----------
+    expected_subwindow_funcs: Sequence
+      A Sequence of subwindow functions.
+      These take a subwindow and return a scalar.
+      Input: tensor with shape [BATCH_SIZE, NUM_CHANNELS, ROWS, COLS]
+      Output: tensor with shape [BATCH_SIZE, NUM_CHANNELS]
 
-    def max_pool(subwindow):
-        assert_equal(subwindow.ndim, 4)
+    make_node_funcs: Sequence
+      A Sequence of functions that create sliding-window Nodes to be tested
+      against the ground-truth provided by the corresponding
+      expected_subwindow_funcs.
 
-        subwindow = subwindow.reshape((subwindow.shape[0],
-                                       subwindow.shape[1],
-                                       -1))
-        return subwindow.max(axis=-1)
+      Parameters
+      ----------
+      input_node: Node
+      window_shape: Sequence
+        [NUM_ROWS, NUM_COLUMNS] of the sliding window.
+      strides: Sequence
+        [ROW_STRIDE, COLUMN_STRIDE], or how many rows/columns to skip between
+        applications of the sliding window.
 
-    def make_node(input_node,
-                  window_shape,
-                  strides,
-                  pad,  # ignored
-                  mode,
-                  axis_map):
-        return Pool2D(input_node=input_node,
-                      window_shape=window_shape,
-                      strides=strides,
-                      mode=mode,
-                      axis_map=axis_map)
+      pad: Sequence
+        [ROW_PAD, COLUMN_PAD], or # of zero-padding rows/columns to add to each
+        side of the image.
+
+      axis_map: dict
+        Maps strings to strings. Optional.
+        If the node uses different axis names than 'b', 'c', '0', '1', this
+        specifies the mapping from the node's axis names to 'b', 'c', '0', '1'.
+
+    supports_padding: bool
+      True if the nodes being tested support zero-padding; otherwise False.
+    '''
 
     def apply_subwindow_func(subwindow_func,
                              max_padded_images,
@@ -365,6 +375,25 @@ def test_pool2d():
                              actual_pad,
                              window_shape,
                              strides):
+        '''
+        Applies a sliding-window function to all subwindows of a feature map.
+
+        Parameters
+        ----------
+        subwindow_func: function
+          A function that takes a subwindow and returns a scalar.
+          Input: tensor with shape [BATCH_SIZE, NUM_CHANNELS, ROWS, COLS]
+          Output: tensor with shape [BATCH_SIZE, NUM_CHANNELS]
+
+        max_padded_images: numpy.ndarray
+          A feature map with shape [BATCH_SIZE, NUM_CHANNELS, ROWS, COLS].
+          This has max_pad[0] rows and max_pad[1] columns of zero-padding.
+
+        max_pad: Sequence
+          [pad_rows, pad_columns], the # of padded rows and columns on each
+          side of the image.
+
+        '''
         assert_equal(max_padded_images.ndim, 4)
         assert_all_less_equal(actual_pad, max_pad)
         assert_all_greater(max_padded_images.shape[2:], max_pad)
@@ -414,7 +443,7 @@ def test_pool2d():
 
         return output_image
 
-    supports_padding = False # TODO: make this an arg, set to Falseonly for test_pool2d
+    # supports_padding = False # TODO: make this an arg, set to Falseonly for test_pool2d
 
     max_stride = 2  # 3?
     max_window_size = 3 # next: 2, then finally 3
@@ -455,19 +484,18 @@ def test_pool2d():
 
     prod = itertools.product
 
-    for mode, expected_func in safe_izip(('average', 'max'),
-                                         (average_pool, max_pool)):
+    for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
+                                                   make_node_funcs):
 
         # Loops through all possible window_shapes, pads, and strides
         for window_shape in prod(range(1, max_window_size + 1), repeat=2):
             for pads in prod(range(max_pad + 1), repeat=2):
                 for strides in prod(range(1, max_stride + 1), repeat=2):
-                    node = make_node(input_node,
-                                     window_shape=window_shape,
-                                     strides=strides,
-                                     pad=pads,
-                                     mode=mode,
-                                     axis_map=axis_map)
+                    node = make_node_func(input_node,
+                                          window_shape=window_shape,
+                                          strides=strides,
+                                          pads=pads,
+                                          axis_map=axis_map)
 
                     node_func = theano.function([input_node.output_symbol],
                                                 node.output_symbol)
@@ -482,3 +510,81 @@ def test_pool2d():
                     actual_images = node_func(images)
 
                     assert_allclose(actual_images, expected_images)
+
+
+def test_pool2d():
+    def average_pool(subwindow):
+        assert_equal(subwindow.ndim, 4)
+
+        num_pixels = numpy.prod(subwindow.shape[2:])
+        assert_greater(num_pixels, 0)
+        subwindow = subwindow.reshape((subwindow.shape[0],
+                                       subwindow.shape[1],
+                                       num_pixels))
+        return subwindow.sum(axis=-1) / float(num_pixels)
+
+    def max_pool(subwindow):
+        assert_equal(subwindow.ndim, 4)
+
+        subwindow = subwindow.reshape((subwindow.shape[0],
+                                       subwindow.shape[1],
+                                       -1))
+        return subwindow.max(axis=-1)
+
+    def make_average_pool_node(input_node,
+                               window_shape,
+                               strides,
+                               pads,  # ignored
+                               axis_map):
+        return Pool2D(input_node=input_node,
+                      window_shape=window_shape,
+                      strides=strides,
+                      mode='average',
+                      axis_map=axis_map)
+
+    def make_max_pool_node(input_node,
+                           window_shape,
+                           strides,
+                           pads,  # ignored
+                           axis_map):
+        return Pool2D(input_node=input_node,
+                      window_shape=window_shape,
+                      strides=strides,
+                      mode='max',
+                      axis_map=axis_map)
+
+    # make_average_pool_node, make_max_pool_node = (
+    #     lambda input_node, window_shape, strides, pad, axis_map: \
+    #     return Pool2D(input_node=input_node,
+    #                   window_shape=window_shape,
+    #                   strides=strides,
+    #                   mode=mode,
+    #                   axis_map=axis_map)
+    #     for mode in ('average', 'max'))
+
+    # def make_maxpool_node(input_node,
+    #                       window_shape,
+    #                       strides,
+    #                       pad,  # ignored
+    #                       axis_map):
+    #     return Pool2D(input_node=input_node,
+    #                   window_shape=window_shape,
+    #                   strides=strides,
+    #                   mode=mode,
+    #                   axis_map=axis_map)
+
+    # def make_node(input_node,
+    #               window_shape,
+    #               strides,
+    #               pad,  # ignored
+    #               mode,
+    #               axis_map):
+    #     return Pool2D(input_node=input_node,
+    #                   window_shape=window_shape,
+    #                   strides=strides,
+    #                   mode=mode,
+    #                   axis_map=axis_map)
+
+    _sliding_window_2d_testimpl([average_pool, max_pool],
+                                [make_average_pool_node, make_max_pool_node],
+                                supports_padding=False)

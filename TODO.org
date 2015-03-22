@@ -9,6 +9,12 @@
 ** If unsatisfactory, Implement data.Mnist, test against pylearn2.datasets.Mnist
 *** Searches for cached mnist memmaps, creates them if necessary.
 * DONE Write mnist.py
+* DONE install CUDNN, confirm that Theano's using it
+* DONE Implement Conv2D node, Pool2D node
+* write sliding test_pool2d and test_conv2d
+** Finish refactoring test_pool2d, confirm it works
+** See if your can remove max_pad arg from apply_subwindow_func, and supply just padded_image rather than max_padded_image, where padded_image is padded by exactly actual_pad, which is now renamed "pads".
+** Write test_conv2d
 * Write LinearScale(EpochCallback)
 ** __init__(self, shared_var, final_value, num_epochs)
 * Write examples/mnist_fully_connected.py
@@ -28,8 +34,6 @@
 *** DONE Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
 **** Yeah that looks to be making better progress
 *** Try using StopOnStagnation rather than a fixed number of iterations
-* install CUDNN, confirm that Theano's using it
-* Implement Conv2D node, test against pylearn2's.
 * Write examples/mnist_conv.py
 * Write examples/cifar10.py
 * Write data/norb.py
