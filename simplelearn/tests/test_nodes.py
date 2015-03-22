@@ -10,6 +10,7 @@ from numpy.testing import assert_allclose, assert_array_equal
 from nose.tools import (assert_is_instance,
                         assert_equal,
                         assert_greater,
+                        assert_greater_equal,
                         assert_true)
 from simplelearn.formats import DenseFormat
 from simplelearn.utils import (safe_izip,
@@ -370,21 +371,23 @@ def test_pool2d():
         _assert_is_shape2d(window_shape)
         _assert_is_shape2d(strides)
 
-        max_pad, actual_pad, window_shape, strides = tuple(numpy.asarray(a)
-                                                           for a in
-                                                           (max_pad,
-                                                            actual_pad,
-                                                            window_shape,
-                                                            strides))
+        max_pad, actual_pad, window_shape, strides = (numpy.asarray(a)
+                                                      for a in (max_pad,
+                                                                actual_pad,
+                                                                window_shape,
+                                                                strides))
         offsets = max_pad - actual_pad
-        image_shape = numpy.asarray(max_padded_images.shape[2:]) - max_pad
+        image_shape = numpy.asarray(max_padded_images.shape[2:]) - 2 * max_pad
         assert_all_greater(image_shape, 0)
 
-        rows, cols = tuple(range(offsets[i],
-                                 offsets[i] + image_shape[i] + actual_pad[i],
-                                 strides[i])
-                           for i in (0, 1))
-        # pdb.set_trace()
+        rows, cols = (range(offsets[i],
+                            (offsets[i] +
+                             image_shape[i] +
+                             actual_pad[i] -
+                             window_shape[i] +
+                             1),
+                            strides[i])
+                      for i in (0, 1))
         output_image = None
 
         for out_r, in_r in enumerate(rows):
@@ -411,14 +414,21 @@ def test_pool2d():
 
         return output_image
 
-    max_stride = 1 #2
-    max_pad = 4
-    max_window_size = 1 # next: 2, then finally 3
-    batch_size = 1  # next: 2
-    num_channels = 1  # next: 2
+    supports_padding = False # TODO: make this an arg, set to Falseonly for test_pool2d
+
+    max_stride = 2  # 3?
+    max_window_size = 3 # next: 2, then finally 3
+    batch_size = 2
+    num_channels = 2
     input_dtype = numpy.dtype('int')
 
-    assert_greater(max_pad, max_window_size)  # to test case where pad > window
+    if supports_padding:
+        max_pad = 3
+        assert_greater(max_pad, max_window_size)
+    else:
+        max_pad = 0
+
+    assert_greater_equal(max_pad, 0)
 
     rng = numpy.random.RandomState(352)
 
@@ -427,7 +437,11 @@ def test_pool2d():
                                      max_pad*2 + max_window_size + 1,
                                      max_pad*2 + max_window_size + 4),
                                     dtype=input_dtype)
-    images = max_padded_images[:, :, max_pad:-max_pad, max_pad:-max_pad]
+    if max_pad > 0:
+        images = max_padded_images[:, :, max_pad:-max_pad, max_pad:-max_pad]
+    else:
+        images = max_padded_images[...]
+
     images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
 
     axis_map = None  # TODO: rename axes (to 'bee' 'zero' 'one' 'see')
