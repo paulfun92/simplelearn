@@ -479,14 +479,15 @@ class Conv2D(Node):
                  input_node,
                  filter_shape,
                  num_filters,
-                 pad,
+                 pads,
                  strides=(1, 1),
-                 axis_map=None):
+                 axis_map=None,
+                 **kwargs):
         '''
         Parameters
         ----------
 
-        pad: str or tuple
+        pads: str or tuple
           'valid': no zero-padding.
                    output_shape: input_shape - filter_shape + 1
           'full': maximal zero-padding.
@@ -515,13 +516,13 @@ class Conv2D(Node):
         _assert_is_shape2d(filter_shape)
         assert_is_integer(num_filters)
 
-        if isinstance(pad, basestring):
-            assert_in(pad, ('valid', 'full', 'same_size'))
+        if isinstance(pads, basestring):
+            assert_in(pads, ('valid', 'full', 'same_size'))
         else:
-            _assert_is_shape2d(pad)
+            _assert_is_shape2d(pads)
 
-        if stride is not None:
-            _assert_is_shape2d(stride)
+        if strides is not None:
+            _assert_is_shape2d(strides)
 
         if axis_map is not None:
             assert_is_instance(axis_map, dict)
@@ -533,31 +534,38 @@ class Conv2D(Node):
             strides,
             filter_shape,
             num_filters,
-            pad)
+            pads)
 
         self.filters = theano.shared(
-            numpy.zeros(([num_filters] +
-                         input_format_node.output_format.shape[1] +
+            numpy.zeros(([num_filters,
+                          input_format_node.output_format.shape[1]] +
                          list(filter_shape)),
                         dtype=theano.config.floatX))
 
 
-        def make_output_symbol(t_node, filters, pad, strides):
-            image_shape = copy.deepcopy(t_node.output_format.shape)
-            assert_equal(image_shape[0], -1)
-            image_shape[0] = None
+        def make_output_symbol(t_node, filters, pads, strides):
 
-            return theano.tensor.nnet.conv2d(input=t_node.output_symbol,
-                                             filters=filters,
-                                             image_shape=image_shape,
-                                             filter_shape=filters.shape,
-                                             border_mode=pad,
-                                             subsample=strides,
-                                             **kwargs)
+            return theano.sandbox.cuda.dnn.dnn_conv(img=t_node.output_symbol,
+                                                    kerns=filters,
+                                                    border_mode=pads,
+                                                    subsample=strides,
+                                                    # don't flip filters
+                                                    conv_mode='cross')
+
+            # image_shape = list(copy.deepcopy(t_node.output_format.shape))
+            # assert_equal(image_shape[0], -1)
+            # image_shape[0] = None
+            # return theano.tensor.nnet.conv2d(input=t_node.output_symbol,
+            #                                  filters=filters,
+            #                                  image_shape=image_shape,
+            #                                  filter_shape=filters.get_value().shape,
+            #                                  border_mode=pads,
+            #                                  subsample=strides,
+            #                                  **kwargs)
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
-                                    pad,
+                                    pads,
                                     strides)
 
 

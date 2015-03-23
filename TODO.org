@@ -12,8 +12,8 @@
 * DONE install CUDNN, confirm that Theano's using it
 * DONE Implement Conv2D node, Pool2D node
 * write sliding test_pool2d and test_conv2d
-** Finish refactoring test_pool2d, confirm it works
-** See if your can remove max_pad arg from apply_subwindow_func, and supply just padded_image rather than max_padded_image, where padded_image is padded by exactly actual_pad, which is now renamed "pads".
+** DONE Finish refactoring test_pool2d, confirm it works
+** DONE See if you can remove max_pad arg from apply_subwindow_func, and supply just padded_image rather than max_padded_image, where padded_image is padded by exactly actual_pad, which is now renamed "pads".
 ** Write test_conv2d
 * Write LinearScale(EpochCallback)
 ** __init__(self, shared_var, final_value, num_epochs)

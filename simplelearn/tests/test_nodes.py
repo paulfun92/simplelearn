@@ -370,7 +370,8 @@ def test_crossentropy():
 
 def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                 make_node_funcs,
-                                supports_padding):
+                                supports_padding,
+                                rtol=None):
     '''
     Implementation of tests for 2D sliding-window nodes like Pool2D and Conv2D.
 
@@ -481,7 +482,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     input_dtype = numpy.dtype('int')
 
     if supports_padding:
-        max_pad = 3
+        max_pad = 4
         assert_greater(max_pad, max_window_size)
     else:
         max_pad = 0
@@ -556,7 +557,10 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                     transposed_images = images.transpose(transpose_indices)
                     actual_images = node_func(transposed_images)
 
-                    assert_allclose(actual_images, expected_images)
+                    kwargs = {}
+                    if rtol is not None:
+                        kwargs['rtol'] = rtol
+                    assert_allclose(actual_images, expected_images, **kwargs)
 
 
 def test_pool2d():
@@ -603,3 +607,46 @@ def test_pool2d():
     _sliding_window_2d_testimpl([average_pool, max_pool],
                                 [make_average_pool_node, make_max_pool_node],
                                 supports_padding=False)
+
+
+def test_conv2d():
+    def rand_floats(shape):
+        rng = numpy.random.RandomState(382342)
+        return rng.uniform(low=-10, high=10, size=shape)
+
+    num_filters = 10
+
+    def convolve(subwindow):
+        '''
+        Convolution without flipping the filters (aka cross-correlation).
+        '''
+        floatX = theano.config.floatX
+        subwindow = numpy.cast[floatX](subwindow)
+        filters = numpy.zeros(shape=(num_filters, ) + subwindow.shape[1:],
+                              dtype=floatX)
+        filters[...] = rand_floats(filters.shape)
+
+        return numpy.einsum('bcde,fcde->bf', subwindow, filters)
+
+    def make_conv_node(input_node,
+                       window_shape,
+                       strides,
+                       pads,
+                       axis_map):
+        result = Conv2D(input_node,
+                        window_shape,
+                        num_filters,
+                        pads,
+                        strides,
+                        axis_map)
+
+        filters = result.filters.get_value()
+        filters[...] = rand_floats(filters.shape)
+        result.filters.set_value(filters)
+
+        return result
+
+    _sliding_window_2d_testimpl([convolve],
+                                [make_conv_node],
+                                supports_padding=True,
+                                rtol=1e-3)
