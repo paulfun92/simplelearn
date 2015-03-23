@@ -2,6 +2,12 @@
 Tests for simplelearn.nodes
 '''
 
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2015"
+__license__ = "Apache 2.0"
+
+
 import itertools
 import numpy
 import theano
@@ -71,7 +77,6 @@ def test_format_node():
     format_node = FormatNode(input_node, output_format, {'zero': '0',
                                                          'see': 'c',
                                                          'one': '1'})
-
 
     format_func = theano.function([input_node.output_symbol],
                                   format_node.output_symbol)
@@ -278,11 +283,10 @@ def test_l2loss():
                                 shape=(-1, feature_size),
                                 dtype=None)
         non_b_axes = tuple(axis for axis in arg_format.axes if axis != 'b')
-        axis_map = {non_b_axes : 'f'}
+        axis_map = {non_b_axes: 'f'}
         diff = arg_format.convert(diff, bf_format, axis_map=axis_map)
 
         return (diff * diff).sum(axis=1)
-
 
     input_format = DenseFormat(axes=('c', '0', 'b', '1'),
                                shape=(1, 2, -1, 3),
@@ -328,9 +332,7 @@ def test_crossentropy():
         cross_entropy = CrossEntropy(softmax_node, target_node)
         return theano.function([x.output_symbol for x in (softmax_node,
                                                           target_node)],
-                        cross_entropy.output_symbol)
-
-
+                               cross_entropy.output_symbol)
 
     for use_integer_targets in (True, False):
         for vec_size in (1, 2):
@@ -346,7 +348,6 @@ def test_crossentropy():
             softmax_format = DenseFormat(axes=('b', 'f'),
                                          shape=(-1, vec_size),
                                          dtype='floatX')
-
 
             loss_function = make_loss_function(softmax_format, target_format)
 
@@ -446,7 +447,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
         assert_all_greater(numpy.asarray(padded_images.shape[2:]), 2 * pads)
 
         rows, cols = (range(0,
-                            padded_images.shape[i+2] - window_shape[i] + 1,
+                            padded_images.shape[i + 2] - window_shape[i] + 1,
                             strides[i])
                       for i in (0, 1))
         output_image = None
@@ -493,8 +494,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
     max_padded_images = numpy.zeros((batch_size,
                                      num_channels,
-                                     max_pad*2 + max_window_size + 1,
-                                     max_pad*2 + max_window_size + 4),
+                                     max_pad * 2 + max_window_size + 1,
+                                     max_pad * 2 + max_window_size + 4),
                                     dtype=input_dtype)
 
     def unpad(max_padded_images, pads):
@@ -509,7 +510,6 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                  :,
                                  pad_to_slice(pads[0]),
                                  pad_to_slice(pads[1])]
-
 
     prod = itertools.product
 
@@ -533,8 +533,9 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
         assert_all_greater(images.shape, 0)
 
-        for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
-                                                       make_node_funcs):
+        for expected_func, make_node_func in \
+            safe_izip(expected_subwindow_funcs,
+                      make_node_funcs):
 
             # Loops through all possible window_shapes, pads, and strides
             for window_shape in prod(range(1, max_window_size + 1), repeat=2):
@@ -550,7 +551,6 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                           strides=strides,
                                           pads=pads,
                                           axis_map=axis_map)
-
 
                     node_func = theano.function([input_node.output_symbol],
                                                 node.output_symbol)
