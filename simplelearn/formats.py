@@ -493,13 +493,17 @@ class DenseFormat(Format):
             for expected_size, size, axis in safe_izip(self.shape,
                                                        batch.shape,
                                                        self.axes):
-                if axis != 'b' and size != expected_size:
-                    raise ValueError("Mismatch between this format' size of "
-                                     "axis %s (%d) and batch's corresponding "
-                                     "size %d." %
-                                     (expected_size,
-                                      axis,
-                                      size))
+                if axis != 'b':
+                    assert_equal(size, 
+                                 expected_size,
+                                 "Mismatch between this format's "
+                                 "stated shape and the batch's shape:\n"
+                                 "  format's axes:  %s\n"
+                                 "  format's shape: %s\n"
+                                 "  batch's shape:  %s\n" %
+                                 (str(self.axes),
+                                  str(self.shape),
+                                  str(batch.shape)))
 
     def _convert(self, batch, output_format, output_batch, **kwargs):
         '''

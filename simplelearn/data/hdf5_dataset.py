@@ -11,6 +11,7 @@ from simplelearn.formats import DenseFormat
 
 import pdb
 
+
 def add_tensor(name, shape, dtype, axes, hdf):
     '''
     Adds a tensor to an HDF5 file, in a manner compatible with Hdf5Dataset.
@@ -48,6 +49,10 @@ class Hdf5Dataset(Dataset):
     Pickling this dataset just pickles the HDF5 file's path.
 
     Unpickling this dataset loads the HDF5 file and wraps it with this Dataset.
+
+    Note that Hdf5Dataset loads the HDF5 file in read-only mode. See
+    ./mnist.py for an example of how to actually create the HDF5 file
+    in the first place.
     '''
 
     def __init__(self, hdf5_filepath, group_path=u'/'):

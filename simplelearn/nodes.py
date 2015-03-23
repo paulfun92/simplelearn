@@ -21,6 +21,7 @@ from nose.tools import (assert_true,
 from simplelearn.utils import (safe_izip,
                                assert_is_integer,
                                assert_all_integers,
+                               assert_all_greater,
                                assert_all_greater_equal)
 from simplelearn.formats import Format, DenseFormat
 import pdb
@@ -55,6 +56,7 @@ class Node(object):
         assert_is_instance(input_nodes, (Node, collections.Sequence))
         assert_is_instance(output_symbol, theano.gof.Variable)
         assert_is_instance(output_format, Format)
+        output_format.check(output_symbol)
 
         if isinstance(input_nodes, Node):
             input_nodes = (input_nodes, )
@@ -416,12 +418,22 @@ def _make_bc01_format_node(i_node, i2t_axis_map):
 
 def _make_bc01_output_format(bc01_input_format,
                              strides,
-                             filter_shape,
+                             window_shape,
                              num_filters,
                              pad):
     '''
     Constructs an appropriately-sized output format for a convolution-like
     operator.
+
+    Parameters
+    ----------
+    pad: str or Sequence
+      'valid': zero padding
+      'full': maximal padding (window_shape - 1)
+      'same_shape': Pad just enough so that convolution doesn't change
+                    the resolution (striding may still change the resolution).
+                    The window_shape must have odd-numbered sizes.
+      [R, C]: Pad by R rows and C columns of zeros on each side of the image.
 
     Returns
     -------
@@ -430,32 +442,86 @@ def _make_bc01_output_format(bc01_input_format,
     '''
 
     assert_equal(bc01_input_format.axes, ('b', 'c', '0', '1'))
+    assert_equal(bc01_input_format.shape[0], -1)
+    assert_all_greater(bc01_input_format.shape[1:], 0)
     _assert_is_shape2d(strides)
-    _assert_is_shape2d(filter_shape)
+    _assert_is_shape2d(window_shape)
 
-    def make_shape_preserving_pad(window_shape):
+    # def make_shape_preserving_pad(window_shape):
+    #     '''
+    #     Returns padding amount that preserves the image shape under convolution.
+    #     '''
+    #     _assert_is_shape2d(window_shape)
+
+    #     return tuple((ws - 1) // 2 if ws % 2 == 0 else ws // 2
+    #                  for ws in window_shape)
+
+    i_img_shape, strides, window_shape = (
+        numpy.asarray(x) for x in (bc01_input_format.shape[2:],
+                                   strides,
+                                   window_shape))
+
+    def get_pads(pad):
         '''
-        Returns padding amount that preserves the image shape under convolution.
+        Converts pad argument to an ndarray of two ints.
         '''
-        _assert_is_shape2d(window_shape)
+        if pad == 'valid':
+            pads = [0, 0]
+        elif pad == 'full':
+            pads = window_shape - 1
+        elif pad == 'same_shape':
+            for window_size in window_shape:
+                assert_equal(window_size % 2,
+                             0,
+                             "when pad = 'same_shape', window_shape must have "
+                             "only odd numbers. Instead, got %s." %
+                             str(window_shape))
+            pads = window_shape // 2
+        elif isinstance(pad, basestring):
+            raise ValueError("Unrecognized pad value '%s'" % pad)
+        else:
+            _assert_is_shape2d(pad)
+            pads = pad
 
-        return tuple((ws - 1) // 2 if ws % 2 == 0 else ws // 2
-                     for ws in window_shape)
+        return numpy.asarray(pads)
 
-    strides = numpy.asarray(strides)
-    i_img_shape = numpy.asarray(bc01_input_format.shape[2:]) // strides
-    filter_shape = numpy.asarray(filter_shape)
+    pads = get_pads(pad)
+    assert_all_greater(window_shape, pads)
 
-    if pad == 'valid':
-        o_img_shape = i_img_shape - filter_shape + 1
-    elif pad == 'full':
-        o_img_shape = i_img_shape + filter_shape + 1
-    elif pad == 'same_shape':
-        o_img_shape = copy.deepcopy(i_img_shape)
-        pad = _make_shape_preserving_pad(filter_shape)
-    else:
-        _assert_is_shape2d(pad)
-        o_img_shape = i_img_shape - filter_shape + 1 + pad
+    padded_input_shape = i_img_shape + pads * 2
+    o_img_shape = (padded_input_shape - window_shape + 1 - 1) // strides + 1
+    # strides = numpy.asarray(strides)
+
+    # strided_img_shape = (numpy.asarray(padded_imbc01_input_format.shape[2:]) - 1) // strides + 1
+    # window_shape = numpy.asarray(window_shape)
+
+    # Confirm that output sizes work out to be the predicted sizes from
+    # Theano's docs, when stride == 1
+    for window_size, o_img_size, i_img_size, stride in safe_izip(window_shape,
+                                                                 o_img_shape,
+                                                                 i_img_shape,
+                                                                 strides):
+        if stride == 1:
+            if pad == 'valid':
+                assert_equal(o_img_size, i_img_size - window_size + 1)
+            elif pad == 'full':
+                assert_equal(o_img_size, i_img_size + window_size + 1)
+            elif pad == 'same_shape':
+                assert_equal(o_img_size, i_img_size)
+
+    # if pad == 'valid':
+    #     assert_array_equal(o_img_shape, i_img_shape - window_shape + 1)
+    #     # o_img_shape = i_img_shape - window_shape + 1
+    # elif pad == 'full':
+    #     assert_array_equal(o_img_shape,
+    #     o_img_shape = i_img_shape + window_shape + 1
+    # elif pad == 'same_shape':
+    #     o_img_shape = copy.deepcopy(i_img_shape)
+    #     pad = _make_shape_preserving_pad(window_shape)
+    # else:
+    #     _assert_is_shape2d(pad)
+    #     pad = numpy.asarray(pad)
+    #     o_img_shape = i_img_shape - window_shape + 1 + (2 * pad)
 
     return DenseFormat(axes=('b', 'c', '0', '1'),
                        shape=(-1,
@@ -524,17 +590,20 @@ class Conv2D(Node):
         _assert_is_shape2d(filter_shape)
         assert_is_integer(num_filters)
 
-        if theano.sandbox.cuda.dnn.dnn_available():
+        dnn_available = theano.sandbox.cuda.dnn.dnn_available
+
+        if dnn_available():
+            if isinstance(pads, basestring):
+                assert_in(pads, ('valid', 'full', 'same_size'))
+            else:
+                _assert_is_shape2d(pads)
+                pads = tuple(pads)
+        else:
             assert_in(pads, ('valid', 'full'),
                       "cuDNN not found, so falling back to "
                       "theano.tensor.nnet.conv2d(), which only supports "
                       "pads argument values of 'valid' and 'full', "
                       "not %s." % str(pads))
-        else:
-            if isinstance(pads, basestring):
-                assert_in(pads, ('valid', 'full', 'same_size'))
-            else:
-                _assert_is_shape2d(pads)
 
         if strides is not None:
             _assert_is_shape2d(strides)
@@ -542,7 +611,7 @@ class Conv2D(Node):
         if axis_map is not None:
             assert_is_instance(axis_map, dict)
 
-        if not theano.sandbox.cuda.dnn.dnn_available():
+        if not dnn_available():
             assert_equal(len(kwargs), 0,
                          "cuDNN implementation does not accept kwargs. Switch "
                          "to default Theano implementation using Theano "
@@ -566,7 +635,7 @@ class Conv2D(Node):
 
         def make_output_symbol(t_node, filters, pads, strides):
 
-            if theano.sandbox.cuda.dnn.dnn_available():
+            if dnn_available():
                 dnn_conv = theano.sandbox.cuda.dnn.dnn_conv
                 return dnn_conv(img=t_node.output_symbol,
                                 kerns=filters,
@@ -591,7 +660,6 @@ class Conv2D(Node):
                                     self.filters,
                                     pads,
                                     strides)
-
 
         super(Conv2D, self).__init__([input_node], output, output_format)
 

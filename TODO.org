@@ -60,7 +60,18 @@
 ** Add LinearScale to learning rate and momentum to the demo.
 * Write examples/mnist_conv.py
 * Write data/norb.py
-** main function: load_norb(hdf_file) 0load_big_norb(), load_small_norb(), load_
+** write load_norb_image_file(image_hdf_dataset_batch)
+** load_norb_label_file(label_hdf_dataset_batch)
+** raw_norb_to_hdf(raw_image_files, raw_label_files, hdf_path)
+** load_norb()
+** load_small_norb()
+** 0load_big_norb(), load_small_norb(), load_
 * Replicate classification + orientation success.
 * Visualize classification + orientation features
 * Scale to 6DOF
+
+
+Debugging test_conv:
+* expected_images should not have first row and column filled with zeros.
+* aside from that row and column, numbers dont match
+** Try filling kernels with all ones, then their convolution will be unique to a particular location, not conv vs cross-correlation.
