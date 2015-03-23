@@ -4,6 +4,29 @@
 * DONE Write unit test for Softmax node, against pylearn2's.
 * DONE Implement CrossEntropy node, unit-test against pylearn2's.
 * DONE Implement Dropout
+** Requirements:
+*** For a given unit, include its inputs with probability p (aka zero out with prob. 1-p).
+*** Scale the inputs by 1/p to compensate for lowered output vector magnitude.
+*** If the inputs are the output of some parameterized function, the parameters' learning rates should be scaled by p^2 (lowered), to compensate for heightend gradient due to scaling by 1/p above.
+** What pylearn2 does
+*** dropout is a cost object, with its own rng. Evaluating it causes it to call mlp.dropout_fprop() instead of mlp.fprop().
+*** This in turn causes it to loop through layers, calling:
+**** state_below = MLP.apply_dropout(state_below)
+***** The core of dropout is here. It just masks and scales state_below.
+**** state_below = layer.fprop(state_below)
+***** fprops (the masked and scaled) input as usual.
+*** model.fprop_dropout() zero-masks and scales the inputs, but scaling the learning rate of the prior layer is the responsibility of the user.
+** strat 1: leave learning rate change to user (ew)
+*** Dropout is a wrapper Node around a Node. No need to know the node's type; it just masks and scales node.output_symbol.
+**** InputNode: applies mask, scales output
+**** Linear: applies mask, scales output
+**** Bias: error or warning
+**** AffineTransform: applies mask, scales output
+** strat 2: let Dropout be a flag for functions in models.py that create CNN/NNs
+*** arg: dropout_include_rates
+*** No need for DropoutSgdParameterUpdater for now.
+*** Adds dropout nodes after each layer for which dropout_include_rate is not None, and scales that layer's weights (not biases) by p^2
+
 * DONE Check out Fuel as a source of dataset wrappers
 ** https://github.com/bartvm/fuel
 ** If unsatisfactory, Implement data.Mnist, test against pylearn2.datasets.Mnist
@@ -11,10 +34,20 @@
 * DONE Write mnist.py
 * DONE install CUDNN, confirm that Theano's using it
 * DONE Implement Conv2D node, Pool2D node
+* DONE Write examples/visualize_mnist.py
+*** DONE On arrow right or left, shows the trained model the next/previous MNIST test digit.
+*** Shows softmax, the argmax of the softmax, the target label, and 10 optimized images
+*** Show a softmax below each of the optimized images
+**** DONE The i'th image is what you get if you optimize output_softmax[i], starting from the displayed image.
+** Debug "optimized" images
+*** DONE Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
+**** Yeah that looks to be making better progress
+*** Try using StopOnStagnation rather than a fixed number of iterations
 * write sliding test_pool2d and test_conv2d
 ** DONE Finish refactoring test_pool2d, confirm it works
 ** DONE See if you can remove max_pad arg from apply_subwindow_func, and supply just padded_image rather than max_padded_image, where padded_image is padded by exactly actual_pad, which is now renamed "pads".
 ** Write test_conv2d
+*** debug: I think it can't deal with pad > window_size. Try reducing max pad to window_size - 1.
 * Write LinearScale(EpochCallback)
 ** __init__(self, shared_var, final_value, num_epochs)
 * Write examples/mnist_fully_connected.py
@@ -25,43 +58,9 @@
 ** DONE Write save-on-best callback, put it in mnist demo
 ** DONE Save best model trained on MNIST
 ** Add LinearScale to learning rate and momentum to the demo.
-* Write examples/visualize_mnist.py
-*** DONE On arrow right or left, shows the trained model the next/previous MNIST test digit.
-*** Shows softmax, the argmax of the softmax, the target label, and 10 optimized images
-*** Show a softmax below each of the optimized images
-**** DONE The i'th image is what you get if you optimize output_softmax[i], starting from the displayed image.
-** Debug "optimized" images
-*** DONE Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
-**** Yeah that looks to be making better progress
-*** Try using StopOnStagnation rather than a fixed number of iterations
 * Write examples/mnist_conv.py
-* Write examples/cifar10.py
 * Write data/norb.py
-* Replicate classification success on big NORB
+** main function: load_norb(hdf_file) 0load_big_norb(), load_small_norb(), load_
 * Replicate classification + orientation success.
-* Write classification demo
-
-
-Dropout brainstorm:
-* Requirements:
-** For a given unit, include its inputs with probability p (aka zero out with prob. 1-p).
-** Scale the inputs by 1/p to compensate for lowered output vector magnitude.
-** If the inputs are the output of some parameterized function, the parameters' learning rates should be scaled by p^2 (lowered), to compensate for heightend gradient due to scaling by 1/p above.
-* What pylearn2 does
-** dropout is a cost object, with its own rng. Evaluating it causes it to call mlp.dropout_fprop() instead of mlp.fprop().
-** This in turn causes it to loop through layers, calling:
-*** state_below = MLP.apply_dropout(state_below)
-**** The core of dropout is here. It just masks and scales state_below.
-*** state_below = layer.fprop(state_below)
-**** fprops (the masked and scaled) input as usual.
-** model.fprop_dropout() zero-masks and scales the inputs, but scaling the learning rate of the prior layer is the responsibility of the user.
-* strat 1: leave learning rate change to user (ew)
-** Dropout is a wrapper Node around a Node. No need to know the node's type; it just masks and scales node.output_symbol.
-*** InputNode: applies mask, scales output
-*** Linear: applies mask, scales output
-*** Bias: error or warning
-*** AffineTransform: applies mask, scales output
-* strat 2: let Dropout be a flag for functions in models.py that create CNN/NNs
-** arg: dropout_include_rates
-** No need for DropoutSgdParameterUpdater for now.
-** Adds dropout nodes after each layer for which dropout_include_rate is not None, and scales that layer's weights (not biases) by p^2
+* Visualize classification + orientation features
+* Scale to 6DOF
