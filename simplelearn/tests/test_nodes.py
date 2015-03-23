@@ -485,15 +485,14 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
         return output_image
 
-    max_stride = 2  # 3?
+    max_stride = 3
     max_window_size = 3
-    batch_size = 1  # TODO: change to 2
-    num_channels = 1  # TODO: change to 2
+    batch_size = 2
+    num_channels = 2
     input_dtype = numpy.dtype('int')
 
     if supports_padding:
         max_pad = max_window_size - 1
-        # assert_greater(max_pad, max_window_size)
     else:
         max_pad = 0
 
@@ -553,10 +552,11 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
             for pads in prod(range(min(max_pad + 1, window_shape[0] - 1)),
                              range(min(max_pad + 1, window_shape[1] - 1))):
                 pads = numpy.asarray(pads)
-            # for pads in prod(range(max_pad + 1), repeat=2):
                 padded_images = get_padded_image(max_padded_images, pads)
                 assert_array_equal(numpy.asarray(padded_images.shape[2:]),
-                                   (2 * pads) + numpy.asarray(images.shape[2:]))
+                                   (2 * pads) +
+                                   numpy.asarray(images.shape[2:]))
+
                 for strides in prod(range(1, max_stride + 1), repeat=2):
                     expected_images = apply_subwindow_func(expected_func,
                                                            padded_images,
@@ -583,7 +583,6 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                     if rtol is not None:
                         kwargs['rtol'] = rtol
 
-                    # assert_allclose(actual_images, expected_images, **kwargs)
                     try:
                         assert_allclose(actual_images,
                                         expected_images,
@@ -643,7 +642,7 @@ def test_conv2d():
         rng = numpy.random.RandomState(382342)
         return rng.uniform(low=-10, high=10, size=shape)
 
-    num_filters = 1  # TODO: change to 10
+    num_filters = 10  # TODO: change to 10
 
     def convolve(subwindow):
         '''
