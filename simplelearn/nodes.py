@@ -447,15 +447,6 @@ def _make_bc01_output_format(bc01_input_format,
     _assert_is_shape2d(strides)
     _assert_is_shape2d(window_shape)
 
-    # def make_shape_preserving_pad(window_shape):
-    #     '''
-    #     Returns padding amount that preserves the image shape under convolution.
-    #     '''
-    #     _assert_is_shape2d(window_shape)
-
-    #     return tuple((ws - 1) // 2 if ws % 2 == 0 else ws // 2
-    #                  for ws in window_shape)
-
     i_img_shape, strides, window_shape = (
         numpy.asarray(x) for x in (bc01_input_format.shape[2:],
                                    strides,
@@ -486,14 +477,9 @@ def _make_bc01_output_format(bc01_input_format,
         return numpy.asarray(pads)
 
     pads = get_pads(pad)
-    # assert_all_greater(window_shape, pads)
 
     padded_input_shape = i_img_shape + pads * 2
     o_img_shape = (padded_input_shape - window_shape + 1 - 1) // strides + 1
-    # strides = numpy.asarray(strides)
-
-    # strided_img_shape = (numpy.asarray(padded_imbc01_input_format.shape[2:]) - 1) // strides + 1
-    # window_shape = numpy.asarray(window_shape)
 
     # Confirm that output sizes work out to be the predicted sizes from
     # Theano's docs, when stride == 1
@@ -508,20 +494,6 @@ def _make_bc01_output_format(bc01_input_format,
                 assert_equal(o_img_size, i_img_size + window_size - 1)
             elif pad == 'same_shape':
                 assert_equal(o_img_size, i_img_size)
-
-    # if pad == 'valid':
-    #     assert_array_equal(o_img_shape, i_img_shape - window_shape + 1)
-    #     # o_img_shape = i_img_shape - window_shape + 1
-    # elif pad == 'full':
-    #     assert_array_equal(o_img_shape,
-    #     o_img_shape = i_img_shape + window_shape + 1
-    # elif pad == 'same_shape':
-    #     o_img_shape = copy.deepcopy(i_img_shape)
-    #     pad = _make_shape_preserving_pad(window_shape)
-    # else:
-    #     _assert_is_shape2d(pad)
-    #     pad = numpy.asarray(pad)
-    #     o_img_shape = i_img_shape - window_shape + 1 + (2 * pad)
 
     return DenseFormat(axes=('b', 'c', '0', '1'),
                        shape=(-1,
