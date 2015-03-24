@@ -32,6 +32,7 @@ from simplelearn.training import (SgdParameterUpdater,
                                   StopsOnStagnation)
 import pdb
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=("Trains multilayer perceptron to classify MNIST digits. "
@@ -89,8 +90,6 @@ def parse_args():
     return parser.parse_args()
 
 
-
-
 def build_fc_classifier(input_node,
                         sizes,
                         sparse_init_counts,
@@ -135,32 +134,21 @@ def build_fc_classifier(input_node,
     assert_equal(input_node.output_format.dtype,
                  numpy.dtype(theano.config.floatX))
 
-    # def get_flat_float_vector(image_node):
-    #     # Convert uint8 image matrices to floatX vectors.
-    #     image_size = numpy.prod(image_node.output_format.shape[1:])
-    #     image_node = RescaleImage(image_node)
-    #     return FormatNode(image_node,
-    #                       DenseFormat(axes=('b', 'f'),
-    #                                   shape=(-1, image_size),
-    #                                   dtype=None),
-    #                       axis_map={('0', '1'): 'f'})
-
-    # image_node = get_flat_float_vector(image_node)
-
-    affine_nodes = []  # do I need this?
+    affine_nodes = []
 
     hidden_node = input_node
     for layer_index, size in enumerate(sizes):
-        hidden_node = AffineTransform(hidden_node, DenseFormat(axes=('b', 'f'),
-                                                             shape=(-1, size),
-                                                             dtype=None))
+        hidden_node = AffineTransform(hidden_node,
+                                      DenseFormat(axes=('b', 'f'),
+                                                  shape=(-1, size),
+                                                  dtype=None))
         affine_nodes.append(hidden_node)
         if layer_index != (len(sizes) - 1):
             hidden_node = ReLU(hidden_node)
 
     output_node = Softmax(hidden_node, DenseFormat(axes=('b', 'f'),
-                                                  shape=(-1, sizes[-1]),
-                                                  dtype=None))
+                                                   shape=(-1, sizes[-1]),
+                                                   dtype=None))
 
     # DEBUG
     # print_softmax_op = theano.printing.Print("softmax: ")
@@ -184,7 +172,6 @@ def build_fc_classifier(input_node,
 
         shared_variable.set_value(params)
 
-
     # Initialize the first N-1 affine layer weights (not biases)
     for sparse_init_count, affine_node in safe_izip(sparse_init_counts,
                                                     affine_nodes[:-1]):
@@ -192,34 +179,25 @@ def build_fc_classifier(input_node,
                        affine_node.bias_node.params):
             init_sparse(params, sparse_init_count, rng)
 
-    # # Initialize the first N-1 affine layer weights (not biases)
-    # for affine_node in affine_nodes:
-    #     # normal-distributes weights
-    #     weights = affine_node.linear_node.params.get_value()
-    #     weights[...] = rng.normal(loc=0.0, scale=.005, size=weights.shape)
-    #     affine_node.linear_node.params.set_value(weights)
-
-    #     # Zeroes biases
-    #     biases = affine_node.bias_node.params.get_value()
-    #     biases[...] = 0.0
-    #     affine_node.bias_node.params.set_value(biases)
-
     return affine_nodes, output_node
 
 
 def print_loss(values, _):  # 2nd argument: formats
     print("Average loss: %s" % str(values))
 
+
 def print_feature_vector(values, _):
     print("Average feature vector: %s" % str(values))
+
 
 def print_mcr(values, _):
     print("Misclassification rate: %s" % str(values))
 
+
 class UpdateNormMonitor(Monitor):
     def __init__(self, name, update):
         update = update.reshape(shape=(1, -1))
-        update_norm = theano.tensor.sqrt((update**2).sum(axis=1))
+        update_norm = theano.tensor.sqrt((update ** 2).sum(axis=1))
 
         # just something to satisfy the checks of Monitor.__init__.
         # Because we overrride on_batch(), this is never used.
@@ -236,6 +214,7 @@ class UpdateNormMonitor(Monitor):
 
     def _on_epoch(self):
         return tuple()
+
 
 def main():
     args = parse_args()
@@ -263,19 +242,8 @@ def main():
                                                     rng)
 
     loss_node = CrossEntropy(output_node, label_node)
-
-    # DEBUG
-    # print_loss_op = theano.printing.Print("cross_entropy: ")
-    # loss_node.output_symbol = print_loss_op(loss_node.output_symbol)
-
     loss_sum = loss_node.output_symbol.mean()
-    # loss_sum = loss_node.output_symbol.sum()
-
-    # learning_rate = .01
-    # momentum = .5
-    # use_nesterov = True
     max_epochs = 10000
-    # batch_size = 100
 
     #
     # Makes parameter updaters
@@ -297,13 +265,12 @@ def main():
     updates = [updater.updates.values()[0] - updater.updates.keys()[0]
                for updater in parameter_updaters]
     update_norm_monitors = [UpdateNormMonitor("layer %d %s" %
-                                              (i//2,
+                                              (i // 2,
                                                "weights" if i % 2 == 0 else
                                                "bias"),
                                               update)
                             for i, update in enumerate(updates)]
 
-    # pdb.set_trace()
     #
     # Makes batch and epoch callbacks
     #
@@ -314,7 +281,9 @@ def main():
                                          min_proportional_decrease=0.0)
     mcr_monitor = AverageMonitor(misclassification_node.output_symbol,
                                  misclassification_node.output_format,
-                                 callbacks=[print_mcr, mcr_logger, training_stopper])
+                                 callbacks=[print_mcr,
+                                            mcr_logger,
+                                            training_stopper])
 
     # batch callback (monitor)
     training_loss_logger = LogsToLists()
@@ -324,14 +293,12 @@ def main():
                                                       training_loss_logger])
 
     # print out 10-D feature vector
-    feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
-                                            affine_nodes[-1].output_format,
-                                            callbacks=[print_feature_vector])
+    # feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
+    #                                         affine_nodes[-1].output_format,
+    #                                         callbacks=[print_feature_vector])
 
     # epoch callbacks
     validation_loss_logger = LogsToLists()
-    # training_stopper = StopsOnStagnation(max_epochs=10,
-    #                                      min_proportional_decrease=0.0)
 
     def make_output_filename(args, best=False):
         assert_equal(os.path.splitext(args.output_prefix)[1], "")
@@ -353,19 +320,16 @@ def main():
     model = SerializableModel([image_uint8_node], [output_node])
     saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
 
-    # pdb.set_trace()
     validation_loss_monitor = AverageMonitor(
         loss_node.output_symbol,
         loss_node.output_format,
         callbacks=[validation_loss_logger, saves_best])
-        # callbacks=[validation_loss_logger, training_stopper])
 
     validation_callback = ValidationCallback(
         inputs=[image_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_testing.iterator(iterator_type='sequential',
                                               batch_size=args.batch_size),
         monitors=[validation_loss_monitor, mcr_monitor])
-        # monitors=[validation_loss_monitor, feature_vector_monitor])
 
     trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
                   mnist_training.iterator(iterator_type='sequential',
@@ -373,8 +337,6 @@ def main():
                   parameters,
                   parameter_updaters,
                   monitors=[training_loss_monitor],
-                  # monitors=[training_loss_monitor] + update_norm_monitors,
-                  # monitors=[training_loss_monitor, feature_vector_monitor],
                   epoch_callbacks=[])
 
     stuff_to_pickle = OrderedDict(
@@ -389,12 +351,6 @@ def main():
                                LimitsNumEpochs(max_epochs)]
 
     trainer.train()
-
-
-# def compare_weights(file0, file1):
-#     def get_weights(file_path):
-#         pickled = cPickle.load(file_path)
-#         trainer = pickled['trainer']
 
 
 if __name__ == '__main__':
