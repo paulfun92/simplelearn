@@ -6,17 +6,23 @@ import numpy
 import theano
 from collections import OrderedDict
 from nose.tools import (assert_true,
+                        assert_is_instance,
                         assert_greater,
                         assert_greater_equal,
+                        assert_less_equal,
                         assert_equal)
-from simplelearn.nodes import (AffineTransform,
+from simplelearn.nodes import (Node,
+                               AffineTransform,
                                FormatNode,
                                ReLU,
                                CrossEntropy,
                                Misclassification,
                                Softmax,
                                RescaleImage)
-from simplelearn.utils import safe_izip
+from simplelearn.utils import (safe_izip,
+                               assert_all_greater,
+                               assert_all_less_equal,
+                               assert_all_integers)
 from simplelearn.io import SerializableModel
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
@@ -66,6 +72,11 @@ def parse_args():
                         help=("Directory and optional prefix of filename to "
                               "save the log to."))
 
+    # These default hyperparameter values are taken from Pylearn2:
+    # In pylearn2/scripts/tutorials/multilayer_perceptron/:
+    #   multilayer_perceptron.ipynb
+    #   mlp_tutorial_part_3.yaml
+
     parser.add_argument("--learning-rate",
                         type=positive_float,
                         default=0.01,
@@ -93,6 +104,7 @@ def parse_args():
 def build_fc_classifier(input_node,
                         sizes,
                         sparse_init_counts,
+                        dropout_include_probabilities,
                         rng):
     '''
     Builds a stack of fully-connected layers followed by a Softmax.
@@ -123,16 +135,32 @@ def build_fc_classifier(input_node,
       The last int is the number of classes.
 
     sparse_init_counts:
-      A sequence of ints, with length one shorter than <sizes>.
+      A sequence of N-1 ints, where N = len(sizes).
       Used to initialize the weights of the first N-1 layers.
       If the n'th element is x, this means that the n'th layer
       will have x nonzeros, with the rest initialized to zeros.
-    '''
-    assert_greater(len(sizes), 0)
-    assert_equal(len(sparse_init_counts), len(sizes) - 1)
 
+    dropout_include_probabilities: Sequence
+      A Sequence of N-1 floats, where N := len(sizes)
+      The dropout include probabilities for the outputs of each of the layers,
+      except for the final one.
+
+    rng: numpy.random.RandomState
+      The RandomState to draw random initial weights from.
+    '''
+    assert_is_instance(input_node, Node)
     assert_equal(input_node.output_format.dtype,
                  numpy.dtype(theano.config.floatX))
+
+    assert_greater(len(sizes), 0)
+    assert_all_greater(sizes, 0)
+
+    assert_equal(len(sparse_init_counts), len(sizes) - 1)
+    assert_all_integers(sparse_init_counts)
+    assert_all_greater(sparse_init_counts, 0)
+    assert_all_less_equal(sparse_init_counts, sizes[:-1])
+
+    assert_equal(len(dropout_include_probabilities), len(sizes) - 1)
 
     affine_nodes = []
 
@@ -154,13 +182,18 @@ def build_fc_classifier(input_node,
     # print_softmax_op = theano.printing.Print("softmax: ")
     # output_node.output_symbol = print_softmax_op(output_node.output_symbol)
 
-    def init_sparse(shared_variable, num_nonzeros, rng):
+    def init_sparse_bias(shared_variable, num_nonzeros, rng):
         '''
         Mimics the sparse initialization in
         pylearn2.models.mlp.Linear.set_input_space()
         '''
 
         params = shared_variable.get_value()
+        assert_equal(params.shape[0], 1)
+
+        assert_greater_equal(num_nonzeros, 0)
+        assert_less_equal(num_nonzeros, params.shape[1])
+
         params[...] = 0.0
 
         indices = rng.choice(params.size,
@@ -168,16 +201,55 @@ def build_fc_classifier(input_node,
                              replace=False)
 
         # normal dist with stddev=1.0
-        params.flat[indices] = rng.randn(num_nonzeros)
+        params[0, indices] = rng.randn(num_nonzeros)
+
+        # Found that for biases, this didn't help (it increased the
+        # final misclassification rate by .001)
+        # if num_nonzeros > 0:
+        #     params /= float(num_nonzeros)
+
+        shared_variable.set_value(params)
+
+    def init_sparse_linear(shared_variable, num_nonzeros, rng):
+        params = shared_variable.get_value()
+        params[...] = 0.0
+
+        assert_greater_equal(num_nonzeros, 0)
+        assert_less_equal(num_nonzeros, params.shape[0])
+
+        for c in xrange(params.shape[1]):
+            indices = rng.choice(params.shape[0],
+                                 size=num_nonzeros,
+                                 replace=False)
+
+            # normal dist with stddev=1.0
+            params[indices, c] = rng.randn(num_nonzeros)
+
+        # TODO: it's somewhat worrisome that the tutorial in
+        # pylearn2.scripts.tutorials.multilayer_perceptron/
+        #   multilayer_perceptron.ipynb
+        # seems to do fine without scaling the weights like this
+        if num_nonzeros > 0:
+            params /= float(num_nonzeros)
+            # Interestingly, while this seems more correct (normalize
+            # columns to norm=1), it prevents the NN from converging.
+            # params /= numpy.sqrt(float(num_nonzeros))
 
         shared_variable.set_value(params)
 
     # Initialize the first N-1 affine layer weights (not biases)
     for sparse_init_count, affine_node in safe_izip(sparse_init_counts,
                                                     affine_nodes[:-1]):
-        for params in (affine_node.linear_node.params,
-                       affine_node.bias_node.params):
-            init_sparse(params, sparse_init_count, rng)
+        # pylearn2 doesn't sparse_init the biases. I also found that
+        # doing so slightly increases the final misclassification rate
+        # .0137 without initing bias, .0139 with.
+        # init_sparse_bias(affine_node.bias_node.params,
+        #                  sparse_init_count,
+        #                  rng)
+
+        init_sparse_linear(affine_node.linear_node.params,
+                           sparse_init_count,
+                           rng)
 
     return affine_nodes, output_node
 
@@ -239,6 +311,7 @@ def main():
     affine_nodes, output_node = build_fc_classifier(image_node,
                                                     sizes,
                                                     sparse_init_counts,
+                                                    [1.0] * len(sparse_init_counts),
                                                     rng)
 
     loss_node = CrossEntropy(output_node, label_node)

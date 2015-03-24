@@ -28,6 +28,7 @@ from simplelearn.nodes import (Node,
                                InputNode,
                                Linear,
                                Bias,
+                               AffineTransform,
                                Function1dTo1d,
                                Pool2D,
                                Conv2D,
@@ -191,6 +192,15 @@ class BiasTester(Function1dTo1dTester):
         assert_equal(rows.shape[1], params.shape[1])
 
         return rows + self.node.params.get_value()
+
+
+class AffineTester(Function1dTo1dTester):
+    def _make_node(self, input_node, output_format):
+        return AffineTransform(input_node, output_format)
+
+    def expected_function1dTo1d(self, rows):
+        return (numpy.dot(rows, self.node.linear_node.params.get_value()) +
+                self.node.bias_node.params.get_value())
 
 
 class SoftmaxTester(Function1dTo1dTester):
@@ -411,6 +421,10 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
       True if the nodes being tested support zero-padding; otherwise False.
     '''
 
+    # TODO: change this to construct a Toeplitz matrix out of padded_images,
+    # so we get a giant stack of C X WR X WC matrices, which can then be fed
+    # to subwindow_func as a single batch.
+    # See scipy.linalg.toeplitz
     def apply_subwindow_func(subwindow_func,
                              padded_images,
                              pads,

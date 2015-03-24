@@ -81,12 +81,40 @@ def assert_all_integers(arg, size=None):
 
     assert_is_instance(arg, collections.Iterable)
 
-    # pdb.set_trace()
-
     for element, index in enumerate(arg):
         assert_true(numpy.issubdtype(type(element), numpy.integer),
                     "Element %d (%s) is not an integer, but a %s." %
                     (index, element, type(element)))
+
+
+def assert_is_floating(arg):
+    '''
+    Checks that arg is a scalar of floating-point type.
+    '''
+    assert_true(numpy.issubdtype(type(arg), numpy.floating),
+                "%s is not of a floating-point type." % type(arg))
+
+
+def assert_all_floating(arg, size=None):
+    '''
+    Checks that arg is an Iterable of floating-point scalars.
+
+    Parameters
+    ----------
+    args: Sequence
+
+    size: int
+      Optional. If specified, this checks that len(arg) == size.
+    '''
+    if size is not None:
+        assert_equal(len(arg), size)
+
+    assert_is_instance(arg, collections.Iterable)
+
+    for element, index in enumerate(arg):
+        assert_true(numpy.issubdtype(type(element), numpy.floating),
+                    "Element %d (%s) is not a floating-point number, but a %s."
+                    % (index, element, type(element)))
 
 
 def assert_all_greater_equal(arg0, arg1):
