@@ -472,7 +472,7 @@ def _make_bc01_output_format(bc01_input_format,
         elif pad == 'same_shape':
             for window_size in window_shape:
                 assert_equal(window_size % 2,
-                             0,
+                             1,
                              "when pad = 'same_shape', window_shape must have "
                              "only odd numbers. Instead, got %s." %
                              str(window_shape))
@@ -505,7 +505,7 @@ def _make_bc01_output_format(bc01_input_format,
             if pad == 'valid':
                 assert_equal(o_img_size, i_img_size - window_size + 1)
             elif pad == 'full':
-                assert_equal(o_img_size, i_img_size + window_size + 1)
+                assert_equal(o_img_size, i_img_size + window_size - 1)
             elif pad == 'same_shape':
                 assert_equal(o_img_size, i_img_size)
 
@@ -565,7 +565,7 @@ class Conv2D(Node):
                    output_shape: input_shape - filter_shape + 1
           'full': maximal zero-padding.
                   output_shape: input_shape + filter_shape + 1
-          'same_size': (cuDNN only) Enough padding to preserve image shape.
+          'same_shape': (cuDNN only) Enough padding to preserve image shape.
                        output_shape = input_shape.
           (R, C): (cuDNN only) Pad rows and columns by this many zeros on each
                   side.
@@ -594,7 +594,13 @@ class Conv2D(Node):
 
         if dnn_available():
             if isinstance(pads, basestring):
-                assert_in(pads, ('valid', 'full', 'same_size'))
+                assert_in(pads, ('valid', 'full', 'same_shape'))
+                if pads == 'same_shape':
+                    assert_true((filter_shape % 2 == 1).all(),
+                                "If pads == 'same_shape', then filter_shape "
+                                "must be odd in both dimensions, but got %s." %
+                                str(filter_shape))
+                    pads = tuple(numpy.asarray(filter_shape) // 2)
             else:
                 _assert_is_shape2d(pads)
                 pads = tuple(pads)
@@ -634,6 +640,10 @@ class Conv2D(Node):
 
 
         def make_output_symbol(t_node, filters, pads, strides):
+            if not isinstance(pads, basestring):
+                pads = tuple(pads)
+
+            strides = tuple(strides)
 
             if dnn_available():
                 dnn_conv = theano.sandbox.cuda.dnn.dnn_conv
@@ -647,6 +657,8 @@ class Conv2D(Node):
                 image_shape = list(copy.deepcopy(t_node.output_format.shape))
                 assert_equal(image_shape[0], -1)
                 image_shape[0] = None
+                image_shape = tuple(image_shape)
+
                 conv2d = theano.tensor.nnet.conv2d
                 return conv2d(input=t_node.output_symbol,
                               filters=filters,
@@ -712,8 +724,8 @@ class Pool2D(Node):
 
         output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
             img=input_format_node.output_symbol,
-            ws=window_shape,
-            stride=strides,
+            ws=tuple(window_shape),
+            stride=tuple(strides),
             mode=mode)
 
         super(Pool2D, self).__init__([input_node],

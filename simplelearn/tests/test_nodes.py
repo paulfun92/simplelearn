@@ -546,22 +546,57 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     prod = itertools.product
     chain = itertools.chain
 
+    def get_pads_from_pad_arg(pad_arg, window_shape):
+        window_shape = numpy.asarray(window_shape)
+        _assert_is_shape2d(window_shape)
+
+        if isinstance(pad_arg, basestring):
+            if pad_arg == 'full':
+                return window_shape - 1
+            elif pad_arg == 'valid':
+                return numpy.asarray([0, 0])
+            elif pad_arg == 'same_shape':
+                assert_true((window_shape % 2 != 0).all())
+                return window_shape // 2
+            else:
+                raise ValueError("Unrecognized pad name: '%s'" % pad_arg)
+        else:
+            _assert_is_shape2d(pad_arg)
+            return numpy.asarray(pad_arg)
+
     for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
                                                    make_node_funcs):
 
         # Loops through all possible window_shapes, pads (including padding
         # bigger than the window shape), strides.
         for window_shape in prod(range(1, max_window_size + 1), repeat=2):
-            # for pads in chain(('full', 'valid', 'same_size'),
+            window_shape = numpy.asarray(window_shape)
+            # for pads in chain(('full', 'valid', 'same_shape'),
             #                   prod(range(max_pad + 1), repeat=2)):
             # for pads in prod(range(max_pad + 1), repeat=2):
 
-            for pads in prod(range(min(max_pad + 1, window_shape[0] + 1)),
-                             range(min(max_pad + 1, window_shape[1] + 1))):
+            def get_pad_args(window_shape, supports_padding):
+                if not supports_padding:
+                    return [(0, 0)]
+                else:
+                    return chain(
+                        ('same_shape', 'full', 'valid'),
+                        prod(range(window_shape[0] + 1),
+                             range(window_shape[1] + 1)))
 
-            # for pads in prod(range(min(max_pad + 1, window_shape[0] - 1)),
-            #                  range(min(max_pad + 1, window_shape[1] - 1))):
-                pads = numpy.asarray(pads)
+            for pad_arg in get_pad_args(window_shape, supports_padding):
+            # for pad_arg in chain(
+            #         ('same_shape', 'full', 'valid'),
+            #         prod(range(min(max_pad + 1, window_shape[0] + 1)),
+            #              range(min(max_pad + 1, window_shape[1] + 1)))):
+                # can't use same_shape padding with even window dims
+                if pad_arg == 'same_shape' and (window_shape % 2 == 0).any():
+                    continue
+
+            # for pads in prod(range(min(max_pad + 1, window_shape[0] + 1)),
+            #                  range(min(max_pad + 1, window_shape[1] + 1))):
+                pads = get_pads_from_pad_arg(pad_arg, window_shape)
+                # pads = numpy.asarray(pads)
                 padded_images = get_padded_image(max_padded_images, pads)
                 assert_array_equal(numpy.asarray(padded_images.shape[2:]),
                                    (2 * pads) +
@@ -577,7 +612,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                     node = make_node_func(input_node,
                                           window_shape=window_shape,
                                           strides=strides,
-                                          pads=pads,
+                                          pads=pad_arg,  # pads,
                                           axis_map=axis_map)
 
                     node_func = theano.function([input_node.output_symbol],
