@@ -4,12 +4,10 @@ import theano
 import theano.tensor as T
 from nose.tools import assert_equal, assert_raises_regexp
 
-from simplelearn.training import (#ComputesAverageOverEpoch,
-                                  StopsOnStagnation,
+from simplelearn.training import (StopsOnStagnation,
                                   StopTraining,
                                   LimitsNumEpochs,
-                                  #LinearlyScalesOverEpochs
-)
+                                  LinearlyScalesOverEpochs)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
 from simplelearn.data.dataset import Dataset
@@ -87,36 +85,39 @@ class L2Norm(Node):
 
 
 def test_limits_num_epochs():
-    limits_num_epochs = LimitsNumEpochs(5)
-    for index in range(4):
+    max_num_epochs = 5
+    limits_num_epochs = LimitsNumEpochs(max_num_epochs)
+
+    limits_num_epochs.on_start_training()
+
+    for _ in range(max_num_epochs - 1):
         limits_num_epochs.on_epoch()
 
-    assert_raises_regexp(StopTraining,
-                         "Reached max \# of epochs",
-                         limits_num_epochs.on_epoch())
+    with assert_raises_regexp(StopTraining, "Reached max"):
+        limits_num_epochs.on_epoch()
 
 
-# def test_linearly_scales_over_epochs():
-#     initial_value = 5.6
-#     final_scale = .012
-#     epochs_to_saturation = 23
+def test_linearly_scales_over_epochs():
+    initial_value = 5.6
+    final_scale = .012
+    epochs_to_saturation = 23
 
-#     shared_variable = theano.shared(initial_value)
-#     assert_allclose(shared_variable.get_value(), initial_value)
+    shared_variable = theano.shared(initial_value)
+    assert_allclose(shared_variable.get_value(), initial_value)
 
-#     callback = LinearlyScalesOverEpochs(shared_variable,
-#                                         final_scale,
-#                                         epochs_to_saturation)
+    callback = LinearlyScalesOverEpochs(shared_variable,
+                                        final_scale,
+                                        epochs_to_saturation)
+    expected_values = numpy.linspace(1.0,
+                                     final_scale,
+                                     epochs_to_saturation + 1) * initial_value
+    flat_values = numpy.zeros(7)
+    flat_values[:] = expected_values[-1]
 
-#     expected_values = numpy.linspace(1.0,
-#                                      final_scale,
-#                                      epochs_to_saturation + 1) * initial_value
-#     flat_values = numpy.zeros(7)
-#     flat_values[:] = expected_values[-1]
+    expected_values = numpy.concatenate((expected_values, flat_values))
 
-#     expected_values = numpy.concatenate((expected_values, flat_values))
-
-#     for expected_value in expected_values:
-#         assert_allclose(shared_variable.get_value(),
-#                         expected_value)
-#         callback()
+    callback.on_start_training()
+    for expected_value in expected_values:
+        assert_allclose(shared_variable.get_value(),
+                        expected_value)
+        callback.on_epoch()

@@ -32,6 +32,21 @@ import pdb
 # pylint: disable=too-few-public-methods
 
 
+class StopTraining(Exception):
+    '''
+    An exception thrown to signal the end of training.
+
+    Analogous to the built-in exception StopIteration.
+    '''
+    def __init__(self, status, message):
+        if status not in ('ok', 'error'):
+            raise ValueError("Expected StopTraining status to be 'ok' or "
+                             "'error', but got '%s'." % str(status))
+
+        self.status = status
+        super(StopTraining, self).__init__(message)
+
+
 class EpochCallback(object):
     '''
     Abstract class for callbacks to call between training epochs.
@@ -303,6 +318,7 @@ class LinearlyScalesOverEpochs(EpochCallback):
 
     def on_epoch(self):
         assert_greater_equal(self._num_epochs_seen, 0)
+        self._num_epochs_seen += 1
 
         # interpolation parameter
         alpha = min(1.0,
@@ -636,21 +652,6 @@ class AverageMonitor(SumMonitor):
         self._count = 0
 
         return result
-
-
-class StopTraining(Exception):
-    '''
-    An exception thrown to signal the end of training.
-
-    Analogous to the built-in exception StopIteration.
-    '''
-    def __init__(self, status, message):
-        if status not in ('ok', 'error'):
-            raise ValueError("Expected StopTraining status to be 'ok' or "
-                             "'error', but got '%s'." % str(status))
-
-        self.status = status
-        super(StopTraining, self).__init__(message)
 
 
 class SavesAtMinimum(object):
