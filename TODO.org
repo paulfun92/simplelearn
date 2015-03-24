@@ -75,3 +75,8 @@ Debugging test_conv:
 * expected_images should not have first row and column filled with zeros.
 * aside from that row and column, numbers dont match
 ** Try filling kernels with all ones, then their convolution will be unique to a particular location, not conv vs cross-correlation.
+
+
+Todo once test_conv is working:
+* re-enable pad sizes bigger than window sizes; see what happens.
+* enable pad keywords like 'valid', 'full', and 'same_size'

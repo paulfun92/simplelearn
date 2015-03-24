@@ -486,7 +486,7 @@ def _make_bc01_output_format(bc01_input_format,
         return numpy.asarray(pads)
 
     pads = get_pads(pad)
-    assert_all_greater(window_shape, pads)
+    # assert_all_greater(window_shape, pads)
 
     padded_input_shape = i_img_shape + pads * 2
     o_img_shape = (padded_input_shape - window_shape + 1 - 1) // strides + 1

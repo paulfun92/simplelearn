@@ -492,7 +492,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     input_dtype = numpy.dtype('int')
 
     if supports_padding:
-        max_pad = max_window_size - 1
+        max_pad = max_window_size + 1
+        # max_pad = max_window_size - 1
     else:
         max_pad = 0
 
@@ -543,14 +544,23 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                        dtype=input_dtype))
 
     prod = itertools.product
+    chain = itertools.chain
 
     for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
                                                    make_node_funcs):
 
-        # Loops through all possible window_shapes, pads, and strides
+        # Loops through all possible window_shapes, pads (including padding
+        # bigger than the window shape), strides.
         for window_shape in prod(range(1, max_window_size + 1), repeat=2):
-            for pads in prod(range(min(max_pad + 1, window_shape[0] - 1)),
-                             range(min(max_pad + 1, window_shape[1] - 1))):
+            # for pads in chain(('full', 'valid', 'same_size'),
+            #                   prod(range(max_pad + 1), repeat=2)):
+            # for pads in prod(range(max_pad + 1), repeat=2):
+
+            for pads in prod(range(min(max_pad + 1, window_shape[0] + 1)),
+                             range(min(max_pad + 1, window_shape[1] + 1))):
+
+            # for pads in prod(range(min(max_pad + 1, window_shape[0] - 1)),
+            #                  range(min(max_pad + 1, window_shape[1] - 1))):
                 pads = numpy.asarray(pads)
                 padded_images = get_padded_image(max_padded_images, pads)
                 assert_array_equal(numpy.asarray(padded_images.shape[2:]),
