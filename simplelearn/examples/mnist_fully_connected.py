@@ -448,11 +448,7 @@ def main():
         (('model', model),
          ('validation_loss_logger', validation_loss_logger)))
 
-    # failed
-    # stuff_to_pickle = OrderedDict(
-    #     (('trainer', trainer),))
-
-    # failed
+    # Pickling the trainer doesn't work when there are Dropout nodes.
     # stuff_to_pickle = OrderedDict(
     #     (('trainer', trainer),
     #      ('validation_loss_logger', validation_loss_logger),

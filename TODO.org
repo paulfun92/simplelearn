@@ -81,11 +81,8 @@ Todo once test_conv is working:
 * re-enable pad sizes bigger than window sizes; see what happens.
 * enable pad keywords like 'valid', 'full', and 'same_size'
 
-Todo today:
-* Debug getting dropout to converge
-** See if dropout at just a single layer works.
-** See if dropout with include_rate = 1.0 works (i.e. don't special-case 1.0 and use it as an excuse to not instantiate Dropout).
-
+Today:
+* fix visualize_mnist.py to take new save format.
 
 Debugging pickling Dropout:
 * Not even dill can pickle it.

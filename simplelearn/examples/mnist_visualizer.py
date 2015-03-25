@@ -24,7 +24,11 @@ import pdb
 def parse_args():
     parser = argparse.ArgumentParser(
         description=("Visualizes the thoughts of the best model outputted by "
-                     "./mnist_fully_connecrted.py"))
+                     "./mnist_fully_connected.py. Default arguments are "
+                     "hand-tuned to get good results on the initially "
+                     "displayed digit (a '7'). For good results on other "
+                     "digits, try playing with --max-iterations and "
+                     "--learning-rate"))
 
     def pkl_file(arg):
         pickle_file = file(arg, 'rb')
@@ -40,6 +44,11 @@ def parse_args():
         assert_greater_equal(result, 0.0)
         return result
 
+    def positive_int(arg):
+        result = int(arg)
+        assert_greater(result, 0)
+        return result
+
     parser.add_argument("--model",
                         type=pkl_file,
                         required=True,
@@ -48,8 +57,13 @@ def parse_args():
 
     parser.add_argument("--learning-rate",
                         type=positive_float,
-                        default=.01,
+                        default=0.8,
                         help=("The learning rate used to optimize images."))
+
+    parser.add_argument("--max-iterations",
+                        type=positive_int,
+                        default=200,
+                        help="The max # of iterations when optimizing images.")
 
     parser.add_argument("--momentum",
                         type=non_negative_float,
@@ -62,32 +76,6 @@ def parse_args():
                         help=("Use Nesterov accelerated gradients if True."))
 
     return parser.parse_args()
-
-# def construct_model_with_shared_inputs(model):
-#     '''
-#     Returns an equivalent of <model>, with the uint8 inputs removed,
-#     and the RescaleImage parents replaced with float32 shared variables.
-#     '''
-
-#     assert_equal(len(model.output_nodes), 1)
-#     assert_equal(len(model.input_nodes), 1)
-
-#     def get_layers(output_node):
-#         result = [output_node]
-
-#         while not isinstance(result[-1], InputNode):
-#             node = result[-1]
-#             assert_equal(len(node.inputs), 1)
-#             result.append(node.inputs[0])
-
-#         return reverse(result)
-
-#     # chop off first layer
-#     original_layers = get_layers(mode.output_nodes[0])[1:]
-#     assert_is_instance(original_layers[0], RescaleImage)
-
-#     new_layers = []
-#     new_layers =
 
 
 def main():
@@ -145,12 +133,7 @@ def main():
     loss_symbol = cross_entropy.output_symbol.mean()
     output_node.output_format.check(output_node.output_symbol)
 
-
     gradient_symbol = theano.gradient.grad(loss_symbol, shared_input_float)
-
-
-    # jacobian = theano.gradient.jacobian(output_symbol.flatten(),
-    #                                     wrt=shared_input_float)
 
     def get_optimized_images(float_image):
 
@@ -172,10 +155,11 @@ def main():
                       parameter_updaters=[param_updater],
                       input_iterator=DummyIterator(),
                       monitors=[],
-                      epoch_callbacks=[LimitsNumEpochs(1000)])
+                      epoch_callbacks=[LimitsNumEpochs(args.max_iterations)])
 
             shared_input_float.set_value(float_image)
-            shared_label.set_value(numpy.asarray([i], dtype=shared_label.dtype))
+            shared_label.set_value(numpy.asarray([i],
+                                                 dtype=shared_label.dtype))
             sgd.train()
 
             optimized_images[i, ...] = shared_input_float.get_value()[0, ...]
@@ -191,11 +175,7 @@ def main():
         for c in range(1, 6):
             optimized_image_axes.append(figure.add_subplot(3,
                                                            5,
-                                                           (r - 1)*5 + c))
-
-    # figure, all_axes = pyplot.subplots(3, 5, figsize=(10, 4))
-    # image_axes = all_axes[0, 0]
-    # optimized_image_axes = all_axes[1:, :].flatten()
+                                                           (r - 1) * 5 + c))
 
     mnist_iterator = mnist_train.iterator(iterator_type='sequential',
                                           batch_size=1)
