@@ -68,6 +68,12 @@ def parse_args():
         assert_equal(os.path.splitext(abs_path)[1], "")
         return arg
 
+    def dropout_include_rate(arg):
+        result = float(arg)
+        assert_greater(arg, 0.0)
+        assert_less_equal(arg, 1.0)
+        return result
+
     parser.add_argument("--output_prefix",
                         type=legit_prefix,
                         required=True,
@@ -99,6 +105,19 @@ def parse_args():
                         type=non_negative_int,
                         default=100,
                         help="batch size")
+
+    parser.add_argument("--dropout-include-rates",
+                        default=(1.0, 1.0),
+                        type=dropout_include_rate,
+                        nargs=2,
+                        help=("The dropout include rates for the outputs of "
+                              "the first two layers. Must be in the range "
+                              "(0.0, 1.0]. If 1.0, the Dropout node will "
+                              "simply be omitted. For no dropout, use "
+                              "1.0 1.0 (this is the default). Make sure to "
+                              "lower the learning rate when using dropout. "
+                              "I'd suggest a learning rate of 0.001 for "
+                              "dropout-include-rates of 0.5 0.5."))
 
     return parser.parse_args()
 
@@ -182,6 +201,7 @@ def build_fc_classifier(input_node,
         if layer_index != (len(sizes) - 1):
             hidden_node = ReLU(hidden_node)
             include_probability = dropout_include_probabilities[layer_index]
+
             if include_probability != 1.0:
                 hidden_node = Dropout(hidden_node,
                                       include_probability,
@@ -322,8 +342,7 @@ def main():
     affine_nodes, output_node = build_fc_classifier(image_node,
                                                     sizes,
                                                     sparse_init_counts,
-                                                    # [.5] * (len(sizes) - 1),
-                                                    [1.0] * (len(sizes) - 1),
+                                                    args.dropout_include_rates,
                                                     rng,
                                                     theano_rng)
 

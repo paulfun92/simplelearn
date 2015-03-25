@@ -81,10 +81,16 @@ Todo once test_conv is working:
 * re-enable pad sizes bigger than window sizes; see what happens.
 * enable pad keywords like 'valid', 'full', and 'same_size'
 
+Todo today:
+* Debug getting dropout to converge
+** See if dropout at just a single layer works.
+** See if dropout with include_rate = 1.0 works (i.e. don't special-case 1.0 and use it as an excuse to not instantiate Dropout).
+
 
 Debugging pickling Dropout:
 * Not even dill can pickle it.
 * can't pickle regardless of device=cpu or gpu
+* Saving just the SerializeableModel and the validation_loss_logger works fine. Saving the trainer doesn't.
 * seems to pickle fine in isolation in ipython (successfully pickled RandomState, RandomStreams, and Dropout).
 * Theory, debunked: It's most likely a problem with RandomStreams that only gets triggered after it's been called.
 ** Tried calling function compiled from a simple InputNode-Dropout chain, then pickling the Dropout and the RandomStreams. Both worked fine.
