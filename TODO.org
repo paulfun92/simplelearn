@@ -43,12 +43,12 @@
 *** DONE Try optimizing the cross-entropy of softmax with appropriate one-hot, rather than optimizing one dimension of the softmax.
 **** Yeah that looks to be making better progress
 *** Try using StopOnStagnation rather than a fixed number of iterations
-* write sliding test_pool2d and test_conv2d
+* DONE write sliding test_pool2d and test_conv2d
 ** DONE Finish refactoring test_pool2d, confirm it works
 ** DONE See if you can remove max_pad arg from apply_subwindow_func, and supply just padded_image rather than max_padded_image, where padded_image is padded by exactly actual_pad, which is now renamed "pads".
 ** Write test_conv2d
 *** debug: I think it can't deal with pad > window_size. Try reducing max pad to window_size - 1.
-* Write LinearScale(EpochCallback)
+* DONE Write LinearScale(EpochCallback)
 ** __init__(self, shared_var, final_value, num_epochs)
 * Write examples/mnist_fully_connected.py
 ** DONE We need to make a subclass of Dataset for MNIST, so it knows how to (not) serialize itself. This can be general; call it HdfDataset.
@@ -80,3 +80,61 @@ Debugging test_conv:
 Todo once test_conv is working:
 * re-enable pad sizes bigger than window sizes; see what happens.
 * enable pad keywords like 'valid', 'full', and 'same_size'
+
+
+Debugging pickling Dropout:
+* Not even dill can pickle it.
+* can't pickle regardless of device=cpu or gpu
+* seems to pickle fine in isolation in ipython (successfully pickled RandomState, RandomStreams, and Dropout).
+* Theory, debunked: It's most likely a problem with RandomStreams that only gets triggered after it's been called.
+** Tried calling function compiled from a simple InputNode-Dropout chain, then pickling the Dropout and the RandomStreams. Both worked fine.
+* Theory: It's most likely a problem with Dropout that only gets triggered after a bprop through a random mask.
+
+Thoughts on serialization:
+* Either the compiled function is the problem, or the Theano graph is the problem.
+** If it's just the function, no big deal at all. Solve in Sgd.__getstate__, __setstate__.
+** If the (RandomStream-created) nodes need to not be saved, now we have a problem.
+*** We need to rebuild DAG upon deserialization. So save just the Nodes, not their theano symbols.
+*** This is doable if all objects only store links to Nodes, not theano symbols, and the DAG is serialized and deserialized with strict bottom-up ordering.
+**** SgdUpdater now contains references not to params, but to the Nodes that contain them, and a means to access them from the node. So you'd need to specify both node (e.g. Linear) and field name (e.g. 'params'), so you can say self.param_to_update = node.__dict__[param_field_name]
+*** Shared variables need to be owned uniquely, so we know whose job it is to serialize/deserialize it.
+
+
+
+* Nodes need to have, in their member variables, the information needed to rebuild themselves from serialization.
+* SgdParameterUpdater needs to be able to create its own gradient
+** Rewrite it in terms of nodes. We need a GradientNode that takes an X scalar node (axes=(), size=())  and an Y node, and outputs dX/dY, inheriting Y's axes and shape as the output.
+** SgdParameterUpdater contains as many Nodes as it has outputs: 
+* Ultimately, the cost function should be an all-encompassing Node that takes input and targets, and outputs a scalar (or batch of scalars).
+* For the moment, either Dropout is the problem, or some Theano state from the compiled function is. We can refuse to serialize the function, instead re-compiling it upon deserialization.
+** Override Sgd.__getstate__() to not save self._update_function, and Sgd.__setstate__() to re-compile update function
+** If that doesn't work, Node may need:
+*** an abstract build_theano_nodes() method that re-builds the theano graph from input nodes' output_symbols, and returns the node's output_symbol.
+*** __getstate__ that leaves out the Theano nodes (saves self._output_symbol as "left unserialized").
+*** __setstate__ that leaves out the Theano nodes (asserts that self._output_symbol is "left unserialized").
+*** output_symbol is now a property that returns self._output_symbol, unless it's "left unserialized", in which case it constructs it using _build_theano_nodes() if necessary.
+
+Simpler band-aid solution to just save models:
+* Pair each model-creating function with a model-saving and model-loading function.
+* Or, create a Model class with abstract methods:
+** __init__(): the model-creating func
+** __getstate__(): the model-saving func
+** __setstate__(): the model-loading func
+* Abandons re-start-ability (doesn't save training updater state)
+* Scales linearly with types of models, brittle to model changes. The serializeable Nodes approach above scales linearly with # of nodes, and can in theory use one unit test for all Nodes' serialization/unserialization.
+
+In-between: serializeable nodes, but forget about serializeable updates for now (you might get that for free)
+* Implement not saving Sgd._update_function.
+** See if that fixes things.
+* If not, implement serializable Nodes
+** See if that fixes things.
+* Step-by-step:
+** Temporarily disable Dropout in mnist demo, confirm that serialization works again.
+** checkout master, create new branch serializeable_nodes
+** Implement not-saving _update_function in Sgd.
+** Commit serializeable_nodes.
+** switch back to mnist_demo branch, confirm still working, re-enable Dropout, confirm not working anymore.
+** Merge serializeable_nodes into mnist_demo. See if that fixes serializeability.
+** If not, switch back to serializeable_nodes, implement serializeable nodes
+** Commit serializeable_nodes
+** switch back to mnist_demo branch, merge serializeable_nodes into mnist_demo, se if that fixes serializeability.

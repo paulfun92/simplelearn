@@ -13,6 +13,7 @@ import os
 import copy
 import warnings
 import cPickle
+import dill
 from collections import Sequence, OrderedDict
 import numpy
 import theano
@@ -161,30 +162,15 @@ class PicklesOnEpoch(EpochCallback):
 
             filepath = os.path.join(path, filename)
 
-        pickle_file = file(filepath, 'wb')
+        with file(filepath, 'wb') as pickle_file:
 
-        cPickle.dump(self._objects_to_pickle,
-                     pickle_file,
-                     protocol=cPickle.HIGHEST_PROTOCOL)
+            cPickle.dump(self._objects_to_pickle,
+                         pickle_file,
+                         protocol=cPickle.HIGHEST_PROTOCOL)
 
-        # for obj in self.objects:
-        #     try:
-        #         cPickle.dump(obj,
-        #                      pickle_file,
-        #                      protocol=cPickle.HIGHEST_PROTOCOL)
-        #     except cPickle.PicklingError, pe:
-        #         print("error pickling %s" % str(obj))
-        #         raise
-
-        # for obj in self.objects:
-        #     try:
-        #         cPickle.dump(obj,
-        #                      pickle_file,
-        #                      protocol=cPickle.HIGHEST_PROTOCOL)
-        #     except cPickle.PicklingError, pe:
-        #         print("error pickling %s" % str(obj))
-        #         raise
-
+            # dill.dump(self._objects_to_pickle,
+            #           pickle_file,
+            #           protocol=cPickle.HIGHEST_PROTOCOL)
 
         self._num_epochs_seen += 1
 
@@ -997,26 +983,14 @@ class Sgd(object):
         self._parameter_updaters = tuple(parameter_updaters)
         self._monitors = tuple(monitors)
 
-        def compile_update_function():
-            '''
-            Compiles the function that computes the monitored values.
-            '''
+        self._compile_update_function_args={
+            'inputs': inputs,
+            'monitors': self._monitors,
+            'parameter_updaters': self._parameter_updaters,
+            'theano_function_mode': theano_function_mode}
 
-            outputs = []
-            for monitor in monitors:
-                outputs.extend(monitor.monitored_values)
-
-            updates = OrderedDict()
-            for updater in parameter_updaters:
-                assert_is_instance(updater.updates, OrderedDict)
-                updates.update(updater.updates)
-
-            return theano.function(inputs,
-                                   outputs,
-                                   updates=updates,
-                                   mode=theano_function_mode)
-
-        self._update_function = compile_update_function()
+        self._update_function = self._compile_update_function(
+            **self._compile_update_function_args)
 
         repeated_callbacks = frozenset(monitors).intersection(epoch_callbacks)
         assert_equal(len(repeated_callbacks),
@@ -1030,6 +1004,30 @@ class Sgd(object):
         self.epoch_callbacks = tuple(epoch_callbacks)
 
         self._train_called = False
+
+    @staticmethod
+    def _compile_update_function(inputs,
+                                 monitors,
+                                 parameter_updaters,
+                                 theano_function_mode):
+        '''
+        Compiles the function that computes the monitored values.
+        '''
+
+        outputs = []
+        for monitor in monitors:
+            outputs.extend(monitor.monitored_values)
+
+        updates = OrderedDict()
+        for updater in parameter_updaters:
+            assert_is_instance(updater.updates, OrderedDict)
+            updates.update(updater.updates)
+
+        return theano.function(inputs,
+                               outputs,
+                               updates=updates,
+                               mode=theano_function_mode)
+
 
     def train(self):
         '''
@@ -1096,3 +1094,16 @@ class Sgd(object):
                 return
             else:
                 raise
+
+
+    # def __getstate__(self):
+    #     result = dict()
+    #     result.update(self.__dict__)
+    #     result['_update_function'] = "left unserialized"
+    #     return result
+
+    # def __setstate__(self, state):
+    #     self.__dict__.update(state)
+    #     assert_equal(self._update_function, "left unserialized")
+    #     self._update_function = self._compile_update_function(
+    #         **self._compile_update_function_args)

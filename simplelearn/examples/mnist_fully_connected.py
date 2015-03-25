@@ -4,6 +4,7 @@ import os
 import argparse
 import numpy
 import theano
+from theano.tensor.shared_randomstreams import RandomStreams
 from collections import OrderedDict
 from nose.tools import (assert_true,
                         assert_is_instance,
@@ -15,6 +16,7 @@ from simplelearn.nodes import (Node,
                                AffineTransform,
                                FormatNode,
                                ReLU,
+                               Dropout,
                                CrossEntropy,
                                Misclassification,
                                Softmax,
@@ -105,7 +107,8 @@ def build_fc_classifier(input_node,
                         sizes,
                         sparse_init_counts,
                         dropout_include_probabilities,
-                        rng):
+                        rng,
+                        theano_rng):
     '''
     Builds a stack of fully-connected layers followed by a Softmax.
 
@@ -144,9 +147,14 @@ def build_fc_classifier(input_node,
       A Sequence of N-1 floats, where N := len(sizes)
       The dropout include probabilities for the outputs of each of the layers,
       except for the final one.
+      If any of these probabilities is 1.0, the corresponding Dropout node
+      will be omitted.
 
     rng: numpy.random.RandomState
-      The RandomState to draw random initial weights from.
+      The RandomState to draw initial weights from.
+
+    theano_rng: theano.tensor.shared_randomstreams.RandomStreams
+      The RandomStreams to draw dropout masks from.
     '''
     assert_is_instance(input_node, Node)
     assert_equal(input_node.output_format.dtype,
@@ -173,14 +181,15 @@ def build_fc_classifier(input_node,
         affine_nodes.append(hidden_node)
         if layer_index != (len(sizes) - 1):
             hidden_node = ReLU(hidden_node)
+            include_probability = dropout_include_probabilities[layer_index]
+            if include_probability != 1.0:
+                hidden_node = Dropout(hidden_node,
+                                      include_probability,
+                                      theano_rng)
 
     output_node = Softmax(hidden_node, DenseFormat(axes=('b', 'f'),
                                                    shape=(-1, sizes[-1]),
                                                    dtype=None))
-
-    # DEBUG
-    # print_softmax_op = theano.printing.Print("softmax: ")
-    # output_node.output_symbol = print_softmax_op(output_node.output_symbol)
 
     def init_sparse_bias(shared_variable, num_nonzeros, rng):
         '''
@@ -298,6 +307,7 @@ def main():
 
     sizes = [500, 500, 10]
     sparse_init_counts = [15, 15]
+    assert_equal(len(sparse_init_counts), len(sizes) - 1)
 
     assert_equal(sizes[-1], 10)
 
@@ -307,12 +317,15 @@ def main():
     image_node = RescaleImage(image_uint8_node)
 
     rng = numpy.random.RandomState(34523)
+    theano_rng = RandomStreams(23845)
 
     affine_nodes, output_node = build_fc_classifier(image_node,
                                                     sizes,
                                                     sparse_init_counts,
-                                                    [1.0] * len(sparse_init_counts),
-                                                    rng)
+                                                    # [.5] * (len(sizes) - 1),
+                                                    [1.0] * (len(sizes) - 1),
+                                                    rng,
+                                                    theano_rng)
 
     loss_node = CrossEntropy(output_node, label_node)
     loss_sum = loss_node.output_symbol.mean()
@@ -413,9 +426,18 @@ def main():
                   epoch_callbacks=[])
 
     stuff_to_pickle = OrderedDict(
-        (('trainer', trainer),
-         ('validation_loss_logger', validation_loss_logger),
-         ('model', model)))
+        (('model', model),
+         ('validation_loss_logger', validation_loss_logger)))
+
+    # failed
+    # stuff_to_pickle = OrderedDict(
+    #     (('trainer', trainer),))
+
+    # failed
+    # stuff_to_pickle = OrderedDict(
+    #     (('trainer', trainer),
+    #      ('validation_loss_logger', validation_loss_logger),
+    #      ('model', model)))
 
     trainer.epoch_callbacks = [PicklesOnEpoch(stuff_to_pickle,
                                               make_output_filename(args),
