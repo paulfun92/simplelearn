@@ -25,6 +25,7 @@ from nose.tools import (assert_true,
                         assert_is_instance,
                         assert_is_not,
                         assert_in)
+from simplelearn.utils import (assert_integer, assert_floating)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip, check_is_subdtype
 from simplelearn.formats import Format
@@ -263,9 +264,56 @@ class ValidationCallback(EpochCallback):
             monitor.on_epoch()
 
 
+class LinearlyInterpolatesOverEpochs(EpochCallback):
+    '''
+    Linearly interpolates a theano shared variable over epochs.
+    '''
+
+    def __init__(self,
+                 shared_value,
+                 final_value,
+                 epochs_to_saturation):
+        assert_is_instance(shared_value,
+                           theano.tensor.sharedvar.SharedVariable)
+        assert_floating(shared_value)
+        assert_floating(final_value)
+        assert_equal(final_value.shape,
+                     shared_value.get_value().shape)
+        assert_integer(epochs_to_saturation)
+        assert_greater(epochs_to_saturation, 0)
+
+        self.shared_value = shared_value
+        self._final_value = final_value
+        self._epochs_to_saturation = epochs_to_saturation
+
+        self._num_epochs_seen = None
+        self._initial_value = None
+
+    def on_start_training(self):
+        self._num_epochs_seen = 0
+        self._initial_value = self.shared_value.get_value()
+
+    def on_epoch(self):
+        assert_greater_equal(self._num_epochs_seen, 0)
+        self._num_epochs_seen += 1
+
+        cast = numpy.cast[self.shared_value.dtype]
+
+        # interpolation parameter
+        end_weight = cast(min(
+            1.0,
+            float(self._num_epochs_seen) / self._epochs_to_saturation))
+
+        start_weight = cast(1.0) - end_weight
+
+        self.shared_value.set_value(
+            start_weight * self._initial_value +
+            end_weight * self._final_value)
+
+
 class LinearlyScalesOverEpochs(EpochCallback):
     '''
-    An epoch callback that linearly scales a theano shared variable over time.
+    Linearly scales a theano shared variable over epochs.
 
     Parameters
     ----------
@@ -275,32 +323,39 @@ class LinearlyScalesOverEpochs(EpochCallback):
       to final_scale over <epochs_to_saturation> epochs.
 
     final_scale: float
-      Final value of S.
+      Final value of S. Mutually exclusive with final_value.
+
+    final_value: numpy.ndarray
+      A numpy array of the same shape as shared_value.get_value().shape.
+      Mutually exclusive with final_scale.
 
     epochs_to_saturation: int
       self._scale should decay to final_value after this many epochs.
     '''
 
-    def __init__(self, shared_value, final_scale, epochs_to_saturation):
+    def __init__(self,
+                 shared_value,
+                 final_scale,
+                 epochs_to_saturation):
         assert_is_instance(shared_value,
                            theano.tensor.sharedvar.SharedVariable)
-
-        check_is_subdtype(final_scale, "final_scale", numpy.floating)
-
-        check_is_subdtype(epochs_to_saturation,
-                          "epochs_to_saturation",
-                          numpy.integer)
+        assert_floating(final_scale)
+        assert_greater_equal(final_scale, 0.0)
+        assert_less_equal(final_scale, 1.0)
+        assert_integer(epochs_to_saturation)
+        assert_greater(epochs_to_saturation, 0)
 
         self.shared_value = shared_value
-        self._initial_value = self.shared_value.get_value()
-
         self._final_scale = final_scale
         self._epochs_to_saturation = epochs_to_saturation
 
+        # initialized in on_start_training()
+        self._initial_value = None
         self._num_epochs_seen = None
 
     def on_start_training(self):
         self._num_epochs_seen = 0
+        self._initial_value = self.shared_value.get_value()
 
     def on_epoch(self):
         assert_greater_equal(self._num_epochs_seen, 0)

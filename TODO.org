@@ -57,7 +57,7 @@
 *** I fixed it by replacing cost=cross_entropies.sum() with cost=cross_entropies.mean()
 ** DONE Write save-on-best callback, put it in mnist demo
 ** DONE Save best model trained on MNIST
-** Add LinearScale to learning rate and momentum to the demo.
+** The Pylearn2's mlp demo uses a momentum scale-er that linearly interpolates between two momentum values, rather than linearly shrinks a scale value. Check that the learning rate scale-er does the same, then change LinearlyScalesOverEpochs to do this.
 * Write examples/mnist_conv.py
 * Write data/norb.py
 ** write load_norb_image_file(image_hdf_dataset_batch)
@@ -81,14 +81,16 @@ Todo once test_conv is working:
 * re-enable pad sizes bigger than window sizes; see what happens.
 * enable pad keywords like 'valid', 'full', and 'same_size'
 
-Today:
-* fix visualize_mnist.py to take new save format.
 
 Debugging pickling Dropout:
 * Not even dill can pickle it.
 * can't pickle regardless of device=cpu or gpu
 * Saving just the SerializeableModel and the validation_loss_logger works fine. Saving the trainer doesn't.
-* seems to pickle fine in isolation in ipython (successfully pickled RandomState, RandomStreams, and Dropout).
+* We're able to save models that include dropout nodes just fine, and then deserialize and use them later.
+* RandomState, RandomStreams, and Dropout seem to pickle fine in isolation in ipython.
+* It has to be something in the trainer that's not in the model.
+** Tried not saving the update_function. Didn't help.
+** Maybe it's something in the SgdParamUpdater?
 * Theory, debunked: It's most likely a problem with RandomStreams that only gets triggered after it's been called.
 ** Tried calling function compiled from a simple InputNode-Dropout chain, then pickling the Dropout and the RandomStreams. Both worked fine.
 * Theory: It's most likely a problem with Dropout that only gets triggered after a bprop through a random mask.

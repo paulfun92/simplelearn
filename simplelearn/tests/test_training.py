@@ -3,10 +3,11 @@ from numpy.testing import assert_allclose
 import theano
 import theano.tensor as T
 from nose.tools import assert_equal, assert_raises_regexp
-
+from simplelearn.utils import safe_izip
 from simplelearn.training import (StopsOnStagnation,
                                   StopTraining,
                                   LimitsNumEpochs,
+                                  LinearlyInterpolatesOverEpochs,
                                   LinearlyScalesOverEpochs)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
@@ -120,4 +121,41 @@ def test_linearly_scales_over_epochs():
     for expected_value in expected_values:
         assert_allclose(shared_variable.get_value(),
                         expected_value)
+        callback.on_epoch()
+
+
+def test_linearly_interpolates_over_epochs():
+    rng = numpy.random.RandomState(23452)
+    dtype = numpy.dtype('float32')
+    cast = numpy.cast[dtype]
+    shape = (2, 3)
+
+    initial_value = cast(rng.uniform(size=shape))
+    final_value = cast(rng.uniform(size=shape))
+    epochs_to_saturation = 23
+
+    shared_variable = theano.shared(numpy.zeros(shape, dtype=dtype))
+
+    callback = LinearlyInterpolatesOverEpochs(shared_variable,
+                                              final_value,
+                                              epochs_to_saturation)
+    shared_variable.set_value(initial_value)
+
+    callback.on_start_training()
+    assert_allclose(shared_variable.get_value(), initial_value)
+
+    initial_weights = numpy.concatenate(
+        (numpy.linspace(1.0, 0.0, epochs_to_saturation + 1),
+         numpy.zeros(7)))
+
+    final_weights = 1.0 - initial_weights
+
+    expected_values = [wi * initial_value + wf * final_value
+                       for wi, wf
+                       in safe_izip(initial_weights, final_weights)]
+
+    for expected_value in expected_values:
+        assert_allclose(shared_variable.get_value(),
+                        expected_value,
+                        atol=1e-06)
         callback.on_epoch()

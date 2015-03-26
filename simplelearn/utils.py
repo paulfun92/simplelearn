@@ -57,11 +57,21 @@ def flatten(iterable):
             yield element
 
 
-def assert_is_integer(arg):
+def assert_integer(arg):
     '''
-    Checks that arg is a scalar of integral type.
+    Checks that arg is of integral type.
+
+    Parameters
+    ----------
+    arg: scalar, or any type with a 'dtype' member (e.g. numpy.ndarray).
     '''
-    assert_true(numpy.issubdtype(type(arg), numpy.integer),
+
+    if hasattr(arg, 'dtype'):
+        dtype = arg.dtype
+    else:
+        dtype = type(arg)
+
+    assert_true(numpy.issubdtype(dtype, numpy.integer),
                 "%s is not an integer" % type(arg))
 
 
@@ -87,12 +97,21 @@ def assert_all_integers(arg, size=None):
                     (index, element, type(element)))
 
 
-def assert_is_floating(arg):
+def assert_floating(arg):
     '''
     Checks that arg is a scalar of floating-point type.
+
+    Parameters
+    ----------
+    arg: scalar, or any type with a 'dtype' member (e.g. numpy.ndarray).
     '''
-    assert_true(numpy.issubdtype(type(arg), numpy.floating),
-                "%s is not of a floating-point type." % type(arg))
+    if hasattr(arg, 'dtype'):
+        dtype = arg.dtype
+    else:
+        dtype = type(arg)
+
+    assert_true(numpy.issubdtype(dtype, numpy.floating),
+                "%s is not of a floating-point type." % dtype)
 
 
 def assert_all_floating(arg, size=None):

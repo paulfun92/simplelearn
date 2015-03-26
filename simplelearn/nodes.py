@@ -19,7 +19,7 @@ from nose.tools import (assert_true,
                         assert_is_instance,
                         assert_in)
 from simplelearn.utils import (safe_izip,
-                               assert_is_integer,
+                               assert_integer,
                                assert_all_integers,
                                assert_all_greater,
                                assert_all_greater_equal)

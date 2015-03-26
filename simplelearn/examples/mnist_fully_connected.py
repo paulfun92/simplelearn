@@ -68,7 +68,7 @@ def parse_args():
         assert_equal(os.path.splitext(abs_path)[1], "")
         return arg
 
-    def dropout_include_rate(arg):
+    def positive_0_to_1(arg):
         result = float(arg)
         assert_greater(arg, 0.0)
         assert_less_equal(arg, 1.0)
@@ -107,8 +107,8 @@ def parse_args():
                         help="batch size")
 
     parser.add_argument("--dropout-include-rates",
-                        default=(1.0, 1.0),
-                        type=dropout_include_rate,
+                        default=(1.0, 1.0),  # i.e. no dropout
+                        type=positive_0_to_1,
                         nargs=2,
                         help=("The dropout include rates for the outputs of "
                               "the first two layers. Must be in the range "
@@ -118,6 +118,17 @@ def parse_args():
                               "lower the learning rate when using dropout. "
                               "I'd suggest a learning rate of 0.001 for "
                               "dropout-include-rates of 0.5 0.5."))
+
+    parser.add_argument("--momentum_final_value",
+                        type=positive_0_to_1,
+                        default=.99,
+                        help="Value for momentum to linearly scale up to.")
+
+    parser.add_argument("--epochs_to_momentum_saturation",
+                        default=10,
+                        type=positive_int,
+                        help=("# of epochs until momentum linearly scales up "
+                              "to --momentum_final_value."))
 
     return parser.parse_args()
 
