@@ -277,13 +277,17 @@ class LinearlyInterpolatesOverEpochs(EpochCallback):
                            theano.tensor.sharedvar.SharedVariable)
         assert_floating(shared_value)
         assert_floating(final_value)
-        assert_equal(final_value.shape,
-                     shared_value.get_value().shape)
+        if not numpy.isscalar(final_value):
+            assert_equal(final_value.shape,
+                         shared_value.get_value().shape)
         assert_integer(epochs_to_saturation)
         assert_greater(epochs_to_saturation, 0)
 
         self.shared_value = shared_value
-        self._final_value = final_value
+
+        cast = numpy.cast[shared_value.dtype]
+        self._final_value = cast(final_value)
+
         self._epochs_to_saturation = epochs_to_saturation
 
         self._num_epochs_seen = None

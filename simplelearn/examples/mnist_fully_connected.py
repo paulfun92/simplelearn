@@ -35,6 +35,7 @@ from simplelearn.training import (SgdParameterUpdater,
                                   Monitor,
                                   AverageMonitor,
                                   LimitsNumEpochs,
+                                  LinearlyInterpolatesOverEpochs,
                                   PicklesOnEpoch,
                                   ValidationCallback,
                                   StopsOnStagnation)
@@ -49,17 +50,22 @@ def parse_args():
 
     def positive_float(arg):
         result = float(arg)
-        assert_greater(arg, 0.0)
+        assert_greater(result, 0.0)
         return result
 
     def non_negative_float(arg):
         result = float(arg)
-        assert_greater_equal(arg, 0.0)
+        assert_greater_equal(result, 0.0)
         return result
 
     def non_negative_int(arg):
         result = int(arg)
-        assert_greater_equal(arg, 0)
+        assert_greater_equal(result, 0)
+        return result
+
+    def positive_int(arg):
+        result = int(arg)
+        assert_greater(result, 0)
         return result
 
     def legit_prefix(arg):
@@ -70,30 +76,33 @@ def parse_args():
 
     def positive_0_to_1(arg):
         result = float(arg)
-        assert_greater(arg, 0.0)
-        assert_less_equal(arg, 1.0)
+        assert_greater(result, 0.0)
+        assert_less_equal(result, 1.0)
         return result
 
-    parser.add_argument("--output_prefix",
+    parser.add_argument("--output-prefix",
                         type=legit_prefix,
                         required=True,
                         help=("Directory and optional prefix of filename to "
                               "save the log to."))
 
-    # These default hyperparameter values are taken from Pylearn2:
-    # In pylearn2/scripts/tutorials/multilayer_perceptron/:
+    # All but one of the default hyperparameter values below are taken from
+    # Pylearn2, in pylearn2/scripts/tutorials/multilayer_perceptron/:
     #   multilayer_perceptron.ipynb
     #   mlp_tutorial_part_3.yaml
+    #
+    # The one exception is final-momentum, which was changed from .99 to
+    # .5. (.99 led to divergence, which is weird).
 
     parser.add_argument("--learning-rate",
                         type=positive_float,
                         default=0.01,
                         help=("Learning rate."))
 
-    parser.add_argument("--momentum",
+    parser.add_argument("--initial-momentum",
                         type=non_negative_float,
                         default=0.5,
-                        help=("Momentum."))
+                        help=("Initial momentum."))
 
     parser.add_argument("--nesterov",
                         default=False,
@@ -101,7 +110,7 @@ def parse_args():
                         help=("Use Nesterov accelerated gradients (default: "
                               "False)."))
 
-    parser.add_argument("--batch_size",
+    parser.add_argument("--batch-size",
                         type=non_negative_int,
                         default=100,
                         help="batch size")
@@ -119,12 +128,12 @@ def parse_args():
                               "I'd suggest a learning rate of 0.001 for "
                               "dropout-include-rates of 0.5 0.5."))
 
-    parser.add_argument("--momentum_final_value",
+    parser.add_argument("--final-momentum",
                         type=positive_0_to_1,
-                        default=.99,
+                        default=.5,  # .99 used in pylearn2 demo
                         help="Value for momentum to linearly scale up to.")
 
-    parser.add_argument("--epochs_to_momentum_saturation",
+    parser.add_argument("--epochs-to-momentum-saturation",
                         default=10,
                         type=positive_int,
                         help=("# of epochs until momentum linearly scales up "
@@ -367,16 +376,23 @@ def main():
 
     parameters = []
     parameter_updaters = []
+    momentum_updaters = []
     for affine_node in affine_nodes:
         for params in (affine_node.linear_node.params,
                        affine_node.bias_node.params):
             parameters.append(params)
             gradients = theano.gradient.grad(loss_sum, params)
-            parameter_updaters.append(SgdParameterUpdater(params,
-                                                          gradients,
-                                                          args.learning_rate,
-                                                          args.momentum,
-                                                          args.nesterov))
+            parameter_updater = SgdParameterUpdater(params,
+                                                    gradients,
+                                                    args.learning_rate,
+                                                    args.initial_momentum,
+                                                    args.nesterov)
+            parameter_updaters.append(parameter_updater)
+
+            momentum_updaters.append(LinearlyInterpolatesOverEpochs(
+                parameter_updater.momentum,
+                args.final_momentum,
+                args.epochs_to_momentum_saturation))
 
     updates = [updater.updates.values()[0] - updater.updates.keys()[0]
                for updater in parameter_updaters]
@@ -428,7 +444,7 @@ def main():
         return ("%slr-%g_mom-%g_nesterov-%s_bs-%d%s.pkl" %
                 (output_prefix,
                  args.learning_rate,
-                 args.momentum,
+                 args.initial_momentum,
                  args.nesterov,
                  args.batch_size,
                  "_best" if best else ""))
@@ -465,11 +481,12 @@ def main():
     #      ('validation_loss_logger', validation_loss_logger),
     #      ('model', model)))
 
-    trainer.epoch_callbacks = [PicklesOnEpoch(stuff_to_pickle,
-                                              make_output_filename(args),
-                                              overwrite=False),
-                               validation_callback,
-                               LimitsNumEpochs(max_epochs)]
+    trainer.epoch_callbacks = (momentum_updaters +
+                               [PicklesOnEpoch(stuff_to_pickle,
+                                               make_output_filename(args),
+                                               overwrite=False),
+                                validation_callback,
+                                LimitsNumEpochs(max_epochs)])
 
     trainer.train()
 
