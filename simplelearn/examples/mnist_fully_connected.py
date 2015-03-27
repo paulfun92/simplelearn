@@ -139,7 +139,19 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
+    parser.add_argument("--conv",
+                        default=False,
+                        action='store_true',
+                        help=("Use convolutional classifier."))
+
     return parser.parse_args()
+
+
+# def add_dropout_node(input_node, include_rate, theano_rng):
+#     if include_rate == 1.0:
+#         return input_node
+#     else:
+#         return Dropout(input_node, include_rate, theano_rng)
 
 
 def build_fc_classifier(input_node,
@@ -194,6 +206,12 @@ def build_fc_classifier(input_node,
 
     theano_rng: theano.tensor.shared_randomstreams.RandomStreams
       The RandomStreams to draw dropout masks from.
+
+    Returns
+    -------
+    rval: tuple
+      (affine_nodes, output_node), where affine_nodes is a list of the
+      AffineNodes, in order, and output_node is the final node, a Softmax.
     '''
     assert_is_instance(input_node, Node)
     assert_equal(input_node.output_format.dtype,
@@ -221,7 +239,6 @@ def build_fc_classifier(input_node,
         if layer_index != (len(sizes) - 1):
             hidden_node = ReLU(hidden_node)
             include_probability = dropout_include_probabilities[layer_index]
-
             if include_probability != 1.0:
                 hidden_node = Dropout(hidden_node,
                                       include_probability,

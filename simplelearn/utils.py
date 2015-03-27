@@ -136,6 +136,41 @@ def assert_all_floating(arg, size=None):
                     % (index, element, type(element)))
 
 
+def assert_all_equal(arg0, arg1=None):
+    '''
+    Asserts that all elements are equal.
+
+    This can be called with 1 or 2 arguments, as follows:
+
+    1 argument: checks that all elements are equal to each other.
+      assert_all_equal([1, 1, 1])
+
+    2 arguments: checks that all elements of arg0 are equal to
+                 a scalar arg1.
+      assert_all_equal([1, 1, 1], 1)
+
+    2 arguments: checks that all corresponding elements of arg0 and
+                 arg1 are equal to each other.
+      assert_all_equal([1, 2, 3], (1, 2, 3))
+
+
+    Parameters
+    ----------
+    arg0: Sequence
+    arg1: scalar, or Sequence (optional)
+    '''
+    assert_is_instance(arg0, collections.Sequence)
+    if arg1 is None:
+        first_value = arg0[0]
+        for a0 in arg0[1:]:
+            assert_equal(a0, first_value)
+    elif isinstance(arg1, collections.Iterable):
+        for a0, a1 in safe_izip(arg0, arg1):
+            assert_equal(a0, a1)
+    else:
+        for a0 in arg0:
+            assert_equal(a0, arg1)
+
 def assert_all_greater_equal(arg0, arg1):
     '''
     Checks that arg0 is a Iterable of scalars greater than or equal to arg1.

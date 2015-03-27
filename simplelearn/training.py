@@ -944,6 +944,126 @@ class SgdParameterUpdater(object):
                                     (self._velocity, new_velocity)])
 
 
+def limit_param_norms(self, parameter_updater, max_norm, input_axes):
+    '''
+    Modifies the update of an SgdParameterUpdater to limit param L2 norms.
+
+    Parameter norms are computed by summing over the input_axes, provided.
+    These are so named because you typically want to sum over the axes
+    that get dotted with the input to the node (e.g. input_axes=[0] for Linear,
+    input_axes=[1, 2, 3] for Conv2D).
+
+    Parameters
+    ----------
+
+    parameter_updater: simplelearn.training.SgdParameterUpdater
+      The parameter updater whose updates this will modify.
+
+    max_norm: floating-point scalar
+      The maximum L2 norm to be permitted for the parameters.
+
+    input_axes: Sequence
+      A Sequence of ints. The indices to sum over when computing the
+      L2 norm of the updated params.
+    '''
+
+    assert_is_instance(parameter_updater, SgdParameterUpdater)
+
+    assert_floating(max_norm)
+    assert_greater(max_norm, 0.0)
+
+    updates = parameter_updater.updates
+    assert_equal(len(updates), 1)
+
+    params, updated_params = next(parameter_updater.updates.iteritems())
+    assert_integer(output_axis)
+    assert_greater_equal(output_axis, 0)
+    assert_less(output_axis, params.ndim)
+
+    axes_to_sum_over = range(output_axis) + range(output_axis + 1,
+                                                  params.ndim)
+
+    norms = T.sqrt(T.sum(T.sqr(updated_params),
+                         axis=axes_to_sum_over,
+                         keepdims=True))
+    desired_norms = T.clip(norms, 0, self.max_norm)
+
+    broadcast_mask = numpy.zeros(params.len, dtype=bool)
+    broadcast_mask[axes_to_sum_over] = True
+    scales = T.broadcast(desired_norms / (1e-7 + norms),
+                         broadcast_mask)
+
+    updates[params] = updated_params * scales
+    # updates[params] = updated_params * (desired_norms /
+    #         (1e-7 + norms)).dimshuffle(0, 'x', 'x', 'x')
+
+
+# class Conv2DFilterNormLimiter(object):
+#     '''
+#     A parameter updater for Conv2D filters, with filter norm limits.
+#     '''
+
+#     def __init__(self,
+#                  parameter_updater,
+#                  max_filter_norm):
+#         assert_is_instance(parameter_updater, SgdParameterUpdater)
+#         assert_floating(max_filter_norm)
+#         assert_greater(max_filter_norm, 0.0)
+
+#         updates = parameter_updater.updates
+#         assert_equal(len(updates), 1)
+
+#         filt, updated_filt = next(parameter_updater.updates.iteritems())
+#         assert_equal(filt.ndim, 4)
+#         assert_equal(updated_filt.ndim, 4)
+
+#         filter_norms = T.sqrt(T.sum(T.sqr(updated_filt), axis=(1, 2, 3)))
+#         desired_norms = T.clip(filter_norms, 0, self.max_filter_norm)
+#         updates[filt] = updated_filt * (desired_norms /
+#                 (1e-7 + filter_norms)).dimshuffle(0, 'x', 'x', 'x')
+
+#         self._parameter_updater = parameter_updater
+
+
+#     @property
+#     def updates(self):
+#         return self._parameter_updater.updates
+
+
+
+
+# class LinearColumnNormLimiter(object):
+#     '''
+#     A parameter updater for Linear weight matrices, with column norm limits.
+#     '''
+
+#     def __init__(self,
+#                  parameter_updater,
+#                  max_filter_norm):
+#         assert_is_instance(parameter_updater, SgdParameterUpdater)
+#         assert_floating(max_filter_norm)
+#         assert_greater(max_filter_norm, 0.0)
+
+#         updates = parameter_updater.updates
+#         assert_equal(len(updates), 1)
+
+#         params, updated_params = next(parameter_updater.updates.iteritems())
+#         assert_equal(params.ndim, 2)
+#         assert_equal(updated_params.ndim, 2)
+
+#         column_norms = T.sqrt(T.sum(T.sqr(updated_filt), axis=(0)))
+#         desired_norms = T.clip(filter_norms, 0, self.max_filter_norm)
+#         updates[filt] = updated_filt * (desired_norms /
+#                 (1e-7 + filter_norms)).dimshuffle(0, 'x', 'x', 'x')
+
+#         self._parameter_updater = parameter_updater
+
+
+#     @property
+#     def updates(self):
+#         return self._parameter_updater.updates
+
+
 class Sgd(object):
 
     '''

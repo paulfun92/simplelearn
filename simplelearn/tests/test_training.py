@@ -83,6 +83,101 @@ class L2Norm(Node):
 #         assert_equal(index, kink_index + num_epochs)
 #         assert_equal(st.status, 'ok')
 #         assert "didn't decrease for" in st.message
+def test_limit_param_norms():
+    '''
+    A unit test for limit_param_norms().
+
+    Optimizes a simple function f = ||W - x||, with a limit on W's norms.
+
+    Initial value of W is 0. ||W - x|| is bigger than W's max norm. Therefore,
+    we expect the final value of W to be k, scaled to max_norm.
+    '''
+
+    floatX = theano.config.floatX
+
+    def make_single_example_dataset(norm, shape):
+        axes = ('b', ) + tuple(str(i) for i in range(len(shape)))
+        fmt = DenseFormat(axes=axes,
+                          shape=(-1, ) + shape,
+                          dtype=floatX)
+        data = fmt.make_batch(batch_size=1, is_symbolic=False)
+        sum_axes = range(1, len(shape) + 1)
+
+        # Scale all data so that L2 norms = norm
+        norms = (data ** 2.0).sum(axis=sum_axes, keepdims=True).sqrt()
+        scales = norm / (norms + .00001)
+        data *= scales
+
+        return Dataset(tensors=[data],
+                       formats=[fmt],
+                       names=['data'])
+
+    def make_costs_node(input_node, weights):
+        input_node = input_nodes[0]
+
+        diff = (input_node.output_symbol -
+                weights.reshape((1, ) + weights.shape))
+        sum_axes = range(1, len(diff.ndim) + 1)
+
+        l2 = (diff * diff).sum(axis=sum_axes).sqrt()
+
+        return Node([input_node],
+                    l2,
+                    DenseFormat(axes=['b'], shape=[-1], dtype=weights.dtype))
+
+    cast = numpy.cast[floatX]
+
+    dataset_norm = 3.0
+    max_norm = 2.0
+    learning_rate = .01
+
+    for shape in ((2, ), (2, 3, 4)):
+        dataset = make_single_example_dataset(dataset_norm, shape)
+
+        weights = theano.tensor.shared(numpy.zeros((1, ) + shape,
+                                                   dtype=floatX))
+
+        input_nodes = dataset.make_input_nodes()
+        assert_equal(len(input_nodes), 1)
+
+        costs_node = make_costs_node(input_nodes[0], weights)
+        gradients = theano.gradients.grad(costs_node.output_symbol.sum(),
+                                          weights)
+        param_updater = SgdParameterUpdater(parameter=weights,
+                                            gradient=gradients,
+                                            learning_rate=learning_rate,
+                                            momentum=0.0,
+                                            use_nesterov=False)
+
+        input_axes = range(1, len(shape) + 1)
+        limit_param_norms(param_updater, max_norm, input_axes)
+
+        stops_on_stagnation = StopsOnStagnation(max_epochs=10)
+        avg_cost_monitor = AverageMonitor(costs_node.output_symbol,
+                                          costs_node.output_format,
+                                          callbacks=[stops_on_stagnation])
+
+        sgd = Sgd(inputs=input_nodes,
+                  input_iterator=dataset.iterator(iterator_type='sequential',
+                                                  batch_size=1),
+                  parameters=[weights],
+                  parameter_updaters=[param_updater],
+                  monitors=[average_cost_monitor],
+                  epoch_callbacks=[])
+
+        sgd.train()
+
+        weight_norms = (weights.get_value() ** 2.0).sum(input_axes,
+                                                        keepdims=True).sqrt()
+        assert_allclose(weight_norms, max_norm)
+
+        # an optional sanity-check to confirm that the weights are on a
+        # straight line between their initial value (0.0) and the data.
+        normed_weights = weights.get_value() / (weight_norms + .00001)
+        normed_data = dataset.tensors[0] / dataset_norm
+        assert_allclose(normed_weights,
+                        normed_data,
+                        rtol=learning_rate)
 
 
 def test_limits_num_epochs():

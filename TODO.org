@@ -50,7 +50,7 @@
 *** debug: I think it can't deal with pad > window_size. Try reducing max pad to window_size - 1.
 * DONE Write LinearScale(EpochCallback)
 ** __init__(self, shared_var, final_value, num_epochs)
-* Write examples/mnist_fully_connected.py
+* DONE Write examples/mnist_fully_connected.py
 ** DONE We need to make a subclass of Dataset for MNIST, so it knows how to (not) serialize itself. This can be general; call it HdfDataset.
 ** DONE Stack AffineTransform, Softmax, and CrossEntropy into a fully-connected NN, with layer geometries chosen from pylearn2's tutorials.
 ** DONE Debug the weight updates shrinking to zero (or being zero most of the time).
@@ -58,6 +58,7 @@
 ** DONE Write save-on-best callback, put it in mnist demo
 ** DONE Save best model trained on MNIST
 ** The Pylearn2's mlp demo uses a momentum scale-er that linearly interpolates between two momentum values, rather than linearly shrinks a scale value. Check that the learning rate scale-er does the same, then change LinearlyScalesOverEpochs to do this.
+* Write test for limit_param_norms
 * Write examples/mnist_conv.py
 * Write data/norb.py
 ** write load_norb_image_file(image_hdf_dataset_batch)
@@ -80,7 +81,7 @@ Debugging test_conv:
 Todo once test_conv is working:
 * re-enable pad sizes bigger than window sizes; see what happens.
 * enable pad keywords like 'valid', 'full', and 'same_size'
-
+* Rename InputNode to LeafNode, let params be LeafNodes, then replace LinearColumnNormLimiter and Conv2dFilterNormLimiter with a single class, NormLimiter, which now knows which axes to sum along when computing the norm, because the params have labeled axes (sum over all params other than the designated output axis, labeled in the NormLimiter's constructor.
 
 Debugging pickling Dropout:
 * Not even dill can pickle it.
