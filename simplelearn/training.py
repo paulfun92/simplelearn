@@ -17,6 +17,7 @@ import dill
 from collections import Sequence, OrderedDict
 import numpy
 import theano
+import theano.tensor as T
 from nose.tools import (assert_true,
                         assert_equal,
                         assert_less_equal,
@@ -25,7 +26,11 @@ from nose.tools import (assert_true,
                         assert_is_instance,
                         assert_is_not,
                         assert_in)
-from simplelearn.utils import (assert_integer, assert_floating)
+from simplelearn.utils import (assert_integer,
+                               assert_floating,
+                               assert_all_less,
+                               assert_all_greater_equal,
+                               assert_all_integers)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip, check_is_subdtype
 from simplelearn.formats import Format
@@ -433,10 +438,6 @@ class Monitor(EpochCallback):
             assert_is_instance(value, theano.gof.Variable)
             assert_is_instance(fmt, Format)
 
-            if 'b' not in fmt.axes:
-                raise ValueError("format.axes doesn't contain batch axis "
-                                 "'b': %s" % str(fmt.axes))
-
         #
         # Sets members
         #
@@ -744,7 +745,7 @@ class StopsOnStagnation(object):
     (e.g. average loss over the epoch) doesn't decrease for N epochs.
     '''
 
-    def __init__(self, max_epochs, min_proportional_decrease):
+    def __init__(self, max_epochs, min_proportional_decrease=0.0):
         '''
         max_epochs: int
           Wait for max this many epochs for the monitored value to decrease.
@@ -944,7 +945,7 @@ class SgdParameterUpdater(object):
                                     (self._velocity, new_velocity)])
 
 
-def limit_param_norms(self, parameter_updater, max_norm, input_axes):
+def limit_param_norms(parameter_updater, params, max_norm, input_axes):
     '''
     Modifies the update of an SgdParameterUpdater to limit param L2 norms.
 
@@ -969,31 +970,41 @@ def limit_param_norms(self, parameter_updater, max_norm, input_axes):
 
     assert_is_instance(parameter_updater, SgdParameterUpdater)
 
+    assert_in(params, parameter_updater.updates)
+
     assert_floating(max_norm)
     assert_greater(max_norm, 0.0)
 
-    updates = parameter_updater.updates
-    assert_equal(len(updates), 1)
+    assert_greater(len(input_axes), 0)
+    assert_all_integers(input_axes)
+    assert_all_greater_equal(input_axes, 0)
+    assert_all_less(input_axes, params.ndim)
 
-    params, updated_params = next(parameter_updater.updates.iteritems())
-    assert_integer(output_axis)
-    assert_greater_equal(output_axis, 0)
-    assert_less(output_axis, params.ndim)
+    input_axes = numpy.asarray(input_axes)
+    # updates = parameter_updater.updates
+    # assert_equal(len(updates), 1)
 
-    axes_to_sum_over = range(output_axis) + range(output_axis + 1,
-                                                  params.ndim)
+    # params, updated_params = next(parameter_updater.updates.iteritems())
+    updated_params = parameter_updater.updates[params]
+    # assert_integer(output_axis)
+    # assert_greater_equal(output_axis, 0)
+    # assert_less(output_axis, params.ndim)
+
+    # axes_to_sum_over = range(output_axis) + range(output_axis + 1,
+    #                                               params.ndim)
 
     norms = T.sqrt(T.sum(T.sqr(updated_params),
-                         axis=axes_to_sum_over,
+                         axis=input_axes,
                          keepdims=True))
-    desired_norms = T.clip(norms, 0, self.max_norm)
+    desired_norms = T.clip(norms, 0, max_norm)
 
-    broadcast_mask = numpy.zeros(params.len, dtype=bool)
-    broadcast_mask[axes_to_sum_over] = True
-    scales = T.broadcast(desired_norms / (1e-7 + norms),
-                         broadcast_mask)
+    broadcast_mask = numpy.zeros(params.ndim, dtype=bool)
+    pdb.set_trace()
+    broadcast_mask[input_axes] = True
+    scales = T.patternbroadcast(desired_norms / (1e-7 + norms),
+                                broadcast_mask)
 
-    updates[params] = updated_params * scales
+    parameter_updater.updates[params] = updated_params * scales
     # updates[params] = updated_params * (desired_norms /
     #         (1e-7 + norms)).dimshuffle(0, 'x', 'x', 'x')
 

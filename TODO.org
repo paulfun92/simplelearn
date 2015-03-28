@@ -60,6 +60,7 @@
 ** The Pylearn2's mlp demo uses a momentum scale-er that linearly interpolates between two momentum values, rather than linearly shrinks a scale value. Check that the learning rate scale-er does the same, then change LinearlyScalesOverEpochs to do this.
 * Write test for limit_param_norms
 * Write examples/mnist_conv.py
+* Write examples/visualize_mnist_conv.py
 * Write data/norb.py
 ** write load_norb_image_file(image_hdf_dataset_batch)
 ** load_norb_label_file(label_hdf_dataset_batch)

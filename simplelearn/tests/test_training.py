@@ -1,14 +1,28 @@
+'''
+Unit tests for ../training.py
+'''
+
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2015"
+__license__ = "Apache 2.0"
+
 import numpy
-from numpy.testing import assert_allclose
+from numpy.testing import assert_allclose, assert_almost_equal
 import theano
 import theano.tensor as T
-from nose.tools import assert_equal, assert_raises_regexp
+from nose.tools import (assert_equal, assert_raises_regexp, assert_is_instance)
 from simplelearn.utils import safe_izip
 from simplelearn.training import (StopsOnStagnation,
                                   StopTraining,
                                   LimitsNumEpochs,
                                   LinearlyInterpolatesOverEpochs,
-                                  LinearlyScalesOverEpochs)
+                                  LinearlyScalesOverEpochs,
+                                  SgdParameterUpdater,
+                                  limit_param_norms,
+                                  Sgd,
+                                  Monitor,
+                                  AverageMonitor)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
 from simplelearn.data.dataset import Dataset
@@ -16,19 +30,19 @@ from simplelearn.data.dataset import Dataset
 import pdb
 
 
-class L2Norm(Node):
+# class L2Norm(Node):
 
-    def __init__(self, input_node):
-        feature_axis = input_node.output_format.axes.index('f')
-        input_symbol = input_node.output_symbol
+#     def __init__(self, input_node):
+#         feature_axis = input_node.output_format.axes.index('f')
+#         input_symbol = input_node.output_symbol
 
-        output_symbol = \
-            T.sqrt((input_symbol * input_symbol).sum(axis=feature_axis))
+#         output_symbol = \
+#             T.sqrt((input_symbol * input_symbol).sum(axis=feature_axis))
 
-        output_format = DenseFormat(axes=('b'), shape=(-1, ), dtype=None)
-        super(L2Norm, self).__init__(output_symbol,
-                                     output_format,
-                                     input_node)
+#         output_format = DenseFormat(axes=('b'), shape=(-1, ), dtype=None)
+#         super(L2Norm, self).__init__(output_symbol,
+#                                      output_format,
+#                                      input_node)
 
 
 # def test_computes_average_over_epoch():
@@ -83,6 +97,23 @@ class L2Norm(Node):
 #         assert_equal(index, kink_index + num_epochs)
 #         assert_equal(st.status, 'ok')
 #         assert "didn't decrease for" in st.message
+
+class WeightMonitor(Monitor):
+
+    def __init__(self, weights, callbacks):
+        fmt = DenseFormat(axes=[str(d) for d in range(weights.ndim)],
+                          shape=weights.get_value().shape,
+                          dtype=weights.dtype)
+        super(WeightMonitor, self).__init__(weights, fmt, callbacks)
+
+    def _on_batch(self, input_batches, monitored_value_batches):
+        pass
+
+    def _on_epoch(self):
+        assert_equal(len(self.monitored_values), 1)
+        return (self.monitored_values[0], )
+
+
 def test_limit_param_norms():
     '''
     A unit test for limit_param_norms().
@@ -95,16 +126,33 @@ def test_limit_param_norms():
 
     floatX = theano.config.floatX
 
-    def make_single_example_dataset(norm, shape):
+    def make_single_example_dataset(norm, shape, rng):
+        '''
+        Returns a Dataset with a single datum with a given L2 norm.
+
+        Parameters
+        ----------
+        norm: float
+          The L2 norm that the flattened datum should have.
+
+        shape: Sequence
+          The shape of the datum.
+
+        Returns
+        -------
+        rval: Dataset
+        '''
         axes = ('b', ) + tuple(str(i) for i in range(len(shape)))
         fmt = DenseFormat(axes=axes,
                           shape=(-1, ) + shape,
                           dtype=floatX)
         data = fmt.make_batch(batch_size=1, is_symbolic=False)
-        sum_axes = range(1, len(shape) + 1)
+        data[...] = rng.uniform(low=-1.0, high=1.0, size=data.shape)
+
+        sum_axes = tuple(range(1, len(shape) + 1))
 
         # Scale all data so that L2 norms = norm
-        norms = (data ** 2.0).sum(axis=sum_axes, keepdims=True).sqrt()
+        norms = numpy.sqrt((data ** 2.0).sum(axis=sum_axes, keepdims=True))
         scales = norm / (norms + .00001)
         data *= scales
 
@@ -113,74 +161,101 @@ def test_limit_param_norms():
                        names=['data'])
 
     def make_costs_node(input_node, weights):
-        input_node = input_nodes[0]
+        '''
+        Returns a Node that computes the squared distance between input_node
+        and weights.
+        '''
+        assert_is_instance(input_node, Node)
+        flat_shape = (input_node.output_symbol.shape[0], -1)
 
-        diff = (input_node.output_symbol -
-                weights.reshape((1, ) + weights.shape))
-        sum_axes = range(1, len(diff.ndim) + 1)
+        input_vectors = input_node.output_symbol.reshape(flat_shape)
+        weight_vectors = weights.reshape((weights.shape[0], -1))
 
-        l2 = (diff * diff).sum(axis=sum_axes).sqrt()
+        diff = input_vectors - weight_vectors
+        # result = T.sqrt(T.sqr(diff).sum(axis=1))
+        result = T.sqr(diff).sum(axis=1)
+
+        # diff = (input_node.output_symbol -
+        #         weights.reshape((1, ) + weights.shape))
+        # sum_axes = range(1, len(diff.ndim) + 1)
+
+        # result = (diff * diff).sum(axis=sum_axes).sqrt()
 
         return Node([input_node],
-                    l2,
+                    result,
                     DenseFormat(axes=['b'], shape=[-1], dtype=weights.dtype))
 
-    cast = numpy.cast[floatX]
+    # cast = numpy.cast[floatX]
 
-    dataset_norm = 3.0
-    max_norm = 2.0
-    learning_rate = .01
+    dataset_norm = .3
+    max_norm = .2
+    learning_rate = .001
+    rng = numpy.random.RandomState(325)
+
+    def print_cost(monitored_value, fmt):
+        print("avg cost: %s" % monitored_value)
+
+    def print_weight_norm(monitored_values, fmt):
+        assert_equal(len(monitored_values), 1)
+        weights = monitored_values[0]
+        norm = numpy.sqrt((weights.get_value() ** 2.0).sum())
+        print("weights' norm: %s" % norm)
 
     for shape in ((2, ), (2, 3, 4)):
-        dataset = make_single_example_dataset(dataset_norm, shape)
+        dataset = make_single_example_dataset(dataset_norm, shape, rng)
 
-        weights = theano.tensor.shared(numpy.zeros((1, ) + shape,
-                                                   dtype=floatX))
+        weights = theano.shared(numpy.zeros((1, ) + shape, dtype=floatX))
 
         input_nodes = dataset.make_input_nodes()
         assert_equal(len(input_nodes), 1)
 
         costs_node = make_costs_node(input_nodes[0], weights)
-        gradients = theano.gradients.grad(costs_node.output_symbol.sum(),
-                                          weights)
+        gradients = theano.gradient.grad(costs_node.output_symbol.mean(),
+                                         weights)
         param_updater = SgdParameterUpdater(parameter=weights,
                                             gradient=gradients,
                                             learning_rate=learning_rate,
                                             momentum=0.0,
                                             use_nesterov=False)
 
-        input_axes = range(1, len(shape) + 1)
-        limit_param_norms(param_updater, max_norm, input_axes)
+        input_axes = tuple(range(1, len(shape) + 1))
+        limit_param_norms(param_updater, weights, max_norm, input_axes)
 
         stops_on_stagnation = StopsOnStagnation(max_epochs=10)
-        avg_cost_monitor = AverageMonitor(costs_node.output_symbol,
-                                          costs_node.output_format,
-                                          callbacks=[stops_on_stagnation])
+        average_cost_monitor = AverageMonitor(costs_node.output_symbol,
+                                              costs_node.output_format,
+                                              callbacks=[stops_on_stagnation,
+                                                         print_cost])
+        weight_monitor = WeightMonitor(weights, [print_weight_norm])
 
-        sgd = Sgd(inputs=input_nodes,
+        sgd = Sgd(inputs=[node.output_symbol for node in input_nodes],
                   input_iterator=dataset.iterator(iterator_type='sequential',
                                                   batch_size=1),
                   parameters=[weights],
                   parameter_updaters=[param_updater],
-                  monitors=[average_cost_monitor],
+                  monitors=[average_cost_monitor, weight_monitor],
                   epoch_callbacks=[])
-
+        # pdb.set_trace()
         sgd.train()
 
-        weight_norms = (weights.get_value() ** 2.0).sum(input_axes,
-                                                        keepdims=True).sqrt()
-        assert_allclose(weight_norms, max_norm)
+        # weight_norms = numpy.sqrt((weights.get_value() ** 2.0).sum(axis=input_axes,
+        #                                                           keepdims=True))
+        weight_norm = numpy.sqrt((weights.get_value()**2.0).sum())
+        assert_almost_equal(weight_norm, max_norm, decimal=6)
 
         # an optional sanity-check to confirm that the weights are on a
         # straight line between their initial value (0.0) and the data.
-        normed_weights = weights.get_value() / (weight_norms + .00001)
-        normed_data = dataset.tensors[0] / dataset_norm
+        normed_weights = weights.get_value() / weight_norm
+        normed_data = dataset._tensors[0] / dataset_norm
         assert_allclose(normed_weights,
                         normed_data,
-                        rtol=learning_rate)
+                        rtol=learning_rate * 10)
 
 
 def test_limits_num_epochs():
+    '''
+    Unit test for simplelearn.training.LimitsNumEpochs.
+    '''
     max_num_epochs = 5
     limits_num_epochs = LimitsNumEpochs(max_num_epochs)
 
@@ -194,6 +269,9 @@ def test_limits_num_epochs():
 
 
 def test_linearly_scales_over_epochs():
+    '''
+    Unit test for simplelearn.training.LinearlyScalesEpochs.
+    '''
     initial_value = 5.6
     final_scale = .012
     epochs_to_saturation = 23
@@ -220,6 +298,9 @@ def test_linearly_scales_over_epochs():
 
 
 def test_linearly_interpolates_over_epochs():
+    '''
+    Unit test for simplelearn.training.LinearlyInterpolatesOverEpochs.
+    '''
     rng = numpy.random.RandomState(23452)
     dtype = numpy.dtype('float32')
     cast = numpy.cast[dtype]
