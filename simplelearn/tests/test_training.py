@@ -172,20 +172,11 @@ def test_limit_param_norms():
         weight_vectors = weights.reshape((weights.shape[0], -1))
 
         diff = input_vectors - weight_vectors
-        # result = T.sqrt(T.sqr(diff).sum(axis=1))
-        result = T.sqr(diff).sum(axis=1)
-
-        # diff = (input_node.output_symbol -
-        #         weights.reshape((1, ) + weights.shape))
-        # sum_axes = range(1, len(diff.ndim) + 1)
-
-        # result = (diff * diff).sum(axis=sum_axes).sqrt()
+        costs = T.sqr(diff).sum(axis=1)
 
         return Node([input_node],
-                    result,
+                    costs,
                     DenseFormat(axes=['b'], shape=[-1], dtype=weights.dtype))
-
-    # cast = numpy.cast[floatX]
 
     dataset_norm = .3
     max_norm = .2
@@ -224,22 +215,21 @@ def test_limit_param_norms():
         stops_on_stagnation = StopsOnStagnation(max_epochs=10)
         average_cost_monitor = AverageMonitor(costs_node.output_symbol,
                                               costs_node.output_format,
-                                              callbacks=[stops_on_stagnation,
-                                                         print_cost])
-        weight_monitor = WeightMonitor(weights, [print_weight_norm])
+                                              callbacks=[stops_on_stagnation])
+                                              # callbacks=[stops_on_stagnation,
+                                              #            print_cost])
+        # weight_monitor = WeightMonitor(weights, [print_weight_norm])
 
         sgd = Sgd(inputs=[node.output_symbol for node in input_nodes],
                   input_iterator=dataset.iterator(iterator_type='sequential',
                                                   batch_size=1),
                   parameters=[weights],
                   parameter_updaters=[param_updater],
-                  monitors=[average_cost_monitor, weight_monitor],
+                  monitors=[average_cost_monitor],
+                  # monitors=[average_cost_monitor, weight_monitor],
                   epoch_callbacks=[])
-        # pdb.set_trace()
         sgd.train()
 
-        # weight_norms = numpy.sqrt((weights.get_value() ** 2.0).sum(axis=input_axes,
-        #                                                           keepdims=True))
         weight_norm = numpy.sqrt((weights.get_value()**2.0).sum())
         assert_almost_equal(weight_norm, max_norm, decimal=6)
 
