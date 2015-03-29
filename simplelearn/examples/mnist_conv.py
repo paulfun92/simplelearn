@@ -119,11 +119,11 @@ def parse_args():
                         default=0.5,
                         help=("Initial momentum."))
 
-    parser.add_argument("--nesterov",
-                        default=False,
+    parser.add_argument("--no-nesterov",
+                        default=False,  # True used in pylearn2 demo
                         action="store_true",
-                        help=("Use Nesterov accelerated gradients (default: "
-                              "False)."))
+                        help=("Don't use Nesterov accelerated gradients "
+                              "(default: False)."))
 
     parser.add_argument("--batch-size",
                         type=non_negative_int,
@@ -423,7 +423,7 @@ def main():
                                                       gradient,
                                                       args.learning_rate,
                                                       args.initial_momentum,
-                                                      args.nesterov))
+                                                      not args.no_nesterov))
         momentum_updaters.append(LinearlyInterpolatesOverEpochs(
             parameter_updaters[-1].momentum,
             args.final_momentum,
@@ -519,7 +519,7 @@ def main():
                 (output_prefix,
                  args.learning_rate,
                  args.initial_momentum,
-                 args.nesterov,
+                 not args.no_nesterov,
                  args.batch_size,
                  "_best" if best else ""))
 
