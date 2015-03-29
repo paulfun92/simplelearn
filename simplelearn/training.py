@@ -13,7 +13,6 @@ import os
 import copy
 import warnings
 import cPickle
-import dill
 from collections import Sequence, OrderedDict
 import numpy
 import theano
