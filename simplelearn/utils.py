@@ -75,26 +75,42 @@ def assert_integer(arg):
                 "%s is not an integer" % type(arg))
 
 
-def assert_all_integers(arg, size=None):
+def assert_all_integers(arg):
     '''
     Checks that arg is an Iterable of integral-typed scalars.
 
     Parameters
     ----------
-    args: Sequence
+    arg: Sequence
 
     size: int
       Optional. If specified, this checks that len(arg) == size.
     '''
-    if size is not None:
-        assert_equal(len(arg), size)
-
     assert_is_instance(arg, collections.Iterable)
 
-    for element, index in enumerate(arg):
+    for index, element in enumerate(arg):
         assert_true(numpy.issubdtype(type(element), numpy.integer),
                     "Element %d (%s) is not an integer, but a %s." %
                     (index, element, type(element)))
+
+
+def assert_all_is_instance(arg, expected_type):
+    '''
+    Checks that arg is an Iterable of integral-typed scalars.
+
+    Parameters
+    ----------
+    arg: Sequence
+
+    expected_type: type
+      The type that all elements of arg should be an instance of.
+    '''
+    assert_is_instance(arg, collections.Iterable)
+
+    for index, element in enumerate(arg):
+        assert_is_instance(element, expected_type,
+                           "Element %d (%s) is not an integer, but a %s." %
+                           (index, element, type(element)))
 
 
 def assert_floating(arg):

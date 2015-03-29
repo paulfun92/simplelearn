@@ -15,12 +15,14 @@ import theano
 from theano.tensor import Rebroadcast
 from nose.tools import (assert_true,
                         assert_equal,
+                        assert_greater,
                         assert_greater_equal,
                         assert_is_instance,
                         assert_in)
 from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_all_integers,
+                               assert_all_is_instance,
                                assert_all_greater,
                                assert_all_greater_equal)
 from simplelearn.formats import Format, DenseFormat
@@ -370,11 +372,12 @@ class AffineTransform(Function1dTo1d):
 
 
 def _assert_is_shape2d(arg):
-    assert_all_integers(arg, 2)
+    assert_all_integers(arg)
+    assert_equal(len(arg), 2)
     assert_all_greater_equal(arg, 0)
 
 
-def _make_bc01_format_node(i_node, i2t_axis_map):
+def _make_bc01_format_node(i_node, i_to_bc01_axis_map):
     '''
     Returns a FormatNode that converts a 4-D input to "bc01-floatX" format.
 
@@ -386,34 +389,46 @@ def _make_bc01_format_node(i_node, i2t_axis_map):
     i_node: Node
       A Node with a 4-dimensional output.
 
-    i2t_axis_map: None or dict
+    i_to_bc01_axis_map: None or dict
        The maps axis names in i_node.output_format to 'b', 'c', '0', and '1'.
        You can omit this if i_node.ouptut_format.axes already uses those names.
     '''
-    # Naming convention used in this function:
-    # 'i': input
-    # 't': the input, transposed to standard 'bc01' order.
     i_axes = i_node.output_format.axes
-    if i2t_axis_map is None:
-        i2t_axis_map = {'b':'b', 'c':'c', '0':'0', '1':'1'}
+    assert_all_is_instance(i_axes, basestring)
+    assert_equal(len(i_axes), 4)
 
-    t2i_axis_map = dict((v, k) for k, v in i2t_axis_map.iteritems())
+    bc01_axes = ('b', 'c', '0', '1')
 
-    t_axes = ('b', 'c', '0', '1')
-    t_axes_with_i_names = [t2i_axis_map[a] for a in t_axes]
+    if i_to_bc01_axis_map is None:
+        i_to_bc01_axis_map = dict((a, a) for a in bc01_axes)
+    else:
+        # keys are all strings (as opposed to tuples of strings)
+        assert_all_is_instance(i_to_bc01_axis_map.iterkeys(), basestring)
+        # for key in i_to_bc01_axis_map.iterkeys():
+        #     assert_is_instance(key, basestring)
+
+        # values are some permutation of bc01_axes
+        assert_equal(set(i_to_bc01_axis_map.itervalues()),
+                     set(bc01_axes))
+
+    bc01_to_i_axis_map = dict((v, k)
+                              for k, v
+                              in i_to_bc01_axis_map.iteritems())
+
+    bc01_axes_with_i_names = [bc01_to_i_axis_map[a] for a in bc01_axes]
 
     i_shape = i_node.output_format.shape
-    t_shape = [i_shape[i_axes.index(a)] for a in t_axes_with_i_names]
+    bc01_shape = [i_shape[i_axes.index(a)] for a in bc01_axes_with_i_names]
 
-    assert_equal(t_shape[0], -1)
-    for size, axis in safe_izip(t_shape, t_axes):
+    assert_equal(bc01_shape[0], -1)
+    for size, axis in safe_izip(bc01_shape, bc01_axes):
         if axis != 'b':
             assert_greater_equal(size, 0)
 
-    t_format = DenseFormat(axes=t_axes,
-                           shape=t_shape,
-                           dtype=theano.config.floatX)
-    return FormatNode(i_node, t_format, i2t_axis_map)
+    bc01_format = DenseFormat(axes=bc01_axes,
+                              shape=bc01_shape,
+                              dtype=theano.config.floatX)
+    return FormatNode(i_node, bc01_format, i_to_bc01_axis_map)
 
 
 def _make_bc01_output_format(bc01_input_format,
@@ -526,6 +541,7 @@ class Conv2D(Node):
         ----------
 
         input_node: Node
+          A node with 4D output format.
 
         filter_shape: Sequence
           [NUM_ROWS, NUM_COLUMNS]
@@ -548,10 +564,11 @@ class Conv2D(Node):
           A stride of (R, C) means we apply the filters once every R rows
           and every C columns.
 
-        axis_map: dict
+        axis_map: dict, or None.
           Maps axis names from those used by input_node.output_format.axes
           to ('b', 'c', '0', '1'), i.e. batch, channel, row, column.
-          See docs for axis_map parameter to simplelearn.format.convert()
+          Default: None, meaning the input node's axes are already some
+                   permutation of ('b', 'c', '0', '1').
         '''
 
         #
@@ -560,7 +577,8 @@ class Conv2D(Node):
 
         assert_is_instance(input_node, Node)
         _assert_is_shape2d(filter_shape)
-        assert_is_integer(num_filters)
+        assert_integer(num_filters)
+        assert_greater(num_filters, 0)
 
         dnn_available = theano.sandbox.cuda.dnn.dnn_available
 
@@ -586,8 +604,54 @@ class Conv2D(Node):
         if strides is not None:
             _assert_is_shape2d(strides)
 
+        # def get_full_axis_map(axis_map):
+        #     '''
+        #     Returns an axis_map with implicit identity mappings added.
+
+        #     This expects axis_map to map from the ('b', 'c', '0', '1')
+        #     axes to some other axes. The user may omit some identity
+        #     mappings, such as ('b'->'b'). This function adds these in.
+
+        #     If no mappings need to be added, this returns axis_map as-is.
+
+        #     For example, get_full_axis_map({('c', '0', '1'): 'f'}) returns
+        #     {'b': 'b',
+        #      ('c', '0', '1'): 'f'}
+        #     '''
+        #     expected_axes = set(('b', 'c', '0', '1'))
+
+        #     # Find which axes are missing from axis_map.keys
+        #     missing_axes = expected_axes.copy()
+        #     for key in axis_map.iterkeys():
+        #         if isinstance(key, basestring):
+        #             missing_axes.remove(key)
+        #         else:
+        #             for axis in key:
+        #                 missing_axes.remove(axis)
+
+        #     # Add any missing axis mappings to axis_map.
+        #     if len(missing_axes) > 0:
+        #         axis_map = copy.deepcopy(axis_map)
+        #         for missing_axis in missing_axes:
+        #             axis_map[missing_axis] = missing_axis
+
+        #     # Check that the axis_map's keys consist entirely of the
+        #     # expected_axes.
+        #     all_axes = set()
+        #     for key in axis_map.iterkeys():
+        #         if isinstance(key, basestring):
+        #             all_axes.add(key)
+        #         else:
+        #             for axis in key:
+        #                 all_axes.add(key)
+
+        #     assert_equal(all_axes, expected_axes)
+
+        #     return axis_map
+
         if axis_map is not None:
             assert_is_instance(axis_map, dict)
+            # axis_map = get_full_axis_map(axis_map)
 
         if not dnn_available():
             assert_equal(len(kwargs), 0,
