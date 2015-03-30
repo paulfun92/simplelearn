@@ -65,12 +65,6 @@ class Dataset(DataSource):
             raise NotImplementedError("'%s' iterator type not supported." %
                                       iterator_type)
 
-    def make_input_nodes(self):
-        NamedTupleOfNodes = collections.namedtuple('NamedNodes', self._names)
-        nodes = tuple(InputNode(fmt) for fmt in self._formats)
-        # pylint: disable=star-args
-        return NamedTupleOfNodes(*nodes)
-
 
 class SequentialIterator(DataIterator):
     """
@@ -189,6 +183,12 @@ class SequentialIterator(DataIterator):
         # self.Batch = collections.namedtuple('Batch', names)
 
         super(SequentialIterator, self).__init__()
+
+    def make_input_nodes(self):
+        NamedTupleOfNodes = collections.namedtuple('NamedNodes', self._names)
+        nodes = tuple(InputNode(fmt) for fmt in self._formats)
+        # pylint: disable=star-args
+        return NamedTupleOfNodes(*nodes)
 
     def next_is_new_epoch(self):
         num_samples = self._tensors[0].shape[self._formats[0].axes.index('b')]

@@ -378,7 +378,10 @@ def main():
 
     mnist_training, mnist_testing = load_mnist()
 
-    image_uint8_node, label_node = mnist_training.make_input_nodes()
+    mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
+                                                    batch_size=args.batch_size)
+
+    image_uint8_node, label_node = mnist_testing_iterator.make_input_nodes()
     image_node = RescaleImage(image_uint8_node)
 
     rng = numpy.random.RandomState(34523)
@@ -533,8 +536,7 @@ def main():
 
     validation_callback = ValidationCallback(
         inputs=[image_node.output_symbol, label_node.output_symbol],
-        input_iterator=mnist_testing.iterator(iterator_type='sequential',
-                                              batch_size=args.batch_size),
+        input_iterator=mnist_testing_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
     # pdb.set_trace()

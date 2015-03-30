@@ -108,8 +108,11 @@ def main():
         return output_node
 
     input_float_node = get_input_float_node(output_node)
+
     mnist_train = load_mnist()[1]
-    label_node = mnist_train.make_input_nodes()[1]
+    mnist_train_iterator = mnist_train.iterator(iterator_type='sequential',
+                                                batch_size=1)
+    label_node = mnist_train_iterator.make_input_nodes()[1]
 
     cross_entropy = CrossEntropy(output_node, label_node)
 
@@ -177,9 +180,6 @@ def main():
                                                            5,
                                                            (r - 1) * 5 + c))
 
-    mnist_iterator = mnist_train.iterator(iterator_type='sequential',
-                                          batch_size=1)
-
     get_float_image = theano.function([input_uint8_node.output_symbol],
                                       input_float_node.output_symbol)
 
@@ -199,13 +199,13 @@ def main():
 
     def on_key_press(event):
         if event.key == ' ':
-            update_display(*mnist_iterator.next())
+            update_display(*mnist_train_iterator.next())
         elif event.key == 'q':
             sys.exit(0)
 
     figure.canvas.mpl_connect('key_press_event', on_key_press)
 
-    update_display(*mnist_iterator.next())
+    update_display(*mnist_train_iterator.next())
     pyplot.show()
 
 

@@ -10,6 +10,7 @@ __license__ = "Apache 2.0"
 import os
 from simplelearn.formats import Format
 
+
 def _get_data_path():
     env_variable = 'SIMPLELEARN_DATA_PATH'
 
@@ -39,17 +40,6 @@ class DataSource(object):
         raise NotImplementedError("%s.iterator() not yet implemented." %
                                   type(self))
 
-    def make_input_nodes(self):
-        """
-        Returns
-        -------
-        rval: instance of a collections.namedtuple type.
-          A named tuple of InputNodes. The names must correspond to the names
-          used by iterators' next() method (e.g. 'model_input', 'label').
-        """
-        raise NotImplementedError("%s.make_input_nodes() not yet implemented."
-                                  % type(self))
-
 
 class DataIterator(object):
     """
@@ -62,6 +52,17 @@ class DataIterator(object):
 
     def __iter__(self):
         return self
+
+    def make_input_nodes(self):
+        """
+        Returns
+        -------
+        rval: instance of a collections.namedtuple type.
+          A named tuple of InputNodes. The names must correspond to the names
+          used by the self.next() method (e.g. 'model_input', 'label').
+        """
+        raise NotImplementedError("%s.make_input_nodes() not yet implemented."
+                                  % type(self))
 
     def next_is_new_epoch(self):
         """
