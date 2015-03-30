@@ -58,17 +58,48 @@
 ** DONE Write save-on-best callback, put it in mnist demo
 ** DONE Save best model trained on MNIST
 ** The Pylearn2's mlp demo uses a momentum scale-er that linearly interpolates between two momentum values, rather than linearly shrinks a scale value. Check that the learning rate scale-er does the same, then change LinearlyScalesOverEpochs to do this.
-* Write test for limit_param_norms
-* Write examples/mnist_conv.py
-* Write examples/visualize_mnist_conv.py
+* DONE Write test for limit_param_norms
+* DONE Write examples/mnist_conv.py
+* DONE Re-check momentum-based updating in pylearn2
+** Looked at pylearn2.training_algorithms.learning_rule.Momentum; looked pretty equivalent.
+* DONE Check mlp.Linear and mlp.ConvElemwise's _modify_updates to see if anything might be going on there that you haven't done.
+** Looked at pylearn2.models.mlp.ConvElemwise._modify_updates(); it just implements norm-capping, which seems equivalent to my limit_param_norms(). Same with mlp.Linear._modify_updates()
 * Write data/norb.py
+** Write Norb class, override its iterator() method to take kwargs for class-instance -> object ID conversion.
+*** Without conversion, label is 5 (9?) dimensional.
+**  Write two label-processing nodes:
+*** Can't: Theano can't do hash-table lookups. This is only possible if the NORB dataset stores Object IDs, which could then be mapped to Class and Instance IDs by a Node.
+*** NorbLabelToClass
+*** NorbLabelToInstance
+*** NorbLabelToElevation
+*** NorbLabelToAzimuth
+*** NorbLabelToLighting
+*** NorbLabelToHeading
+*** NorbLabelToContrast
+*** NorbLabelToLuminance
+*** NorbLabelToShift
+*** 
 ** write load_norb_image_file(image_hdf_dataset_batch)
 ** load_norb_label_file(label_hdf_dataset_batch)
 ** raw_norb_to_hdf(raw_image_files, raw_label_files, hdf_path)
-** load_norb()
-** load_small_norb()
-** 0load_big_norb(), load_small_norb(), load_
-* Replicate classification + orientation success.
+*** Concatenates test & train data into single hdf tensors. Returns hdf tensors, train size.
+** load_norb(hdf_path or which_norb=['big, 'small'], which_set=['test, 'train'])
+*** These all just call _load_norb_impl(hdf_path)
+*** If using which_norb and which_set, these create a hdf file using raw_norb_to_hdf if necessary, then return _load_norb_impl(hdf_path).
+** make_norb_instance_dataset(input_hdf, output_hdf, elevation_test_stride, azimuth_test_stride, object_whitelist)
+*** load_norb(input_hdf, 'test'), load_norb(input_hdf, 'train'),
+*** open tmp_hdf (tmp_hdf) with unified images and labels
+*** copy from input_hdf's test and train to the unified tensors of tmp_hdf
+*** shuffle the unified tensors of tmp_hdf.
+*** Create test_mask by logical_and((unified_labels[:, elevation] % elevation_test_stride) == 0, unified_labels[:, azimuth] % (azimuth_test_stride * 2), unified_labels[:, :2] == object_whitelist[0], unified_labels[:, :2] == object_whitelist[1], ...)
+*** open output_hdf(output_hdf), with 'train' and 'test' groups.
+*** output_hdf.train.images = tmp_hdf.images[logical_not(test_mask), ...]
+*** output_hdf.train.labels = tmp_hdf.labels[logical_not(test_mask), :]
+*** output_hdf.test.images = tmp_hdf.images[test_mask, ...]
+*** output_hdf.test.labels = tmp_hdf.labels[test_mask, :]
+** These instance datasets should now be loadable using load_norb(hdf_path).
+** Write a quick examples/browse_norb.py --input hdf_file to step through a norb dataset's images and labels.
+* Write examples/train_norb
 * Visualize classification + orientation features
 * Scale to 6DOF
 
@@ -145,3 +176,17 @@ In-between: serializeable nodes, but forget about serializeable updates for now 
 ** If not, switch back to serializeable_nodes, implement serializeable nodes
 ** Commit serializeable_nodes
 ** switch back to mnist_demo branch, merge serializeable_nodes into mnist_demo, se if that fixes serializeability.
+
+
+* NORB brainstorm
+** Need support for:
+*** variable-length label vectors (5 vs 11)
+*** label vector conversions are generally non-differentiable. Don't make them Theano nodes. Make them iterators.
+*** How to specify iterator label format?
+**** Just provide a function that takes a label and outputs a value.
+**** Independently, we also need to provide an implementation of make_input_nodes that returns InputNodes with the approprate DenseFormats.
+***** One more reason to move make_input_nodes to iterator.
+**** One solution: just subclass Norb and override .iterator() and .make_input_nodes
+**** Another solution: make it the iterator's job to impelent make_input_nodes
+***** Write ConvertingIterator, which wraps an existing iterator and converts its output (though its implementation of _next() and _make_input_nodes()).
+***** This is better because it sepearates the concerns of iteration order vs format. 
