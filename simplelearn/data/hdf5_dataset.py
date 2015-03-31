@@ -15,11 +15,133 @@ from simplelearn.formats import DenseFormat
 import pdb
 
 
-def add_tensor(name, shape, dtype, axes, hdf):
+# TODO: hdf5 reform:
+# Hdf5Datasets should just a collection of tensors, with some partition row
+# indices that demarcate where the test, train, or validation sets begin.
+# Each tensor will have an 'axes' attr, so that we can recover its DenseFormat.
+#
+# When serializing, it just stores the file path of the hdf file, relative to
+# simplelearn.data.data_dir.
+#
+# An Hdf5Dataset is just a range of row_indices of an HdfDatasets.
+# In its __init__, it stores a self._hdf_datasets and a self._slice, then
+# calls super().__init__(subtensors, names, formats), where subtensors
+# are sliced from HdfDatasets' tensors.
+#
+# It overrides Dataset's serialization to only serialize self._hdf_datasets,
+# and self._slice
+
+# class Hdf5DatasetWriter(object):
+#     def __init__(self, dataset_path, size, description=''):
+#         self.partition_bounds = []
+#         self.partition_names = []
+#         self.tensors = []
+#         self.formats = []
+#         self.hdf = h5py.File(dataset_path, 'w')
+#         self.hdf.attrs['description'] = description
+#         self.size = size
+
+#     def add_tensor(self, name, fmt):
+#         '''
+#         Adds a tensor to an HDF5 group, in a manner compatible with Hdf5Dataset.
+
+#         Parameters
+#         ----------
+#         name: str
+#           The tensor's name in the group.
+
+#         fmt: simplelearn.formats.DenseFormat
+#           The tensor's format.
+
+#         hdf_group: h5py.Group
+#           The Group to add this tensor to under the name <name>. Note that
+#           h5py.Files are Groups.
+#         '''
+#         shape = list(self.fmt.shape)
+#         shape[self.fmt.index('b')] = self.size
+
+#         dataset = self.hdf.create_dataset(name, shape, fmt.dtype)
+#         dataset.attrs['axes'] = numpy.asarray(axes, 'S')
+
+#         self.tensors.append(dataset)
+#         self.formats.append(fmt)
+
+#         return dataset
+
+#     def add_partition(self, size, name):
+#         '''
+#         Parameters
+#         ----------
+#         size: int
+#           A positive int, or -1. If the latter, make this the final partition,
+#           using all remaining space.
+
+#         name: str
+#           The name of this partition (e.g. 'train', 'valid', 'test').
+#         '''
+#         assert_integer(size)
+#         assert_not_equal(size, 0)
+#         assert_greater(size, -2)
+
+#         assert_is_instance(name, basestring)
+#         name = unicode(name)
+
+#         partition_start = (0 if len(self.partition_bounds) == 0
+#                            else self.partition_bounds[-1])
+
+#         if size == -1:
+#             size = self.size - partition_start
+
+#         assert_less_equal(partition_end, self.size)
+
+#         self.partition_ends.append(partition_start + size)
+#         self.partition_names.append(name)
+
+#     def get_partition(self, partition):
+#         '''
+#         Parameters
+#         ----------
+#         partition: str or int
+#           Either the partition name (choose from self.partition_names)
+#           or the partition's index (as used by self.partition_names).
+
+#         Returns
+#         -------
+#         rval: Dataset
+#         '''
+#         if isinstance(partition, basestring):
+#             partition = tuple(self.partition_names).index(partition)
+#         else:
+#             assert_integer(partition)
+#             assert_greater_equal(partition, 0)
+#             assert_less(partition, len(self.partition_names))
+
+#         partition_tensors = []
+#         for fmt, hdf_tensor in safe_izip(self.formats, self.tensors):
+
+def add_tensor(name, shape, dtype, axes, hdf_group):
     '''
-    Adds a tensor to an HDF5 file, in a manner compatible with Hdf5Dataset.
+    Adds a tensor to an HDF5 group, in a manner compatible with Hdf5Dataset.
+
+    Parameters
+    ----------
+    name: str
+      The tensor's name in the group.
+
+    shape: Sequence
+      The tensor's shape.
+
+    dtype: str, numpy.dtype
+      The tensor's dtype.
+
+    axes: Sequence
+      The axis names.
+
+    hdf_group: h5py.Group
+      The Group to add this tensor to under the name <name>. Note that
+      h5py.Files are Groups.
     '''
-    dataset = hdf.create_dataset(name, shape, dtype)
+    dataset = hdf_group.create_dataset(name, shape, dtype)
     dataset.attrs['axes'] = numpy.asarray(axes, 'S')
     return dataset
 
