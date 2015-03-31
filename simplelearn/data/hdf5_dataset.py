@@ -5,7 +5,10 @@ A Dataset that stores its data in an HDF5 file.
 import os
 import h5py
 import numpy
-from nose.tools import assert_true, assert_is_instance, assert_in
+from nose.tools import (assert_true,
+                        assert_is_instance,
+                        assert_in,
+                        assert_not_equal)
 from simplelearn.data.dataset import Dataset
 from simplelearn.formats import DenseFormat
 
@@ -55,12 +58,16 @@ class Hdf5Dataset(Dataset):
     in the first place.
     '''
 
-    def __init__(self, hdf5_filepath, group_path=u'/'):
+    def __init__(self, hdf5_filepath, group_path=u''):
         assert_true(os.path.isfile(hdf5_filepath))
-        assert_is_instance(group_path, unicode)
+        group_path = unicode(group_path)
+        if group_path[0] == '/':
+            group_path = group_path[1:]
+
+        assert_not_equal(group_path[0], '/')
 
         hdf = h5py.File(hdf5_filepath, 'r')
-        assert_in(group_path[1:], hdf.keys())
+        assert_in(group_path, hdf.keys())
         hdf = hdf[group_path]
 
         self.hdf5_filepath = hdf5_filepath

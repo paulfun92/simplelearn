@@ -107,12 +107,14 @@ def _read_norb_file(filepath):
     return read_numbers(file_handle, dtype, size).reshape(shape)
 
 
-def _create_hdf(which_norb):
+def _make_hdf(which_norb):
     '''
-    Creates a big_norb_cache.h5 or a small_norb_cache.h5 file.
+    Caches NORB data to an HDF5 file.
 
     Reads the original NORB files from a standard designated
-    directory, and caches them to an HDF5 file.
+    directory, downloading them there first if necessary.
+
+    Then, reads the NORB files, caching their contents to an HDF5 file.
 
     Parameters
     ----------
@@ -338,3 +340,31 @@ def _create_hdf(which_norb):
     with h5py.File(hdf_path, 'w') as hdf_file:  # w for overwrite, w- for no
         add_dataset(which_norb, 'train', hdf_file)
         add_dataset(which_norb, 'test', hdf_file)
+
+
+def load_norb(which_norb, which_set):
+    '''
+    Loads a NORB dataset.
+
+    Parameters
+    ----------
+    which_norb: str
+      'big' or 'small'
+
+    which_set: str
+      'train' or 'test'
+    '''
+    assert_in(which_norb, ('big', 'small'))
+    assert_in(which_set, ('train', 'test'))
+
+    norb_directory = os.path.join(simplelearn.data.data_path,
+                                  '%s_norb' % which_norb)
+    if not os.path.isdir(norb_directory):
+        os.mkdir(norb_directory)
+        # need_to_download = True
+
+    cache_file_path = os.path.join(norb_directory, 'cache.h5')
+    if not os.path.isfile(cache_file_path):
+        _make_hdf(which_norb)
+
+    return Hdf5Dataset(cache_file_path, which_set)
