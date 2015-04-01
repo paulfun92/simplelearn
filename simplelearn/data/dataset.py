@@ -50,16 +50,16 @@ class Dataset(DataSource):
 
             fmt.check(tensor)
 
-        self._names = names
-        self._formats = formats
-        self._tensors = tensors
+        self.names = names
+        self.formats = formats
+        self.tensors = tensors
 
     def iterator(self, iterator_type, batch_size, **kwargs):
         if iterator_type == 'sequential':
             return SequentialIterator(batch_size,
-                                      names=self._names,
-                                      tensors=self._tensors,
-                                      formats=self._formats,
+                                      names=self.names,
+                                      tensors=self.tensors,
+                                      formats=self.formats,
                                       **kwargs)
         else:
             raise NotImplementedError("'%s' iterator type not supported." %
