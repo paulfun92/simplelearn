@@ -190,3 +190,16 @@ In-between: serializeable nodes, but forget about serializeable updates for now 
 **** Another solution: make it the iterator's job to impelent make_input_nodes
 ***** Write ConvertingIterator, which wraps an existing iterator and converts its output (though its implementation of _next() and _make_input_nodes()).
 ***** This is better because it sepearates the concerns of iteration order vs format. 
+
+
+* TODO Wednesday:
+** Finish instance dataset making for stereo
+** add support for mono
+** port images & labels memmap to mono-NORB converter script
+*** Don't forget jitter for x & y position.
+** Create instance dataset for 6-objects dataset
+** Write script for classifying 6-objects dataset.
+
+* TODO Thursday:
+** Write script for classifying & camera angle regression
+** Add position regression (i.e. position offset from center).

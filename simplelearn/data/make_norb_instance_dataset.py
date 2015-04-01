@@ -1,11 +1,13 @@
 #! /usr/bin/env python
 
 import os
+import argparse
 from collections import Sequence
 import numpy
 import h5py
 from nose.tools import (assert_equal,
                         assert_in,
+                        assert_true,
                         assert_is_instance,
                         assert_greater,
                         assert_greater_equal)
@@ -18,8 +20,10 @@ from simplelearn.formats import DenseFormat
 from simplelearn.data.norb import load_norb
 from simplelearn.data.hdf5_dataset import add_tensor
 
+import pdb
 
-def make_instance_dataset(which_norb,
+
+def make_instance_dataset(norb,
                           test_elevation_stride,
                           test_azimuth_stride,
                           objects=None,
@@ -216,8 +220,76 @@ def make_instance_dataset(which_norb,
 
 def _main():
     def parse_args():
-        pass
+        parser = argparse.ArgumentParser(
+            description=("Merges the test and training sets of a "
+                         "NORB dataset, shuffles them, and re-splits "
+                         "into testing and training data according "
+                         "to camera angle. If the NORB dataset is "
+                         "stereo, this will use only the left stereo "
+                         "images."))
 
+        def norb_path(arg):
+            if arg == 'big':
+                return load_norb(
+
+        parser.add_argument('-i',
+                            "--input",
+                            type=norb_path,
+                            required=True,
+                            help=("'big', 'small', or the .h5 file "
+                                  "of the NORB dataset."))
+
+        parser.add_argument("-e",
+                            "--test-elevation-stride",
+                            required=True,
+                            metavar='M',
+                            help=("Select every M'th elevation for "
+                                  "the test set."))
+
+        parser.add_argument('-a',
+                            '--test-azimuth-stride',
+                            required=True,
+                            metavar='N',
+                            help=("Select every N'th azimuth for the "
+                                  "test set"))
+
+        def non_negative_int(arg):
+            arg = int(arg)
+            assert_greater_equal(arg, 0)
+            return arg
+
+        parser.add_argument('--objects',
+                            type=non_negative_int,
+                            nargs='+',
+                            default=None,
+                            help=("Objects to include in the "
+                                  "instance dataset. Omit to include "
+                                  "all objects. Otherwise, provide "
+                                  "a sequence of integers c1 i1 c2 "
+                                  "i2 ... cZ nZ, which specify each "
+                                  "object using category and "
+                                  "instance labels cx ix"))
+
+        parser.add_argument('-o',
+                            '--output',
+                            required=True,
+                            help=('.h5 file to save to'))
+
+        args = parser.parse_args()
+
+        if args.objects is not None:
+            assert_equal(len(args.objects) % 2, 0)
+            args.objects = numpy.asarray(args.objects).reshape(-1, 2)
+
+        return args
+
+    args = parse_args()
+
+    make_instance_dataset(norb_dataset,
+                          args.test_elevation_stride,
+                          args.test_azimuth_stride,
+                          args.objects,
+                          args.output)
 
 
 if __name__ == '__main__':
