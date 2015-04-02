@@ -376,7 +376,9 @@ def main():
 
     assert_equal(affine_output_sizes[-1], 10)
 
-    mnist_training, mnist_testing = load_mnist()
+    mnist = load_mnist()
+    mnist_training = mnist['train']
+    mnist_testing = mnist['test']
 
     mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
                                                     batch_size=args.batch_size)

@@ -109,7 +109,7 @@ def main():
 
     input_float_node = get_input_float_node(output_node)
 
-    mnist_train = load_mnist()[1]
+    mnist_train = load_mnist()['test']
     mnist_train_iterator = mnist_train.iterator(iterator_type='sequential',
                                                 batch_size=1)
     label_node = mnist_train_iterator.make_input_nodes()[1]
