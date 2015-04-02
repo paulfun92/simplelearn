@@ -310,14 +310,9 @@ class SequentialIterator(DataIterator):
                              (num_samples, self._batch_size))
 
             if self._loop_style == 'wrap':
-                # batch = \
-                    #     self.Batch(*(fmt.make_batch(is_symbolic=False,
-                #                                 batch_size=self._batch_size)
-                #                  for fmt in self._formats))
-
-                batch = (fmt.make_batch(is_symbolic=False,
-                                        batch_size=self._batch_size)
-                         for fmt in self._formats)
+                batch = tuple(fmt.make_batch(is_symbolic=False,
+                                             batch_size=self._batch_size)
+                              for fmt in self._formats)
 
                 chunk_size = num_samples - self._next_batch_start
                 assert_greater(chunk_size, 0)

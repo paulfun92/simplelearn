@@ -114,7 +114,8 @@ def test_sequential_iterator_next():
         tile_pattern[fmt.axes.index('b')] = max_epochs + 1
         looped_tensors.append(numpy.tile(tensor, tile_pattern))
 
-    epoch=0
+    epoch = 0
+
     for batch_number, iterator_batch in enumerate(iterator):
         expected_batch = get_batch(sample_index, batch_size, looped_tensors)
         assert_equal(iterator_batch, expected_batch)
