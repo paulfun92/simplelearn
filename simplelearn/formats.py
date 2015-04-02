@@ -663,7 +663,7 @@ class DenseFormat(Format):
             assert_equal(frozenset(from_axes), frozenset(to_axes))
 
             for axes in (from_axes, to_axes):
-                assert all(isinstance(axis, str) for axis in axes)
+                assert all(isinstance(axis, basestring) for axis in axes)
 
             return batch.transpose([from_axes.index(a) for a in to_axes])
 
