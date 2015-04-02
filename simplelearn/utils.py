@@ -2,10 +2,10 @@
 Utility functions used throughout simplelearn
 '''
 
-# __author__ = "Matthew Koichi Grimes"
-# __email__ = "mkg@alum.mit.edu"
-# __copyright__ = "Copyright 2015"
-# __license__ = "Apache 2.0"
+__author__ = "Matthew Koichi Grimes"
+__email__ = "mkg@alum.mit.edu"
+__copyright__ = "Copyright 2015"
+__license__ = "Apache 2.0"
 
 
 import os
@@ -256,21 +256,24 @@ def assert_all_equal(arg0, arg1=None):
     This can be called with 1 or 2 arguments, as follows:
 
     1 argument: checks that all elements are equal to each other.
+
       assert_all_equal([1, 1, 1])
 
     2 arguments: checks that all elements of arg0 are equal to
                  a scalar arg1.
+
       assert_all_equal([1, 1, 1], 1)
 
     2 arguments: checks that all corresponding elements of arg0 and
                  arg1 are equal to each other.
-      assert_all_equal([1, 2, 3], (1, 2, 3))
 
+      assert_all_equal([1, 2, 3], (1, 2, 3))
 
     Parameters
     ----------
     arg0: Sequence
     arg1: scalar, or Sequence (optional)
+
     '''
     assert_is_instance(arg0, collections.Sequence)
     if arg1 is None:

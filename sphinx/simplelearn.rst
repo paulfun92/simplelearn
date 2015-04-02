@@ -1,15 +1,16 @@
 simplelearn package
 ===================
 
-Subpackages
------------
-
-.. toctree::
-
-    simplelearn.data
-
 Submodules
 ----------
+
+simplelearn.data module
+-----------------------
+
+.. automodule:: simplelearn.data
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
 simplelearn.formats module
 --------------------------
@@ -27,10 +28,10 @@ simplelearn.nodes module
     :undoc-members:
     :show-inheritance:
 
-simplelearn.trainers module
+simplelearn.training module
 ---------------------------
 
-.. automodule:: simplelearn.trainers
+.. automodule:: simplelearn.training
     :members:
     :undoc-members:
     :show-inheritance:
@@ -39,15 +40,6 @@ simplelearn.utils module
 ------------------------
 
 .. automodule:: simplelearn.utils
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
-
-Module contents
----------------
-
-.. automodule:: simplelearn
     :members:
     :undoc-members:
     :show-inheritance:
