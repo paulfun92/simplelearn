@@ -3,6 +3,7 @@ Datasets that live on an HDF5 file under simplelearn.data.data_path's subtree.
 '''
 
 import os
+from collections import Iterable
 import numpy
 import h5py
 from nose.tools import (assert_false,
@@ -24,15 +25,37 @@ import pdb
 
 
 # pylint: disable=too-few-public-methods
-class Hdf5Datasets(object):
+class Hdf5Data(object):
     '''
-    Wraps an HDF5 file. Slice this with Hdf5Dataset to get a Dataset.
+    Wraps an HDF5 file. The [] operator returns a Hdf5Dataset, which contains
+    a slice along the batch axis from each of the tensors in this object.
 
     On pickling, this just saves the relative path from
     simplelearn.data.data_path to the HDF5 file.
     '''
 
     def __init__(self, path, mode, size=None):
+        '''
+        Wraps an HDF5 file with this dataset.
+
+        When creating and editing new Hdf5Dataset (i.e. mode = 'w' or 'w-'),
+        it's safe practice to close it after you're done editing,
+        then re-open it in read-only mode (mode 'r') for actual use.
+
+        Parameters
+        ----------
+        path: str
+          file path to the HDF5 file.
+
+        mode: str
+          'r': read-only
+          'w': create new for writing, overwriting any file of the same name.
+          'w-: create new for writing, fail if a file of the same name exists.
+
+        size: integer
+          Number of examples the dataset will store.
+          Only specify if <mode> is 'w' or 'w-'.
+        '''
         assert_is_instance(path, basestring)
         assert_is_instance(mode, basestring)
         assert_in(mode,
@@ -72,9 +95,46 @@ class Hdf5Datasets(object):
             self.hdf.create_group('tensors')
 
     @property
+    def tensors(self):
+        '''
+        Returns the tensors in a tuple.
+        '''
+        return tuple(self.hdf['tensors'].values())
+
+    @property
+    def names(self):
+        '''
+        Returns the tensor names in a tuple.
+        '''
+        return tuple(self.hdf['tensors'].keys())
+
+    @property
+    def formats(self):
+        '''
+        Returns the tensor formats in a tuple.
+        '''
+        def get_format(tensor):
+            '''
+            Returns the DenseFormat of an h5py.Dataset with labeled dims.
+            '''
+
+            axes = tuple(dim.label for dim in tensor.dims)
+            shape = list(tensor.shape)
+            shape[axes.index('b')] = -1
+
+            return DenseFormat(axes=axes,
+                               shape=shape,
+                               dtype=tensor.dtype)
+
+        return tuple(get_format(t) for t in self.tensors)
+
+    @property
     def size(self):
         '''
-        Number of 'rows' in each of the tensors.
+        Number of examples in each of the tensors.
+
+        This is fixed on instantiation, so it's defined even if no tensors have
+        been added yet.
 
         Returns
         -------
@@ -113,10 +173,12 @@ class Hdf5Datasets(object):
 
     def get_default_slice(self, name):
         '''
-        Get one of the default slices by name.
+        Returns a default slice.
 
-        O(N) in the number of default slices, since it does a linear search for
-        <name>.
+        Parameters
+        ----------
+        name: str
+          The name of the default slice.
 
         Returns
         -------
@@ -124,20 +186,77 @@ class Hdf5Datasets(object):
         '''
 
         slice_names = numpy.asarray(self.hdf['slice_names'])
-        name = numpy.asarray([name], dtype=self.hdf['slice_names'].dtype)
+        name = numpy.asarray([name],
+                             dtype=self.hdf['slice_names'].dtype)
         slice_index = numpy.nonzero(slice_names == name)[0]
-        if len(slice_index) == 0:
-            raise ValueError("%s is not a known default slice. Choose from %s"
-                             % tuple(slice_names))
 
-        pdb.set_trace()
+        if len(slice_index) == 0:
+            raise ValueError("%s is not a known default slice. Choose "
+                             "from %s" % (name, tuple(slice_names)))
+
         return self.default_slices[slice_index[0]]
+
+    def __getitem__(self, arg):
+        '''
+        Like Dataset.__getitem__, except:
+          * Returns an Hdf5Dataset, which is a picklable view of this HdfData.
+          * The arg can be a default slice name.
+
+        Example:
+
+          self['test'] returns the testing set, if 'test' is one of the
+          default slice names.
+
+        Note that this is O(N) in the number of default slices, since it does a
+        linear search for <name>.
+
+        Returns
+        -------
+        rval: HdfDatasetSlice
+        '''
+
+        return Hdf5Dataset(self, arg)
+
+    def __setitem__(self, key, batches):
+        '''
+        For writing to Hdf5Data objects.
+
+        Example:
+          self['train'] = (training_images, training_labels)
+
+        Parameters
+        ----------
+        key: str, integer, or slice
+          See doc for __getitem__()
+
+        batches: Iterable
+          An Iterable of numpy array-like objects that can be assigned to
+          slices of self.tensors. Must have the same length as self.tensors.
+        '''
+        assert_is_instance(batches, Iterable)
+
+        batch_slice = (self.get_default_slice(key)
+                       if isinstance(key, basestring)
+                       else Dataset._getitem_arg_to_slice(key))
+
+        def get_slice_tuple(fmt, batch_slice):
+            '''
+            Returns a tuple for slicing a single tensor along its batch axis.
+            '''
+            return tuple(batch_slice if axis == 'b' else slice(None)
+                         for axis in fmt.axes)
+
+        for tensor, fmt, batch in safe_izip(self.tensors,
+                                            self.formats,
+                                            batches):
+            slice_tuple = get_slice_tuple(fmt, batch_slice)
+            tensor[slice_tuple] = batch
 
     def add_default_slice(self, name, size):
         '''
         Add to the list of default slices.
 
-        Most dataset come with designated training and testing sets.
+        Most datasets come with designated training and testing sets.
         These are stored as default slices.
 
         Parameters
@@ -148,12 +267,6 @@ class Hdf5Datasets(object):
         size: int
           Size of slice, or -1 to use all remaining data unclaimed by
           previous default slices.
-
-        Returns
-        -------
-        rval: Hdf5DatasetsSlice
-          A Dataset view into the slice that was just added.
-          Don't use this if you plan on adding more tensors.
         '''
         assert_is_instance(name, basestring)
         # if we need longer names, change the 'S100' dtype above.
@@ -185,8 +298,6 @@ class Hdf5Datasets(object):
 
         slice_ends.resize([num_slices])
         slice_ends[-1] = new_end
-
-        return Hdf5DatasetsSlice(self, self.default_slices[-1])
 
     def add_tensor(self, name, fmt, dtype=None):
         '''
@@ -235,63 +346,84 @@ class Hdf5Datasets(object):
         return False  # prevents __setstate__ from being called
 
 
-class Hdf5DatasetsSlice(Dataset):
+class Hdf5Dataset(Dataset):
     '''
-    A Dataset that's a slice of the rows of an Hdf5Datasets object.
+    A Dataset that's a slice of the rows of a Hdf5Data object.
 
     On pickling, this just saves the row slice and a reference to the
     HdfDatsets object.
+
+    Writing to this dataset's data will not affect the underlying HDF5 file!
+    If you wish to edit the HDF5 data, use Hdf5Data.__setitem__().
     '''
 
-    def __init__(self, hdf5_datasets, row_slice):
-        assert_is_instance(hdf5_datasets, Hdf5Datasets)
+    def __init__(self, hdf5_data, slice_arg):
+        '''
+        Equivalent to hdf5_data[slice_arg].
 
-        if isinstance(row_slice, basestring):
-            row_slice = hdf5_datasets.get_default_slice(row_slice)
-        else:
-            assert_is_instance(row_slice, slice)
+        See docs for Hdf5Data.__getitem__() for details.
+        '''
+        assert_is_instance(hdf5_data, Hdf5Data)
 
-        def get_format(tensor):
-            '''
-            Returns the tensor's format as a new DenseFormat object.
-            '''
-            pdb.set_trace()
-            axes = tuple(dim.label for dim in tensor.dims)
-            shape = list(tensor.shape)
-            shape[axes.index('b')] = -1
+        if isinstance(slice_arg, basestring):
+            slice_arg = hdf5_data.get_default_slice(slice_arg)
 
-            return DenseFormat(axes=axes,
-                               shape=shape,
-                               dtype=tensor.dtype)
+        full_dataset = Dataset(names=hdf5_data.names,
+                               tensors=hdf5_data.tensors,
+                               formats=hdf5_data.formats)
 
-        def slice_tensor(tensor, fmt, row_slice):
-            '''
-            Slices the tensor along the 'b' (batch) axis.
-            '''
+        super(Hdf5Dataset, self).__init__(names=full_dataset.names,
+                                          tensors=full_dataset[slice_arg],
+                                          formats=full_dataset.formats)
 
-            assert_is_instance(row_slice, slice)
+        self._init_args = {'hdf5_data': hdf5_data, 'slice_arg': slice_arg}
 
-            b_index = fmt.axes.index('b')
-            if len(fmt.axes) == 1:
-                return tensor[row_slice]
-            else:
-                slices = tuple(row_slice if i == b_index else slice(None)
-                               for i in range(len(fmt.axes)))
-                return tensor[slices]
+        # if isinstance(row_slice, basestring):
+        #     row_slice = hdf5_datasets.get_default_slice(row_slice)
+        # else:
+        #     assert_is_instance(row_slice, slice)
 
-        tensor_group = hdf5_datasets['tensors']
+        # def get_format(tensor):
+        #     '''
+        #     Returns the tensor's format as a new DenseFormat object.
+        #     '''
+        #     pdb.set_trace()
+        #     axes = tuple(dim.label for dim in tensor.dims)
+        #     shape = list(tensor.shape)
+        #     shape[axes.index('b')] = -1
 
-        names = tensor_group.keys()
-        hdf5_tensors = tensor_group.values()
-        formats = [get_format(t) for t in hdf5_tensors]
-        tensors = [slice_tensor(t, f, row_slice)
-                   for t, f in safe_izip(hdf5_tensors, formats)]
+        #     return DenseFormat(axes=axes,
+        #                        shape=shape,
+        #                        dtype=tensor.dtype)
 
-        self._init_args = {'row_slice': row_slice,
-                           'hdf5_datasets': hdf5_datasets}
-        super(Hdf5DatasetsSlice, self).__init__(names=names,
-                                                tensors=tensors,
-                                                formats=formats)
+        # def slice_tensor(tensor, fmt, row_slice):
+        #     '''
+        #     Slices the tensor along the 'b' (batch) axis.
+        #     '''
+
+        #     assert_is_instance(row_slice, slice)
+
+        #     b_index = fmt.axes.index('b')
+        #     if len(fmt.axes) == 1:
+        #         return tensor[row_slice]
+        #     else:
+        #         slices = tuple(row_slice if i == b_index else slice(None)
+        #                        for i in range(len(fmt.axes)))
+        #         return tensor[slices]
+
+        # tensor_group = hdf5_datasets['tensors']
+
+        # names = tensor_group.keys()
+        # hdf5_tensors = tensor_group.values()
+        # formats = [get_format(t) for t in hdf5_tensors]
+        # tensors = [slice_tensor(t, f, row_slice)
+        #            for t, f in safe_izip(hdf5_tensors, formats)]
+
+        # self._init_args = {'row_slice': row_slice,
+        #                    'hdf5_datasets': hdf5_datasets}
+        # super(Hdf5DatasetSlice, self).__init__(names=names,
+        #                                         tensors=tensors,
+        #                                         formats=formats)
 
     def __getinitargs__(self):
         '''

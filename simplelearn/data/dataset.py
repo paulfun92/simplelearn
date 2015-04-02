@@ -9,8 +9,10 @@ __license__ = "Apache 2.0"
 
 import collections
 import numpy
+from simplelearn.utils import assert_all_equal, assert_integer
 from numpy.testing import assert_equal
-from nose.tools import (assert_less,
+from nose.tools import (assert_is_instance,
+                        assert_less,
                         assert_greater,
                         assert_less_equal,
                         assert_not_equal)
@@ -24,8 +26,8 @@ class Dataset(DataSource):
     """
     A finite set of data.
 
-    Stores data internally in one or more indexable numpy arrays (e.g. ndarray,
-    memmap).
+    Stores data internally in one or more sliceable multidimensional
+    arrays (e.g. numpy.ndarray, numpy.memmap, h5py.Dataset, etc).
     """
 
     def __init__(self, names, tensors, formats):
@@ -53,6 +55,72 @@ class Dataset(DataSource):
         self.names = names
         self.formats = formats
         self.tensors = tensors
+
+    @property
+    def size(self):
+        '''
+        The number of examples contained in this Dataset.
+
+        Throws a RuntimeException if this Dataset contains no tensors.
+        '''
+        if len(self.tensors) == 0:
+            raise RuntimeError("This dataset has no tensors, so its "
+                               "'size' is undefined.")
+
+        sizes = [t.shape[f.axes.index('b')]
+                 for t, f in safe_izip(self.tensors, self.formats)]
+        assert_all_equal(sizes)
+        return sizes[1]
+
+    @staticmethod
+    def _getitem_arg_to_slice(arg):
+        '''
+        Turns arg into a slice, if it isn't one.
+        '''
+        if numpy.isscalar(arg):
+            assert_integer(arg)
+            if arg == -1:
+                return slice(arg, None)
+            else:
+                return slice(arg, arg + 1)
+        else:
+            assert_is_instance(arg, slice)
+            return arg
+
+    def __getitem__(self, arg):
+        '''
+        Returns a tuple of slices along the batch axis.
+
+        Examples:
+
+          self[slice(3, 10)] returns a 6-element batch from each tensor.
+
+          self[3] is equivalent to self[slice(3, 4)] (batch axis is intact)
+
+
+        Parameters
+        ----------
+        arg: integer or slice
+
+        Returns
+        -------
+        rval: tuple
+          A tuple of views into each tensor.
+        '''
+
+        batch_slice = self._getitem_arg_to_slice(arg)
+
+        def get_slice_tuple(fmt, batch_slice):
+            '''
+            Returns a tuple for slicing a tensor along its batch axis.
+            '''
+            return tuple(batch_slice if axis == 'b'
+                         else slice(None)
+                         for axis in fmt.axes)
+
+        return tuple(tensor[get_slice_tuple(fmt, batch_slice)]
+                     for tensor, fmt
+                     in safe_izip(self.tensors, self.formats))
 
     def iterator(self, iterator_type, batch_size, **kwargs):
         if iterator_type == 'sequential':
@@ -151,6 +219,9 @@ class SequentialIterator(DataIterator):
                                         self._loop_style))
 
         def get_num_samples(tensor, fmt):
+            '''
+            Returns the size along the batch axis.
+            '''
             batch_index = fmt.axes.index('b')
             return tensor.shape[batch_index]
 
@@ -187,7 +258,7 @@ class SequentialIterator(DataIterator):
     def make_input_nodes(self):
         NamedTupleOfNodes = collections.namedtuple('NamedNodes', self._names)
         nodes = tuple(InputNode(fmt) for fmt in self._formats)
-        # pylint: disable=star-args
+
         return NamedTupleOfNodes(*nodes)
 
     def next_is_new_epoch(self):
@@ -240,7 +311,7 @@ class SequentialIterator(DataIterator):
 
             if self._loop_style == 'wrap':
                 # batch = \
-                #     self.Batch(*(fmt.make_batch(is_symbolic=False,
+                    #     self.Batch(*(fmt.make_batch(is_symbolic=False,
                 #                                 batch_size=self._batch_size)
                 #                  for fmt in self._formats))
 
@@ -295,5 +366,3 @@ class SequentialIterator(DataIterator):
             self._next_batch_start = 0
 
         return subbatches
-        # pylint: disable=star-args
-        # return self.Batch(*subbatches)

@@ -10,8 +10,9 @@ from nose.tools import (assert_true,
                         assert_equal,
                         assert_in)
 from simplelearn.data import data_path
+from simplelearn.formats import DenseFormat
 from simplelearn.utils import safe_izip
-from simplelearn.data.hdf5 import Hdf5Datasets
+from simplelearn.data.hdf5 import Hdf5Data
 
 import pdb
 
@@ -31,7 +32,7 @@ def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
 
     Returns
     -------
-    rval: Hdf5Datasets
+    rval: Hdf5Data
       The default slices are set to 'train' and 'test'.
       The tensors are 'images' and 'labels'.
 
@@ -105,19 +106,23 @@ def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
         assert_equal(images.shape[0], expected_size)
         assert_equal(labels.shape[0], expected_size)
 
-    hdf5_datasets = Hdf5Datasets(hdf5_path, mode='w-', size=70000)
-    training_set = hdf5_datasets.add_default_slice('train', 60000)
-    testing_set = hdf5_datasets.add_default_slice('test', -1)
+    hdf5_data = Hdf5Data(hdf5_path, mode='w-', size=70000)
+    hdf5_data.add_tensor('images',
+                         DenseFormat(axes=('b', '0', '1'),
+                                     shape=(-1, ) + image_data[0].shape[1:],
+                                     dtype=image_data[0].dtype))
+    hdf5_data.add_tensor('labels',
+                         DenseFormat(axes=('b'),
+                                     shape=(-1, ) + label_data[0].shape[1:],
+                                     dtype=label_data[0].dtype))
 
-    for (dataset,
-         images,
-         labels) in safe_izip((training_set, testing_set),
-                              image_data,
-                              label_data):
-        dataset.tensors[0][...] = images
-        dataset.tensors[1][...] = labels
+    training_set = hdf5_data.add_default_slice('train', 60000)
+    testing_set = hdf5_data.add_default_slice('test', -1)
 
-    return Hdf5Datasets(hdf5_path, mode='r')
+    hdf5_data['train'] = [image_data[0], label_data[0]]
+    hdf5_data['test'] = [image_data[1], label_data[1]]
+
+    return Hdf5Data(hdf5_path, mode='r')
 
 
 def load_mnist():
@@ -130,13 +135,13 @@ def load_mnist():
 
     Returns
     -------
-    rval: Hdf5Datasets
+    rval: Hdf5Data
     '''
     default_mnist_dir = join(data_path, 'mnist')
     cache_path = join(default_mnist_dir, 'cache.h5')
 
     if isfile(cache_path):
-        return Hdf5Datasets(cache_path, mode='r')
+        return Hdf5Data(cache_path, mode='r')
     else:  # Construct cache file
         raw_mnist_dir = join(default_mnist_dir, 'original_files')
         return _copy_raw_mnist_to_hdf5(raw_mnist_dir, cache_path)
