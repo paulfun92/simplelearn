@@ -306,7 +306,13 @@ def main():
         for inputs, outputs in safe_izip((training_inputs, testing_inputs),
                                          (training_outputs, testing_outputs)))
 
-    input_node, label_node = training_set.make_input_nodes()
+    batch_size = args.batch_size
+    if batch_size == -1:
+        batch_size = training_outputs.shape[0]
+
+    training_iterator = training_set.iterator(iterator_type='sequential',
+                                              batch_size=batch_size)
+    input_node, label_node = training_iterator.make_input_nodes()
 
     affine_node = AffineTransform(input_node=input_node,
                                   output_format=DenseFormat(axes=['b', 'f'],
@@ -398,10 +404,6 @@ def main():
             logger_axes.legend(self.logger_plots, ["train loss", "test loss"])
             return ()
 
-    batch_size = args.batch_size
-    if batch_size == -1:
-        batch_size = training_outputs.shape[0]
-
     assert_greater(batch_size, 0)
 
     input_symbols = [n.output_symbol for n in (input_node, label_node)]
@@ -425,8 +427,7 @@ def main():
         monitors=[validation_loss_monitor])
 
     sgd = Sgd(inputs=input_symbols,
-              input_iterator=training_set.iterator(iterator_type='sequential',
-                                                   batch_size=batch_size),
+              input_iterator=training_iterator,
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],
               parameter_updaters=parameter_updaters,

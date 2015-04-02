@@ -335,15 +335,16 @@ class Hdf5Data(object):
 
         return tensor
 
-    def __getinitargs__(self):
-        path = os.path.relpath(os.path.abspath(self.hdf.filename),
-                               start=simplelearn.data.data_path)
-
-        return {'path': path, 'mode': 'r'}
-
-    # pylint: disable=no-self-use
     def __getstate__(self):
-        return False  # prevents __setstate__ from being called
+        relative_path = os.path.relpath(os.path.abspath(self.hdf.filename),
+                                        start=simplelearn.data.data_path)
+        return relative_path
+
+    def __setstate__(self, relative_path):
+        absolute_path = os.path.join(simplelearn.data.data_path,
+                                     relative_path)
+
+        self.__init__(absolute_path, 'r')
 
 
 class Hdf5Dataset(Dataset):
@@ -376,54 +377,7 @@ class Hdf5Dataset(Dataset):
                                           tensors=full_dataset[slice_arg],
                                           formats=full_dataset.formats)
 
-        self._init_args = {'hdf5_data': hdf5_data, 'slice_arg': slice_arg}
-
-        # if isinstance(row_slice, basestring):
-        #     row_slice = hdf5_datasets.get_default_slice(row_slice)
-        # else:
-        #     assert_is_instance(row_slice, slice)
-
-        # def get_format(tensor):
-        #     '''
-        #     Returns the tensor's format as a new DenseFormat object.
-        #     '''
-        #     pdb.set_trace()
-        #     axes = tuple(dim.label for dim in tensor.dims)
-        #     shape = list(tensor.shape)
-        #     shape[axes.index('b')] = -1
-
-        #     return DenseFormat(axes=axes,
-        #                        shape=shape,
-        #                        dtype=tensor.dtype)
-
-        # def slice_tensor(tensor, fmt, row_slice):
-        #     '''
-        #     Slices the tensor along the 'b' (batch) axis.
-        #     '''
-
-        #     assert_is_instance(row_slice, slice)
-
-        #     b_index = fmt.axes.index('b')
-        #     if len(fmt.axes) == 1:
-        #         return tensor[row_slice]
-        #     else:
-        #         slices = tuple(row_slice if i == b_index else slice(None)
-        #                        for i in range(len(fmt.axes)))
-        #         return tensor[slices]
-
-        # tensor_group = hdf5_datasets['tensors']
-
-        # names = tensor_group.keys()
-        # hdf5_tensors = tensor_group.values()
-        # formats = [get_format(t) for t in hdf5_tensors]
-        # tensors = [slice_tensor(t, f, row_slice)
-        #            for t, f in safe_izip(hdf5_tensors, formats)]
-
-        # self._init_args = {'row_slice': row_slice,
-        #                    'hdf5_datasets': hdf5_datasets}
-        # super(Hdf5DatasetSlice, self).__init__(names=names,
-        #                                         tensors=tensors,
-        #                                         formats=formats)
+        self._init_args = (hdf5_data, slice_arg)
 
     def __getinitargs__(self):
         '''
@@ -433,7 +387,3 @@ class Hdf5Dataset(Dataset):
         '''
 
         return self._init_args
-
-    # pylint: disable=no-self-use
-    def __getstate__(self):
-        return False  # prevents __setstate__ from being called on unpickling
