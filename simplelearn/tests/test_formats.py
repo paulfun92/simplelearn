@@ -67,8 +67,8 @@ def test_format_abstract_methods():
 
     batch_format = Format()
     assert_raises_regexp(NotImplementedError,
-                         "_is_equivalent\(\) not yet implemented.",
-                         batch_format._is_equivalent,
+                         "requires_conversion\(\) not yet implemented.",
+                         batch_format.requires_conversion,
                          batch_format)
 
     assert_raises_regexp(NotImplementedError,
@@ -96,8 +96,8 @@ class DummyFormat(Format):
     def __init__(self, dtype=None):
         super(DummyFormat, self).__init__(dtype=dtype)
 
-    def _is_equivalent(self, target_format):
-        return self == target_format
+    def requires_conversion(self, target_format):
+        return self != target_format
 
     def _convert(self, batch, target_format, output):
         output_dtype = (batch.dtype if target_format.dtype is None
