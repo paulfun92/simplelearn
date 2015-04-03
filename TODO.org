@@ -192,7 +192,12 @@ In-between: serializeable nodes, but forget about serializeable updates for now 
 ***** This is better because it sepearates the concerns of iteration order vs format. 
 
 
-* TODO Wednesday:
+* TODO Thursday:
+** Get mnist working
+** give Dataset a __getitem__ method that can take ints or slices.
+** In Hdf5Dataset, override __getitem__ to also take strings.
+** let Hdf5Datasets also be a Dataset? In which case, change its name to Hdf5Dataset, and change HdfDatasetsSlice to Hdf5DatasetSlice.
+** change norb.py to use new Hdf5Dataset[Slice].
 ** Finish instance dataset making for stereo
 ** add support for mono
 ** port images & labels memmap to mono-NORB converter script

@@ -2,36 +2,19 @@
 Function for loading MNIST as a Dataset.
 '''
 
-import warnings
 from os.path import join, isdir, isfile
 import struct
-from collections import OrderedDict
-import h5py
 import numpy
 from nose.tools import (assert_true,
                         assert_false,
-                        assert_is_instance,
                         assert_equal,
-                        assert_in,
-                        assert_is_instance)
-from simplelearn.formats import DenseFormat
+                        assert_in)
 from simplelearn.data import data_path
-from simplelearn.data.hdf5_dataset import add_tensor, Hdf5Dataset
+from simplelearn.formats import DenseFormat
+from simplelearn.utils import safe_izip
+from simplelearn.data.hdf5 import Hdf5Data
 
 import pdb
-
-# class __Mnist(Hdf5Dataset):
-#     '''
-#     Do not construct directly. Use the load_mnist() function instead.
-#     '''
-
-#     def __init__(self, file_path, which_set):
-#         assert_in(which_set, ('test', 'train'))
-#         self._which_set = which_set
-#         super(__Mnist, self).__init__(file_path)
-
-#     def _get_dataset_group(self, hdf5):
-#         return hdf5[self.which_set]
 
 
 def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
@@ -49,12 +32,14 @@ def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
 
     Returns
     -------
-    rval: h5py.File
-      An h5py file handle with the following structure:
-        rval['train']['images'] := training images
-        rval['train']['labels'] := training labels
-        rval['test']['images'] := test images
-        rval['test']['labels'] := test labels
+    rval: Hdf5Data
+      The default slices are set to 'train' and 'test'.
+      The tensors are 'images' and 'labels'.
+
+      Extract train and test slices as:
+
+        training_set = Hdf5DatasetSlice(rval, 'train')
+        testing_set = Hdf5DatasetSlice(rval, 'test')
     '''
 
     assert_true(isdir(raw_mnist_dir))
@@ -94,107 +79,69 @@ def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
         assert_equal(result.size, num_labels)
         return result
 
-    def add_dataset(train_or_test, hdf5_file):
+    def get_data(train_or_test, images_or_labels):
         '''
-        Adds the training or testing set to the hdf5 file.
+        Returns the train/test set's images/labels as a numpy array.
         '''
-        assert_in(train_or_test, ('train', 'test'))
 
-        group = hdf5_file.create_group(train_or_test)
+        assert_in(train_or_test, ('train', 'test'))
+        assert_in(images_or_labels, ('images', 'labels'))
 
         prefix = 'train' if train_or_test == 'train' else 't10k'
 
-        raw_images_path = join(raw_mnist_dir, '%s-images-idx3-ubyte' % prefix)
-        raw_images = read_raw_images(raw_images_path)
-        images = add_tensor('images',
-                            raw_images.shape,
-                            raw_images.dtype,
-                            ('b', '0', '1'),
-                            group)
+        if images_or_labels == 'images':
+            filepath = join(raw_mnist_dir,
+                            '%s-images-idx3-ubyte' % prefix)
+            return read_raw_images(filepath)
+        else:
+            filepath = join(raw_mnist_dir,
+                            '%s-labels-idx1-ubyte' % prefix)
+            return read_raw_labels(filepath)
 
-        # images = group.create_dataset('images',
-        #                               raw_images.shape,
-        #                               dtype=raw_images.dtype)
-        images[...] = raw_images
+    image_data = [get_data(t, 'images') for t in ('train', 'test')]
+    label_data = [get_data(t, 'labels') for t in ('train', 'test')]
+    for images, labels, expected_size in safe_izip(image_data,
+                                                   label_data,
+                                                   (60000, 10000)):
+        assert_equal(images.shape[0], expected_size)
+        assert_equal(labels.shape[0], expected_size)
 
-        raw_labels_path = join(raw_mnist_dir, '%s-labels-idx1-ubyte' % prefix)
-        raw_labels = read_raw_labels(raw_labels_path)
+    hdf5_data = Hdf5Data(hdf5_path, mode='w-', size=70000)
+    hdf5_data.add_tensor('images',
+                         DenseFormat(axes=('b', '0', '1'),
+                                     shape=(-1, ) + image_data[0].shape[1:],
+                                     dtype=image_data[0].dtype))
+    hdf5_data.add_tensor('labels',
+                         DenseFormat(axes=('b'),
+                                     shape=(-1, ) + label_data[0].shape[1:],
+                                     dtype=label_data[0].dtype))
 
-        labels = add_tensor('labels',
-                            raw_labels.shape,
-                            raw_labels.dtype,
-                            ('b',),
-                            group)
+    training_set = hdf5_data.add_default_slice('train', 60000)
+    testing_set = hdf5_data.add_default_slice('test', -1)
 
-        # labels = group.create_dataset('labels',
-        #                               raw_labels.shape,
-        #                               dtype=raw_labels.dtype)
-        labels[...] = raw_labels
+    hdf5_data['train'] = [image_data[0], label_data[0]]
+    hdf5_data['test'] = [image_data[1], label_data[1]]
 
-    with h5py.File(hdf5_path, 'w-') as writeable_hdf5_file:
-        add_dataset('train', writeable_hdf5_file)
-        add_dataset('test', writeable_hdf5_file)
-
-    return h5py.File(hdf5_path, 'r')
+    return Hdf5Data(hdf5_path, mode='r')
 
 
-def load_mnist(raw_mnist_dir=None):
+def load_mnist():
     '''
     Loads MNIST data.
 
     If this is the first time this function is called, the data will be read
     from the raw MNIST files, and copied to a single HDF5 file, stored in
     $SIMPLELEARN_DATA_PATH/mnist/mnist_cache.h5. This is a one-time operation.
-    Subsequent calls to load_mnist will ignore the raw_mnist_dir
-
-
-    Parameters
-    ----------
-    raw_mnist_dir: str or None
-      The directory in which the raw MNIST files are to be found.
-      If None, this will use "$SIMPLELEARN_DATA_PATH/mnist"
 
     Returns
     -------
-    rval: tuple
-      A tuple of two simplelearn.data.Hdf5Datasets, the training and testing
-      set.
+    rval: Hdf5Data
     '''
     default_mnist_dir = join(data_path, 'mnist')
-    cache_path = join(default_mnist_dir, 'mnist_cache.h5')
+    cache_path = join(default_mnist_dir, 'cache.h5')
 
     if isfile(cache_path):
-        if raw_mnist_dir is not None:
-            warnings.warn("Ignoring raw_mnist_dir argument '%s', since a "
-                          "cached copy of MNIST already exists at %s." %
-                          (raw_mnist_dir, cache_path))
-
+        return Hdf5Data(cache_path, mode='r')
     else:  # Construct cache file
-
-        if raw_mnist_dir is None:
-            raw_mnist_dir = default_mnist_dir
-        else:
-            assert_is_instance(raw_mnist_dir, basestring)
-
-        hdf_file = _copy_raw_mnist_to_hdf5(raw_mnist_dir, cache_path)
-
-
-    result = tuple(Hdf5Dataset(cache_path, u'/%s' % which_set)
-                   for which_set in ('train', 'test'))
-    return result
-    # def group_to_dataset(group):
-    #     assert_equal(group.keys(), ['images', 'labels'])
-    #     images = group['images']
-    #     labels = group['labels']
-
-    #     formats = [DenseFormat(axes=('b', '0', '1'),
-    #                            shape=[-1, images.shape[1], images.shape[2]],
-    #                            dtype=images.dtype),
-    #                DenseFormat(axes=['b'],
-    #                            shape=[-1],
-    #                            dtype=labels.dtype)]
-
-    #     return Dataset(group.keys(), group.values(), formats)
-
-    # return tuple(group_to_dataset(hdf_file[set_name])
-    #              for set_name in ('train', 'test'))
+        raw_mnist_dir = join(default_mnist_dir, 'original_files')
+        return _copy_raw_mnist_to_hdf5(raw_mnist_dir, cache_path)

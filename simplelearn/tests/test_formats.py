@@ -67,8 +67,8 @@ def test_format_abstract_methods():
 
     batch_format = Format()
     assert_raises_regexp(NotImplementedError,
-                         "_is_equivalent\(\) not yet implemented.",
-                         batch_format._is_equivalent,
+                         "requires_conversion\(\) not yet implemented.",
+                         batch_format.requires_conversion,
                          batch_format)
 
     assert_raises_regexp(NotImplementedError,
@@ -96,8 +96,8 @@ class DummyFormat(Format):
     def __init__(self, dtype=None):
         super(DummyFormat, self).__init__(dtype=dtype)
 
-    def _is_equivalent(self, target_format):
-        return self == target_format
+    def requires_conversion(self, target_format):
+        return self != target_format
 
     def _convert(self, batch, target_format, output):
         output_dtype = (batch.dtype if target_format.dtype is None
@@ -493,7 +493,7 @@ def test_denseformat_convert_to_denseformat():
             assert_array_equal(mono_rgb_batch.flatten()[:3], (0, 1, 2))
 
             assert_raises_regexp(ValueError,
-                                 "If self.axes and target_format.axes don't "
+                                 "If self.axes and output_format.axes don't "
                                  "contain the same axes",
                                  mono_rgb.convert,
                                  mono_rgb_batch,

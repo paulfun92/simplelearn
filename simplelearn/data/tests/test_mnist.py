@@ -8,93 +8,118 @@ from numpy.testing import assert_allclose, assert_array_equal
 from nose.tools import assert_equal, assert_true
 from simplelearn.formats import DenseFormat
 from simplelearn.data.mnist import load_mnist
-from simplelearn.utils import safe_izip
+from simplelearn.utils import safe_izip, assert_all_equal
 from simplelearn.nodes import RescaleImage
 
 try:
     from pylearn2.datasets.mnist import MNIST as Pylearn2Mnist
-    pylearn2_is_installed = True
+    PYLEARN2_IS_INSTALLED = True
 except ImportError:
-    pylearn2_is_installed = False
-
-import pdb
+    PYLEARN2_IS_INSTALLED = False
 
 
 def test_mnist():
-    mnist_datasets = load_mnist()
-    for mnist, expected_size in safe_izip(mnist_datasets, (60000, 10000)):
-        assert_equal(mnist._tensors[0].shape[0], expected_size)
+    '''
+    Tests load_mnist().
 
-    training_set, test_set = mnist_datasets
+    Checks test & train sets' formats and sizes, but not content.
+    '''
+    mnist_hdf = load_mnist()
+    train_set = mnist_hdf['train']
+    test_set = mnist_hdf['test']
 
-    expected_formats =  [DenseFormat(shape=[-1, 28, 28],
-                                     axes=['b', '0', '1'],
-                                     dtype='uint8'),
-                         DenseFormat(shape=[-1],
-                                     axes=['b'],
-                                     dtype='uint8')]
+    for mnist, expected_size in safe_izip((train_set, test_set),
+                                          (60000, 10000)):
+        assert_equal(mnist.size, expected_size)
+
+    expected_formats = [DenseFormat(shape=[-1, 28, 28],
+                                    axes=['b', '0', '1'],
+                                    dtype='uint8'),
+                        DenseFormat(shape=[-1],
+                                    axes=['b'],
+                                    dtype='uint8')]
     expected_names = [u'images', u'labels']
     expected_sizes = [60000, 10000]
 
-    for dataset, expected_size in safe_izip((training_set, test_set),
+    for dataset, expected_size in safe_izip((train_set, test_set),
                                             expected_sizes):
-        assert_equal(dataset._names, expected_names)
-        assert_equal(dataset._formats, expected_formats)
+        assert_all_equal(dataset.names, expected_names)
+        assert_all_equal(dataset.formats, expected_formats)
 
-        for tensor, fmt in safe_izip(dataset._tensors, dataset._formats):
+        for tensor, fmt in safe_izip(dataset.tensors, dataset.formats):
             fmt.check(tensor)
             assert_equal(tensor.shape[0], expected_size)
 
-        labels = dataset._tensors[dataset._names.index('labels')]
+        labels = dataset.tensors[dataset.names.index('labels')]
         assert_true(numpy.logical_and(labels[...] >= 0,
                                       labels[...] < 10).all())
 
 
 def test_mnist_against_pylearn2():
-    if not pylearn2_is_installed:
+    '''
+    Tests the content of the MNIST dataset loaded by load_mnist().
+
+    Compares against pylearn2's MNIST wrapper. No-op if pylearn2 is not
+    installed.
+    '''
+    if not PYLEARN2_IS_INSTALLED:
         return
 
-    simplelearn_datasets = load_mnist()
+    mnist_hdf = load_mnist()
+    train_set = mnist_hdf['train']
+    test_set = mnist_hdf['test']
+
+    simplelearn_datasets = (train_set, test_set)
     pylearn2_datasets = [Pylearn2Mnist(which_set=w) for w in ('train', 'test')]
 
     def get_convert_function():
-        input_nodes = simplelearn_datasets[0].make_input_nodes()
+        '''
+        Converts simplelearn's mnist data (uint8, [0, 255]), to
+        pylearn2's iterator output (float32, [0.0, 1.0]).
+        '''
+        iterator = simplelearn_datasets[0].iterator(iterator_type='sequential',
+                                                    batch_size=1)
+        input_nodes = iterator.make_input_nodes()
         sl_batch_converter = RescaleImage(input_nodes[0])
         return theano.function([input_nodes[0].output_symbol],
                                sl_batch_converter.output_symbol)
 
-    convert_sl_batch = get_convert_function()
+    convert_s_batch = get_convert_function()
 
-    def check_equal(sl, pl):
+    def check_equal(s_mnist, p_mnist):
+        '''
+        Compares simplelearn and pylearn2's MNIST datasets.
+        '''
         batch_size = 100
 
-        sl_iter = sl.iterator(batch_size=100,
-                              iterator_type='sequential',
-                              loop_style='divisible')
+        s_iter = s_mnist.iterator(batch_size=batch_size,
+                                  iterator_type='sequential',
+                                  loop_style='divisible')
 
-        pl_iter = pl.iterator(batch_size=100,
-                              mode='sequential',
-                              topo=True,
-                              targets=True)
+        p_iter = p_mnist.iterator(batch_size=batch_size,
+                                  mode='sequential',
+                                  topo=True,
+                                  targets=True)
 
         keep_going = True
 
         count = 0
 
         while keep_going:
-            sl_image, sl_label = sl_iter.next()
-            pl_image, pl_label = pl_iter.next()
+            s_image, s_label = s_iter.next()
+            p_image, p_label = p_iter.next()
 
-            sl_image = convert_sl_batch(sl_image)[..., numpy.newaxis]
-            sl_label = sl_label[:, numpy.newaxis]
+            s_image = convert_s_batch(s_image)[..., numpy.newaxis]
+            s_label = s_label[:, numpy.newaxis]
 
-            assert_allclose(sl_image, pl_image)
-            assert_array_equal(sl_label, pl_label)
-            count += sl_image.shape[0]
-            keep_going = not sl_iter.next_is_new_epoch()
+            assert_allclose(s_image, p_image)
+            assert_array_equal(s_label, p_label)
+            count += s_image.shape[0]
+            keep_going = not s_iter.next_is_new_epoch()
 
-        assert_equal(count, sl._tensors[0].shape[0])
-        assert_equal(count, pl.X.shape[0])
+        assert_equal(count, s_mnist.tensors[0].shape[0])
+        assert_equal(count, p_mnist.X.shape[0])
 
-    for sl, pl in safe_izip(simplelearn_datasets, pylearn2_datasets):
-        check_equal(sl, pl)
+    for s_mnist, p_mnist in safe_izip(simplelearn_datasets,
+                                      pylearn2_datasets):
+        check_equal(s_mnist, p_mnist)

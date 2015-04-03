@@ -10,6 +10,8 @@ __license__ = "Apache 2.0"
 import os
 from simplelearn.formats import Format
 
+import pdb
+
 
 def _get_data_path():
     env_variable = 'SIMPLELEARN_DATA_PATH'
@@ -105,14 +107,17 @@ class DataIterator(object):
                                  "called, next_is_new_epoch() must return "
                                  "True. (It returned False.)")
 
-        # self._batch = self._next()
         result = self._next()
 
-        if not isinstance(result, tuple) or \
-           not all(Format.is_numeric(r) for r in result):
+        if not isinstance(result, tuple):
+            # pdb.set_trace()
+            raise TypeError("%s._next() implemented incorrectly: It must "
+                            "return a tuple, but got a %s." %
+                            (type(self), type(result)))
+        elif not all(Format.is_numeric(r) for r in result):
             raise TypeError("%s._next() implemented incorrectly: It must "
                             "return a tuple of numeric arrays, but got "
-                            "something else.")
+                            "something else." % type(self))
 
         self._next_was_called = True
         return result

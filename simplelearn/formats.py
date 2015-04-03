@@ -344,7 +344,7 @@ class DenseFormat(Format):
     def __init__(self, axes, shape, dtype):
         super(DenseFormat, self).__init__(dtype=dtype)
 
-        if not all(isinstance(axis, str) for axis in axes):
+        if not all(isinstance(axis, basestring) for axis in axes):
             raise TypeError("axes contain non-strings: %s" %
                             str(tuple(axes)))
 
@@ -494,7 +494,7 @@ class DenseFormat(Format):
                                                        batch.shape,
                                                        self.axes):
                 if axis != 'b':
-                    assert_equal(size, 
+                    assert_equal(size,
                                  expected_size,
                                  "Mismatch between this format's "
                                  "stated shape and the batch's shape:\n"
@@ -663,7 +663,7 @@ class DenseFormat(Format):
             assert_equal(frozenset(from_axes), frozenset(to_axes))
 
             for axes in (from_axes, to_axes):
-                assert all(isinstance(axis, str) for axis in axes)
+                assert all(isinstance(axis, basestring) for axis in axes)
 
             return batch.transpose([from_axes.index(a) for a in to_axes])
 

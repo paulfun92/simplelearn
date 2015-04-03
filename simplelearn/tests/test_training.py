@@ -2,6 +2,8 @@
 Unit tests for ../training.py
 '''
 
+from __future__ import print_function
+
 __author__ = "Matthew Koichi Grimes"
 __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2015"
@@ -197,7 +199,9 @@ def test_limit_param_norms():
 
         weights = theano.shared(numpy.zeros((1, ) + shape, dtype=floatX))
 
-        input_nodes = dataset.make_input_nodes()
+        training_iterator = dataset.iterator(iterator_type='sequential',
+                                             batch_size=1)
+        input_nodes = training_iterator.make_input_nodes()
         assert_equal(len(input_nodes), 1)
 
         costs_node = make_costs_node(input_nodes[0], weights)
@@ -221,8 +225,7 @@ def test_limit_param_norms():
         # weight_monitor = WeightMonitor(weights, [print_weight_norm])
 
         sgd = Sgd(inputs=[node.output_symbol for node in input_nodes],
-                  input_iterator=dataset.iterator(iterator_type='sequential',
-                                                  batch_size=1),
+                  input_iterator=training_iterator,
                   parameters=[weights],
                   parameter_updaters=[param_updater],
                   monitors=[average_cost_monitor],
@@ -236,7 +239,7 @@ def test_limit_param_norms():
         # an optional sanity-check to confirm that the weights are on a
         # straight line between their initial value (0.0) and the data.
         normed_weights = weights.get_value() / weight_norm
-        normed_data = dataset._tensors[0] / dataset_norm
+        normed_data = dataset.tensors[0] / dataset_norm
         assert_allclose(normed_weights,
                         normed_data,
                         rtol=learning_rate * 10)

@@ -128,21 +128,15 @@ def _make_hdf(which_norb):
 
     assert_in(which_norb, ('big', 'small'))
 
-    # need_to_download = False
-
     norb_directory = os.path.join(simplelearn.data.data_path,
                                   '%s_norb' % which_norb)
     if not os.path.isdir(norb_directory):
         os.mkdir(norb_directory)
-        # need_to_download = True
 
     norb_originals_directory = os.path.join(norb_directory, 'original_files')
 
     if not os.path.isdir(norb_originals_directory):
         os.mkdir(norb_originals_directory)
-        # need_to_download = True
-        # raise IOError("Created missing designated directory %s. "
-        #               "Please copy the raw NORB files into it.")
 
     def get_norb_filenames(which_norb, which_set):
         '''
@@ -199,14 +193,13 @@ def _make_hdf(which_norb):
                 for file_num_str in file_num_strs:
                     filename = ('{prefix}-5x{instances}x9x18x6x2x{dim}x{dim}'
                                 '-{which_set}ing{file_num_str}-{file_type}.'
-                                '{suffix}').format(
-                                    prefix=prefix,
-                                    instances=instances,
-                                    dim=dim,
-                                    which_set=which_set,
-                                    file_num_str=file_num_str,
-                                    file_type=file_type,
-                                    suffix=suffix)
+                                '{suffix}').format(prefix=prefix,
+                                                   instances=instances,
+                                                   dim=dim,
+                                                   which_set=which_set,
+                                                   file_num_str=file_num_str,
+                                                   file_type=file_type,
+                                                   suffix=suffix)
                     filepath = os.path.join(norb_originals_directory,
                                             filename)
                     file_list.append(filepath)
