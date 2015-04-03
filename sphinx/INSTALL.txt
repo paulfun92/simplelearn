@@ -1,7 +1,0 @@
-Install Theano and nosetests.
-
-To create documentation:
-
-sphinx-apidoc -o sphinx/ -F -H Simplelearn -A "Matthew Koichi Grimes" -V 0.1 -R 0.1 -f simplelearn/
-cd sphinx
-make html

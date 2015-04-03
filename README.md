@@ -27,21 +27,23 @@ Currently Simplelearn only supports deterministic models (no RBMs).
 
 Dependencies
 ------------
-* [Theano](http://www.deeplearning.net/software/theano/)
-* [nose](http://nose.readthedocs.org/en/latest/)
-* [CUDA](https://developer.nvidia.com/cuda-zone) Needed to run on the GPU.
-* [cuDNN](https://developer.nvidia.com/cuDNN)  Needed to run convnets on the GPU.
-* [sphinx](http://sphinx-doc.org/) Only needed if you want to build the API docs.
+* [Theano](http://www.deeplearning.net/software/theano/) Required.
+* [nose](http://nose.readthedocs.org/en/latest/) Required.
+* [h5py](http://www.h5py.org/) Required.
+* [CUDA](https://developer.nvidia.com/cuda-zone) To run on the GPU.
+* [cuDNN](https://developer.nvidia.com/cuDNN) To run convnets on the GPU.
+* [matplotlib](http://matplotlib.org/) To run many of the visualizers / examples.
+* [sphinx](http://sphinx-doc.org/) To build the API docs yourself.
 
 Documentation
 -------------
 
+Installation instructions are in simplelearn/INSTALL.md
+
 Beginners should start by browsing the complete working examples in examples/.
-API docs will be available online shortly.
 
-You will need sphinx and its numpydoc extension to build the API docs yourself.
-Doc building instructions are in simplelearn/sphinx/README.md
-
+API docs will be available online shortly. You can build your own HTML docs
+by following the doc-building instructions in simplelearn/INSTALL.md
 
 License
 -------
