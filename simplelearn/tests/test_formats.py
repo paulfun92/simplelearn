@@ -493,7 +493,7 @@ def test_denseformat_convert_to_denseformat():
             assert_array_equal(mono_rgb_batch.flatten()[:3], (0, 1, 2))
 
             assert_raises_regexp(ValueError,
-                                 "If self.axes and target_format.axes don't "
+                                 "If self.axes and output_format.axes don't "
                                  "contain the same axes",
                                  mono_rgb.convert,
                                  mono_rgb_batch,
