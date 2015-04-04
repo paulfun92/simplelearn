@@ -1,12 +1,4 @@
-'''
-Utility functions used throughout simplelearn
-'''
-
-# __author__ = "Matthew Koichi Grimes"
-# __email__ = "mkg@alum.mit.edu"
-# __copyright__ = "Copyright 2015"
-# __license__ = "Apache 2.0"
-
+from __future__ import print_function
 
 import os
 import collections
@@ -73,17 +65,23 @@ def human_readable_memory_size(size, precision=2):
     return "%.*f %s" % (precision, size, suffixes[suffix_index])
 
 
-def human_readable_time_duration(seconds):
-    hours = seconds // 60
+def human_readable_duration(seconds):
+    minutes = seconds // 60
     seconds = seconds % 60
-    days = hours // 24
-    hours = hours % 24
+    result = "%g s" % seconds
 
-    result = "%g s"
-    if hours > 0:
-        result = "%d h " + result
-    if days > 0:
-        result = "%d d " + result
+    if minutes > 0:
+        hours = minutes // 60
+        minutes = minutes % 60
+        result = ("%d m " % minutes) + result
+
+        if hours > 0:
+            days = hours // 24
+            hours = hours % 24
+            result = ("%d h " % hours) + result
+
+            if days > 0:
+                result = ("%d d " % days) + result
 
     return result
 
@@ -134,8 +132,9 @@ def download_url(url,
 
         if show_progress:
             # print("Downloading: %s Bytes: %s" % (file_name, file_size))
-            print("Downloading %s (%s)" %
-                  (file_name, human_readable_memory_size(file_size)))
+            print("Downloading {} ({})".format(
+                file_name,
+                human_readable_memory_size(file_size)))
 
         downloaded_size = 0
         block_size = 8192
@@ -147,11 +146,17 @@ def download_url(url,
             downloaded_size += len(buffer)
             file_handle.write(buffer)
             if show_progress:
-                status = (r"%10d  [%3.2f%%]" %
-                          (downloaded_size,
-                           downloaded_size * 100. / file_size))
-                status = status + chr(8)*(len(status)+1)
-                print status,
+                print("{:10d}  [{:3.2f}%]".format(
+                    downloaded_size,
+                    downloaded_size * 100. / file_size),
+                      end='\r')
+
+
+                # status = (r"%10d  [%3.2f%%]" %
+                #           (downloaded_size,
+                #            downloaded_size * 100. / file_size))
+                # status = status + chr(8)*(len(status)+1)
+                # print status,
 
 
 def assert_integer(arg):
