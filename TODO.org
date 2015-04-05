@@ -192,11 +192,10 @@ In-between: serializeable nodes, but forget about serializeable updates for now 
 ***** This is better because it sepearates the concerns of iteration order vs format. 
 
 
-* TODO Thursday:
-** Get mnist working
-** give Dataset a __getitem__ method that can take ints or slices.
-** In Hdf5Dataset, override __getitem__ to also take strings.
-** let Hdf5Datasets also be a Dataset? In which case, change its name to Hdf5Dataset, and change HdfDatasetsSlice to Hdf5DatasetSlice.
+* TODO Friday:
+** DONE Get mnist working
+** DONE give Dataset a __getitem__ method that can take ints or slices.
+** DONE In Hdf5Dataset, override __getitem__ to also take strings.
 ** change norb.py to use new Hdf5Dataset[Slice].
 ** Finish instance dataset making for stereo
 ** add support for mono
@@ -204,7 +203,5 @@ In-between: serializeable nodes, but forget about serializeable updates for now 
 *** Don't forget jitter for x & y position.
 ** Create instance dataset for 6-objects dataset
 ** Write script for classifying 6-objects dataset.
-
-* TODO Thursday:
 ** Write script for classifying & camera angle regression
 ** Add position regression (i.e. position offset from center).

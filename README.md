@@ -27,9 +27,14 @@ Currently Simplelearn only supports deterministic models (no RBMs).
 
 Dependencies
 ------------
-* [Theano](http://www.deeplearning.net/software/theano/) Required.
-* [nose](http://nose.readthedocs.org/en/latest/) Required.
-* [h5py](http://www.h5py.org/) Required.
+Required:
+
+* [Theano](http://www.deeplearning.net/software/theano/)
+* [nose](http://nose.readthedocs.org/en/latest/)
+* [h5py](http://www.h5py.org/)
+
+Optional:
+
 * [CUDA](https://developer.nvidia.com/cuda-zone) To run on the GPU.
 * [cuDNN](https://developer.nvidia.com/cuDNN) To run convnets on the GPU.
 * [matplotlib](http://matplotlib.org/) To run many of the visualizers / examples.
