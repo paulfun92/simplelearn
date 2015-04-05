@@ -14,14 +14,15 @@ from simplelearn.utils import (human_readable_memory_size,
 
 def main():
     # modeled after big NORB's test set images
-    shape = (29160 * 5, 2, 108, 108)
+    shape = (29160 * 2, 2, 108, 108)
     dtype = numpy.dtype('uint8')
     dtype_max = numpy.iinfo(dtype).max
 
-    #batch_size = 29160
     batch_size = 128
+    num_batches = int(numpy.ceil(shape[0] / float(batch_size)))
 
     path_prefix = '/tmp/benchmark_random_access_to_hdf5_and_memmap'
+    # path_prefix = '/home/mkg/tmp/benchmark_random_access_to_hdf5_and_memmap'
     h5_path = path_prefix + '.h5'
     mm_path = path_prefix + '.npy'
 
@@ -66,19 +67,25 @@ def main():
         print("Filling HDF5 tensor.")
         fill_tensor(h5_tensor)
 
-    print("HDF5 sequential write time: " +
-          human_readable_duration(default_timer() - start_time))
+    duration = default_timer() - start_time
+    print("HDF5 sequential write time: " + human_readable_duration(duration))
+    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                  batch_size))
 
     print("Allocating %s memmap tensor to %s." % (memory_size, mm_path))
     start_time = default_timer()
     fill_tensor(open_memmap(mm_path, 'w+', dtype, shape))
+    duration = default_timer() - start_time
     print('Memmap sequential write time: %s' %
-          human_readable_duration(default_timer() - start_time))
+          human_readable_duration(duration))
+    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                  batch_size))
 
     rng = numpy.random.RandomState(1413)
 
+    shuffled_indices = rng.choice(shape[0], size=shape[0], replace=False)
+
     def random_reads(tensor):
-        shuffled_indices = rng.choice(shape[0], size=shape[0], replace=False)
         row_index = 0
 
         is_hdf5 = isinstance(tensor, h5py.Dataset)
@@ -102,14 +109,18 @@ def main():
         h5_tensor = h5_file['tensor']
         random_reads(h5_tensor)
 
-    print('HDF5 random read time: ' +
-          human_readable_duration(default_timer() - start_time))
+    duration = default_timer() - start_time
+    print('HDF5 random read time: ' + human_readable_duration(duration))
+    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                  batch_size))
 
     print("Randomly reading from " + mm_path)
     start_time = default_timer()
     random_reads(open_memmap(mm_path, 'r', dtype, shape))
-    print('Memmap random read time: ' +
-          human_readable_duration(default_timer() - start_time))
+    duration = default_timer() - start_time
+    print('Memmap random read time: ' + human_readable_duration(duration))
+    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                  batch_size))
 
 
 if __name__ == '__main__':
