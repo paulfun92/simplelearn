@@ -2,54 +2,32 @@
 Function for loading MNIST as a Dataset.
 '''
 
-from os.path import join, isdir, isfile
-import struct
-import numpy
-from nose.tools import (assert_true,
-                        assert_false,
-                        assert_equal,
-                        assert_in)
-from simplelearn.data import data_path
-from simplelearn.formats import DenseFormat
-from simplelearn.utils import safe_izip
-from simplelearn.data.hdf5 import Hdf5Data
-
-import pdb
+import os
+import gzip
+from simplelearn.data.h5_dataset import open_h5_file, H5Dataset
 
 
-def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
+def _read_mnist_file(raw_file_path):
     '''
-    Copies the MNIST train and test data to a new hdf5 file.
-
-    Parameters
-    ----------
-    raw_mnist_dir: str
-      The path containing the raw MNIST files:
-        train-images-idx3-ubyte
-        train-labels-idx1-ubyte
-        t10k-images-idx3-ubyte
-        t10k-labels-idx1-ubyte
-
-    Returns
-    -------
-    rval: Hdf5Data
-      The default slices are set to 'train' and 'test'.
-      The tensors are 'images' and 'labels'.
-
-      Extract train and test slices as:
-
-        training_set = Hdf5DatasetSlice(rval, 'train')
-        testing_set = Hdf5DatasetSlice(rval, 'test')
+    Returns the tensor encoded in an original MNIST file as a numpy.ndarray.
     '''
 
-    assert_true(isdir(raw_mnist_dir))
-    assert_false(isfile(hdf5_path))
+    def open_file(file_path):
+        '''
+        Returns a readable file handle to an MNIST file, either in the original
+        gzipped form, or uncompressed form.
+        '''
+        extension = os.path.splitext(raw_file_path)[1]
+        if extension = '.gz':
+            return gzip.open(raw_file_path) if extension == '.gz'
+        else:
+            return open(raw_file_path, 'rb')
 
-    def read_raw_images(raw_images_file_path):
+    def read_mnist_image_file(file_path):
         '''
         Reads a MNIST images file, returns it as a numpy array.
         '''
-        raw_images_file = open(raw_images_file_path, 'rb')
+        raw_images_file = open(file_path, 'rb')
         (magic_number,
          num_images,
          num_rows,
@@ -57,91 +35,95 @@ def _copy_raw_mnist_to_hdf5(raw_mnist_dir, hdf5_path):
 
         if magic_number != 2051:
             raise ValueError("Wrong magic number in MNIST images file %s" %
-                             raw_images_file_path)
+                             file_path)
 
         data = numpy.fromfile(raw_images_file, dtype='uint8')
         return data.reshape((num_images, num_rows, num_cols))
 
-    def read_raw_labels(raw_labels_file_path):
+    def read_mnist_labels_file(file_path):
         '''
         Reads a MNIST labels file, returns it as a numpy array.
         '''
-        raw_labels_file = open(raw_labels_file_path, 'rb')
+        raw_labels_file = open(file_path, 'rb')
         (magic_number,
          num_labels) = struct.unpack('>ii', raw_labels_file.read(8))
 
         if magic_number != 2049:
             raise ValueError("Wrong magic number in MNIST labels file %s" %
-                             raw_labels_file_path)
+                             file_path)
 
         result = numpy.fromfile(raw_labels_file, dtype='uint8')
         assert_equal(result.ndim, 1)
         assert_equal(result.size, num_labels)
         return result
 
-    def get_data(train_or_test, images_or_labels):
-        '''
-        Returns the train/test set's images/labels as a numpy array.
-        '''
-
-        assert_in(train_or_test, ('train', 'test'))
-        assert_in(images_or_labels, ('images', 'labels'))
-
-        prefix = 'train' if train_or_test == 'train' else 't10k'
-
-        if images_or_labels == 'images':
-            filepath = join(raw_mnist_dir,
-                            '%s-images-idx3-ubyte' % prefix)
-            return read_raw_images(filepath)
-        else:
-            filepath = join(raw_mnist_dir,
-                            '%s-labels-idx1-ubyte' % prefix)
-            return read_raw_labels(filepath)
-
-    image_data = [get_data(t, 'images') for t in ('train', 'test')]
-    label_data = [get_data(t, 'labels') for t in ('train', 'test')]
-    for images, labels, expected_size in safe_izip(image_data,
-                                                   label_data,
-                                                   (60000, 10000)):
-        assert_equal(images.shape[0], expected_size)
-        assert_equal(labels.shape[0], expected_size)
-
-    hdf5_data = Hdf5Data(hdf5_path, mode='w-', size=70000)
-    hdf5_data.add_tensor('images',
-                         DenseFormat(axes=('b', '0', '1'),
-                                     shape=(-1, ) + image_data[0].shape[1:],
-                                     dtype=image_data[0].dtype))
-    hdf5_data.add_tensor('labels',
-                         DenseFormat(axes=('b'),
-                                     shape=(-1, ) + label_data[0].shape[1:],
-                                     dtype=label_data[0].dtype))
-
-    training_set = hdf5_data.add_default_slice('train', 60000)
-    testing_set = hdf5_data.add_default_slice('test', -1)
-
-    hdf5_data['train'] = [image_data[0], label_data[0]]
-    hdf5_data['test'] = [image_data[1], label_data[1]]
-
-    return Hdf5Data(hdf5_path, mode='r')
+    if '-idx3-' in raw_file_path:
+        return _read_mnist_image_file(raw_file_path)
+    else:
+        assert_in('-idx1-', raw_file_path)
+        return _read_mnist_label_file(raw_file_path)
 
 
 def load_mnist():
     '''
-    Loads MNIST data.
+    Returns the train and test sets of MNIST.
 
-    If this is the first time this function is called, the data will be read
-    from the raw MNIST files, and copied to a single HDF5 file, stored in
-    $SIMPLELEARN_DATA_PATH/mnist/mnist_cache.h5. This is a one-time operation.
+    Downloads and copies to a local HDF5 cache file if necessary.
 
     Returns
     -------
-    rval: Hdf5Data
+    rval: tuple
+      (train, test), where each is an H5Dataset
     '''
-    default_mnist_dir = join(data_path, 'mnist')
-    cache_path = join(default_mnist_dir, 'cache.h5')
 
-    if isfile(cache_path):
-        return Hdf5Data(cache_path, mode='r')
-    else:  # Construct cache file
-        raw_mnist_dir = join(default_mnist_dir, 'original_files')
-        return _copy_raw_mnist_to_hdf5(raw_mnist_dir, cache_path)
+    mnist_dir = os.path.join(simplelearn.data.data_path, 'mnist')
+    if not os.path.isdir(mnist_dir):
+        os.mkdir(mnist_dir)
+
+    h5_path = os.path.join(mnist_dir, 'cache.h5')
+    partitions = h5_path['partitions']
+
+    partition_names = tuple(h5_path['partition_names'])
+    assert_equal(partition_names, ('test', 'train'))
+
+    (train_filenames,
+     test_filenames) = (['{}-images-idx3-ubyte.gz'.format(prefix),
+                         '{}-labels-idx1-ubyte.gz'.format(prefix)]
+                        for prefix in ('train', 't10k'))
+
+    tensor_names = tuple(h5_path['tensor_names'])
+    assert_equal(tensor_names, ('images', 'labels'))
+
+    if not os.path.isfile(h5_path):
+        h5_file = open_h5_file(h5_path,
+                               partition_names,
+                               (60000, 10000),
+                               tensor_names,
+                               (DenseFormat(axes=('b', '0', '1'),
+                                            shape=(-1, 28, 28),
+                                            dtype='uint8'),
+                                DenseFormat(axes=('b',),
+                                            shape=(-1, ),
+                                            dtype='uint8')))
+
+        originals_path = os.path.join(mnist_dir, 'original_files')
+        if not os.path.isdir(originals_path):
+            os.mkdir(originals_path)
+
+        for (partition_name,
+             filenames) in safe_izip(partition_names,
+                                     [train_filenames, test_filenames]):
+            partition = partitions[partition_name]
+            h5_tensors = [partition[n] for n in tensor_names]
+
+            for h5_tensor, original_filename in safe_izip(h5_tensors,
+                                                          filenames):
+                filepath = os.path.join(originals_dir, original_filename)
+                if not os.path.isfile(filepath):
+                    url_root = "http://yann.lecun.com/exdb/mnist/"
+                    url = url_root + original_filename
+                    download_url(url,
+                                 local_filepath=filepath,
+                                 show_progress=True)
+
+                tensor[...] = _read_mnist_file(filepath)

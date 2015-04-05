@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 
+import argparse
 from timeit import default_timer
 import h5py
 import numpy
@@ -13,16 +14,61 @@ from simplelearn.utils import (human_readable_memory_size,
 
 
 def main():
+
+    def parse_args():
+        parser = argparse.ArgumentParser(
+            description=("Compares sequential write and random read times for "
+                         "HDF5 vs memmap datasets."))
+
+        parser.add_argument("--output-dir",
+                            default="/tmp/",
+                            help=("The directory to output to. Handy for "
+                                  "comparing HDD vs SDD performance."))
+
+        parser.add_argument("--no-memmap",
+                            action='store_true',
+                            default=False,
+                            help="Don't test memmaps.")
+
+        parser.add_argument("--no-h5",
+                            action='store_true',
+                            default=False,
+                            help="Don't test HDF5.")
+
+        parser.add_argument("--batch-size",
+                            default=128,
+                            help="Number of images per batch")
+
+        parser.add_argument("--dtype",
+                            type=numpy.dtype,
+                            default='uint8',
+                            help="Data dtype.")
+
+        parser.add_argument("--image-dim",
+                            default=108,  # from big NORB dataset
+                            help=("Size of one side of the random square "
+                                  "images."))
+
+        parser.add_argument("--num-gb",
+                            type=float,
+                            default=1.0,
+                            help="File size, in GB")
+
+    args = parse_args()
+
     # modeled after big NORB's test set images
-    shape = (29160 * 2, 2, 108, 108)
-    dtype = numpy.dtype('uint8')
-    dtype_max = numpy.iinfo(dtype).max
+    example_shape = (args.image_dim, args.image_dim)
+    example_size = numpy.prod(example_shape) * args.dtype.itemsize
+    num_examples = numpy.floor(num_GB * (1024 ** 3) / example_size)
 
-    batch_size = 128
-    num_batches = int(numpy.ceil(shape[0] / float(batch_size)))
+    shape = (num_examples, args.image_dim, args.image_dim)
+    dtype_max = numpy.iinfo(args.dtype).max
 
-    path_prefix = '/tmp/benchmark_random_access_to_hdf5_and_memmap'
-    # path_prefix = '/home/mkg/tmp/benchmark_random_access_to_hdf5_and_memmap'
+    # batch_size = 128
+    num_batches = int(numpy.ceil(shape[0] / float(args.batch_size)))
+
+    path_prefix = os.path.join(args.output_dir,
+                               '/benchmark_random_access_to_hdf5_and_memmap')
     h5_path = path_prefix + '.h5'
     mm_path = path_prefix + '.npy'
 
@@ -52,7 +98,7 @@ def main():
             print("writing {} of {} rows".format(row_index, shape[0]),
                   end='\r')
 
-            next_row_index = min(shape[0], row_index + batch_size)
+            next_row_index = min(shape[0], row_index + args.batch_size)
             values = get_expected_values(row_index, next_row_index)
 
             tensor[row_index:next_row_index, ...] = values
@@ -60,26 +106,28 @@ def main():
 
     memory_size = human_readable_memory_size(numpy.prod(shape))
 
-    start_time = default_timer()
-    with h5py.File(h5_path, mode='w') as h5_file:
-        print("Allocating %s HDF5 tensor to %s." % (memory_size, h5_path))
-        h5_tensor = h5_file.create_dataset('tensor', shape, dtype)
-        print("Filling HDF5 tensor.")
-        fill_tensor(h5_tensor)
+    if not args.no_h5:
+        start_time = default_timer()
+        with h5py.File(h5_path, mode='w') as h5_file:
+            print("Allocating %s HDF5 tensor to %s." % (memory_size, h5_path))
+            h5_tensor = h5_file.create_dataset('tensor', shape, args.dtype)
+            print("Filling HDF5 tensor.")
+            fill_tensor(h5_tensor)
 
-    duration = default_timer() - start_time
-    print("HDF5 sequential write time: " + human_readable_duration(duration))
-    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
-                                                  batch_size))
+        duration = default_timer() - start_time
+        print("HDF5 sequential write time: " + human_readable_duration(duration))
+        print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                      args.batch_size))
 
-    print("Allocating %s memmap tensor to %s." % (memory_size, mm_path))
-    start_time = default_timer()
-    fill_tensor(open_memmap(mm_path, 'w+', dtype, shape))
-    duration = default_timer() - start_time
-    print('Memmap sequential write time: %s' %
-          human_readable_duration(duration))
-    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
-                                                  batch_size))
+    if not args.no_memmap:
+        print("Allocating %s memmap tensor to %s." % (memory_size, mm_path))
+        start_time = default_timer()
+        fill_tensor(open_memmap(mm_path, 'w+', args.dtype, shape))
+        duration = default_timer() - start_time
+        print('Memmap sequential write time: %s' %
+              human_readable_duration(duration))
+        print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                      args.batch_size))
 
     rng = numpy.random.RandomState(1413)
 
@@ -93,7 +141,7 @@ def main():
         while row_index < shape[0]:
             print("read {} of {} rows".format(row_index, shape[0]), end='\r')
 
-            next_row_index = min(shape[0], row_index + batch_size)
+            next_row_index = min(shape[0], row_index + args.batch_size)
             indices = shuffled_indices[row_index:next_row_index]
             if is_hdf5:
                 indices = numpy.sort(indices)
@@ -103,24 +151,26 @@ def main():
 
             row_index = next_row_index
 
-    print("Randomly reading from " + h5_path)
-    start_time = default_timer()
-    with h5py.File(h5_path, mode='r') as h5_file:
-        h5_tensor = h5_file['tensor']
-        random_reads(h5_tensor)
+    if not args.no_h5:
+        print("Randomly reading from " + h5_path)
+        start_time = default_timer()
+        with h5py.File(h5_path, mode='r') as h5_file:
+            h5_tensor = h5_file['tensor']
+            random_reads(h5_tensor)
 
-    duration = default_timer() - start_time
-    print('HDF5 random read time: ' + human_readable_duration(duration))
-    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
-                                                  batch_size))
+        duration = default_timer() - start_time
+        print('HDF5 random read time: ' + human_readable_duration(duration))
+        print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                      args.batch_size))
 
-    print("Randomly reading from " + mm_path)
-    start_time = default_timer()
-    random_reads(open_memmap(mm_path, 'r', dtype, shape))
-    duration = default_timer() - start_time
-    print('Memmap random read time: ' + human_readable_duration(duration))
-    print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
-                                                  batch_size))
+    if not args.no_memmap:
+        print("Randomly reading from " + mm_path)
+        start_time = default_timer()
+        random_reads(open_memmap(mm_path, 'r', args.dtype, shape))
+        duration = default_timer() - start_time
+        print('Memmap random read time: ' + human_readable_duration(duration))
+        print("{:.2g} secs per {}-sized batch".format(duration / num_batches,
+                                                      args.batch_size))
 
 
 if __name__ == '__main__':
