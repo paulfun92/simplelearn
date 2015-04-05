@@ -2,6 +2,8 @@
 Utility functions used throughout simplelearn
 '''
 
+from __future__ import print_function
+
 __author__ = "Matthew Koichi Grimes"
 __email__ = "mkg@alum.mit.edu"
 __copyright__ = "Copyright 2015"
@@ -73,17 +75,23 @@ def human_readable_memory_size(size, precision=2):
     return "%.*f %s" % (precision, size, suffixes[suffix_index])
 
 
-def human_readable_time_duration(seconds):
-    hours = seconds // 60
+def human_readable_duration(seconds):
+    minutes = seconds // 60
     seconds = seconds % 60
-    days = hours // 24
-    hours = hours % 24
+    result = "%g s" % seconds
 
-    result = "%g s"
-    if hours > 0:
-        result = "%d h " + result
-    if days > 0:
-        result = "%d d " + result
+    if minutes > 0:
+        hours = minutes // 60
+        minutes = minutes % 60
+        result = ("%d m " % minutes) + result
+
+        if hours > 0:
+            days = hours // 24
+            hours = hours % 24
+            result = ("%d h " % hours) + result
+
+            if days > 0:
+                result = ("%d d " % days) + result
 
     return result
 
@@ -134,8 +142,9 @@ def download_url(url,
 
         if show_progress:
             # print("Downloading: %s Bytes: %s" % (file_name, file_size))
-            print("Downloading %s (%s)" %
-                  (file_name, human_readable_memory_size(file_size)))
+            print("Downloading {} ({})".format(
+                file_name,
+                human_readable_memory_size(file_size)))
 
         downloaded_size = 0
         block_size = 8192
@@ -147,11 +156,10 @@ def download_url(url,
             downloaded_size += len(buffer)
             file_handle.write(buffer)
             if show_progress:
-                status = (r"%10d  [%3.2f%%]" %
-                          (downloaded_size,
-                           downloaded_size * 100. / file_size))
-                status = status + chr(8)*(len(status)+1)
-                print status,
+                print("{:10d}  [{:3.2f}%]".format(
+                    downloaded_size,
+                    downloaded_size * 100. / file_size),
+                      end='\r')
 
 
 def assert_integer(arg):
@@ -256,24 +264,21 @@ def assert_all_equal(arg0, arg1=None):
     This can be called with 1 or 2 arguments, as follows:
 
     1 argument: checks that all elements are equal to each other.
-
       assert_all_equal([1, 1, 1])
 
     2 arguments: checks that all elements of arg0 are equal to
                  a scalar arg1.
-
       assert_all_equal([1, 1, 1], 1)
 
     2 arguments: checks that all corresponding elements of arg0 and
                  arg1 are equal to each other.
-
       assert_all_equal([1, 2, 3], (1, 2, 3))
+
 
     Parameters
     ----------
     arg0: Sequence
     arg1: scalar, or Sequence (optional)
-
     '''
     assert_is_instance(arg0, collections.Sequence)
     if arg1 is None:

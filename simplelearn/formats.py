@@ -1,4 +1,5 @@
-'''Classes that represent different data formats.
+'''
+Classes that represent different data formats.
 
 "Data format" includes things that don't qualitatively change the
 data, such as memory layout, axis order, and floating point precision.
@@ -10,7 +11,7 @@ converting from float to int, or complex to float, is not.
 
 __author__ = "Matthew Koichi Grimes"
 __email__ = "mkg@alum.mit.edu"
-__copyright__ = "Copyright 2014"
+__copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
 
