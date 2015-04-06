@@ -27,9 +27,8 @@ def main():
 
         parser.add_argument('--which-set',
                             required=True,
-                            choices=['test', 'train', 'both'],
-                            help=("Which set to view. Select from 'test', "
-                                  "'train', or 'both'"))
+                            choices=['test', 'train'],
+                            help=("Which set to view ('test' or 'train'"))
 
         return parser.parse_args()
 
@@ -39,22 +38,13 @@ def main():
                                          1,
                                          squeeze=True,
                                          figsize=(4, 4))
-    window_title = ("MNIST's testing and training sets"
-                    if args.which_set == 'both'
-                    else "MNIST's %sing set" % args.which_set)
-    print window_title
-    figure.canvas.set_window_title(window_title)
+
+    figure.canvas.set_window_title("MNIST's %sing set" % args.which_set)
 
     image_axes.get_xaxis().set_visible(False)
     image_axes.get_yaxis().set_visible(False)
 
-    data = load_mnist()
-
-    if args.which_set == 'both':
-        dataset = data[:]
-    else:
-        dataset = data[args.which_set]
-
+    dataset = load_mnist()[0 if args.which_set == 'train' else 1]
     iterator = dataset.iterator(batch_size=1, iterator_type='sequential')
 
     index = [0]

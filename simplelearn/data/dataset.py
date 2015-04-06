@@ -52,9 +52,9 @@ class Dataset(DataSource):
 
             fmt.check(tensor)
 
-        self.names = names
-        self.formats = formats
-        self.tensors = tensors
+        self.names = tuple(names)
+        self.formats = tuple(formats)
+        self.tensors = tuple(tensors)
 
     @property
     def size(self):
