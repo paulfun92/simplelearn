@@ -1,5 +1,5 @@
 '''
-Functions and classes for loading, saving, and iterating through NORB datasets.
+Function for loading NORB and Small NORB datasets.
 '''
 
 from __future__ import print_function
