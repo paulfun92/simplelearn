@@ -210,14 +210,12 @@ def make_instance_dataset(norb_name,
     train_indices = (a_train_indices, b_train_indices)
     test_indices = (a_test_indices, b_test_indices)
 
+    # Creates a .h5 file, copies repartitioned data into it, and shuffles.
     with make_h5_file(h5_path,
                       partition_names,
                       partition_sizes,
                       a_norb.names,
                       [mono_image_format, label_format]) as h5_file:
-        '''
-        Creates a .h5 file, copies repartitioned data into it, and shuffles.
-        '''
         partitions = h5_file['partitions']
 
         for partition_name, (a_indices, b_indices) \
@@ -248,10 +246,13 @@ def make_instance_dataset(norb_name,
             out_labels[len(a_indices):, :] = b_labels[b_indices, :]
 
             # Shuffles the output images and labels in the same way
-            print("Shuffling...")
-            for out_tensor in (out_images, out_labels):
+            for out_tensor, tensor_name in safe_izip((out_images, out_labels),
+                                                     ('images', 'labels')):
                 # same seed for each loop means same shuffle order
                 rng = numpy.random.RandomState(rng_seed)
+
+                print("Shuffling {} {}...".format(partition_name,
+                                                  tensor_name))
                 rng.shuffle(out_tensor)
 
     return h5_path
@@ -311,16 +312,6 @@ def main():
                                   "i2 ... cZ nZ, which specify each "
                                   "object using category and "
                                   "instance labels cx ix"))
-
-        def ends_with_h5(arg):
-            assert_equal(os.path.splitext(arg)[1], '.h5')
-            return arg
-
-        # parser.add_argument('-o',
-        #                     '--output',
-        #                     type=ends_with_h5,
-        #                     required=True,
-        #                     help=('.h5 file to save to'))
 
         args = parser.parse_args()
 

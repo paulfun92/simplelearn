@@ -142,6 +142,9 @@ class H5Dataset(Dataset):
           Path to the .h5 file
         '''
 
+        assert_is_instance(path, basestring)
+        assert_is_instance(partition_name, basestring)
+
         self.h5_file = h5py.File(path, mode='r')
 
         partitions = self.h5_file['partitions']
@@ -185,19 +188,34 @@ class H5Dataset(Dataset):
         self.__init__(os.path.join(simplelearn.data.data_path, state[0]),
                       state[1])
 
-def load_h5_datasets(h5_path):
+def load_h5_dataset(h5_path, partition=None):
     '''
     Returns all the H5Datasets contained in a file created with make_h5_file().
 
     Parameters
     ----------
+
     h5_path: str
       Path to .h5 file created with make_h5_file().
 
-    rval: tuple
-      A tuple of H5Datasets, one for each partition in the .h5 file.
+    partition: str or None
+      Optional. If supplied, this returns just that partition (e.g. 'test',
+      'train'). If omitted, this returns all partitions.
+
+    Returns
+    -------
+
+    rval: tuple, or H5Dataset
+      If <partition> is omitted, this returns a tuple of H5Datasets.
+      Otherwise, this returns just the H5Dataset of the specified partition.
     '''
 
     h5_file = h5py.File(h5_path, mode='r')
     partition_names = h5_file['partition_names']
-    return tuple(H5Dataset(h5_file, n) for n in partition_names)
+    if partition is None:
+        with h5py.File(h5_path, mode='r') as h5_file:
+            partition_names = list(h5_file['partition_names'])
+
+        return tuple(H5Dataset(h5_path, n) for n in partition_names)
+    else:
+        return H5Dataset(h5_path, partition)

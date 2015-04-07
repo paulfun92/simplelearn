@@ -1,7 +1,10 @@
 #! /usr/bin/env python
 
 '''
-Step through the images of NORB or Small NORB.
+Steps through the images of NORB or Small NORB.
+
+This is intended as a minimal example of using the NORB dataset.
+For an actually useful browser, use simplelearn/scripts/browse_norb.py.
 '''
 
 import sys
@@ -48,10 +51,8 @@ def main():
         axes.get_xaxis().set_visible(False)
         axes.get_yaxis().set_visible(False)
 
-    window_title = ("%s NORB, " % args.which_norb +
-                    ("testing and training sets"
-                     if args.which_set == 'both'
-                     else "%sing set" % args.which_set))
+    window_title = ("{} NORB, {}ing set".format(args.which_norb,
+                                                args.which_set))
 
     figure.canvas.set_window_title(window_title)
 

@@ -11,7 +11,7 @@ import simplelearn
 from simplelearn.formats import DenseFormat
 from simplelearn.utils import safe_izip, download_url
 from simplelearn.data.h5_dataset import (make_h5_file,
-                                         load_h5_datasets,
+                                         load_h5_dataset,
                                          H5Dataset)
 
 import pdb
@@ -490,34 +490,24 @@ def _load_official_norb(which_norb):
 
     return result
 
-def load_norb(norb_spec):
+
+def load_norb(norb_spec, partition=None):
+    '''
+    Returns one or all partitions in a NORB dataset.
+
+    Parameters
+    ----------
+    norb_spec: string
+      'big' for Big NORB, 'small' for Small NORB, or the path to a .h5 file
+      for custom NORBs.
+
+    partition: string or None
+      Optional. If omitted, this returns all partitions in a tuple. If
+      supplied, this returns just the named partition.
+    '''
     if norb_spec in ('big', 'small'):
-        return _load_official_norb(norb_spec)
+        h5_path = os.path.join(_get_norb_dir(norb_spec), 'cache.h5')
     else:
-        load_h5_datasets(norb_spec)
+        h5_path = norb_spec
 
-# def load_norb(which_norb, which_set):
-#     '''
-#     Loads a NORB dataset.
-
-#     Parameters
-#     ----------
-#     which_norb: str
-#       'big' or 'small'
-
-#     which_set: str
-#       'train' or 'test'
-#     '''
-#     assert_in(which_norb, ('big', 'small'))
-#     assert_in(which_set, ('train', 'test'))
-
-#     norb_dir = os.path.join(simplelearn.data.data_path, '%s_norb' % which_norb)
-#     if not os.path.isdir(norb_dir):
-#         os.mkdir(norb_dir)
-#         # need_to_download = True
-
-#     cache_file_path = os.path.join(norb_dir, 'cache.h5')
-#     if not os.path.isfile(cache_file_path):
-#         _make_hdf(which_norb)
-
-#     return Hdf5Dataset(cache_file_path, which_set)
+    return load_h5_dataset(h5_path, partition)
