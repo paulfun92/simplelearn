@@ -199,6 +199,17 @@ def assert_all_integers(arg):
                     (index, element, type(element)))
 
 
+def assert_all_true(arg):
+    '''
+    Checks that all elements of arg are true.
+    '''
+    assert_is_instance(arg, collections.Iterable)
+
+    for index, element in enumerate(arg):
+        assert_true(element,
+                    "Element {} ({}) is not True.".format(index, element))
+
+
 def assert_all_is_instance(arg, expected_type):
     '''
     Checks that arg is an Iterable of integral-typed scalars.

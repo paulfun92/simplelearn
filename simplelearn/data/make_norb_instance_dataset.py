@@ -4,35 +4,63 @@ import os
 import argparse
 from collections import Sequence
 import numpy
-import h5py
 from nose.tools import (assert_equal,
-                        assert_in,
-                        assert_true,
                         assert_is_instance,
                         assert_greater,
                         assert_greater_equal)
 import simplelearn
 from simplelearn.utils import (safe_izip,
                                assert_integer,
-                               assert_all_equal)
+                               assert_all_equal,
+                               assert_all_true,
+                               assert_all_integers,
+                               assert_all_greater_equal)
 
 from simplelearn.formats import DenseFormat
+from simplelearn.data.dataset import Dataset
 from simplelearn.data.norb import load_norb
-from simplelearn.data.hdf5_dataset import add_tensor
+from simplelearn.data.h5_dataset import make_h5_file
 
 import pdb
 
 
-def make_instance_dataset(norb,
+def make_instance_dataset(norb_name,
+                          a_norb,
+                          b_norb,
                           test_elevation_stride,
                           test_azimuth_stride,
                           objects=None,
                           rng_seed=None):
     '''
-    Creates an instance recognition dataset NORB images.
+    Creates instance recognition datasets from category recognition datasets.
+
+    Merges two category recognition datasets (with disjoint object instances),
+    and re-partitions them into instance recognition datasets (with disjoint
+    camera views).
+
+    The instance recognition dataset consists of a train and test set.
+
+    All objects not selected by <objects> are ignored.
+
+    Of the remaining images, he test set consists of all images that satisfy
+    both the test_elevation_stride and test_azimuth_stride. The other
+    images are used for the training set.
+
+    If the category datset is in stereo, only the left stereo images are used.
 
     Parameters
     ----------
+    norb_name: str
+      The name of the category recognition dataset (e.g. 'big_norb'). Used to
+      build the name of the instance recognition dataset. Alphanumeric
+      characters and '_' only.
+
+    a_norb: NORB Dataset
+      One of the category recognition datasets (i.e. training set).
+
+    b_norb: NORB Dataset
+      The other category recognition dataset (i.e. testing set).
+
     test_elevation_stride: int
       Use every M'th elevation as a test image.
 
@@ -44,13 +72,22 @@ def make_instance_dataset(norb,
       Each (cx, ix) pair specifies an object to include, by their
       class and instance labels cx and ix.
 
-    The test set consists of all images that satisfy both the
-    test_elevation_stride and test_azimuth_stride. All other images are used
-    for the training set.
+    rng_seed: int
+      Used to seed the RNG for shuffling examples.
 
-    Only the left stereo images are used.
+    Returns
+    -------
+    rval: str
+      The path to the newly created .h5 file.
     '''
-    assert_in(which_norb, ('big', 'small'))
+
+    assert_is_instance(norb_name, basestring)
+    assert_all_true(c.isalnum() or c == '_' for c in norb_name)
+
+    assert_is_instance(a_norb, Dataset)
+    assert_is_instance(b_norb, Dataset)
+    assert_all_equal(a_norb.names, b_norb.names)
+    assert_all_equal(a_norb.formats, b_norb.formats)
 
     assert_integer(test_elevation_stride)
     assert_greater(test_elevation_stride, 0)
@@ -62,11 +99,8 @@ def make_instance_dataset(norb,
         assert_is_instance(objects, Sequence)
         for id_pair in objects:
             assert_equal(len(id_pair), 2)
-            category, instance = id_pair
-            assert_integer(category)
-            assert_greater_equal(category, 0)
-            assert_integer(instance)
-            assert_greater_equal(instance, 0)
+            assert_all_integers(id_pair)
+            assert_all_greater_equal(id_pair, 0)
 
     if rng_seed is None:
         rng_seed = 3252
@@ -74,14 +108,16 @@ def make_instance_dataset(norb,
         assert_integer(rng_seed)
         assert_greater_equal(rng_seed, 0)
 
-    a_norb, b_norb = (load_norb(which_norb, s) for s in ('train', 'test'))
+    #
+    # Done sanity-checking args
+    #
 
     def get_row_indices(labels,
                         test_elevation_stride,
                         test_azimuth_stride,
                         objects):
         '''
-        Returns row masks for training and testing data.
+        Returns row indices or training and testing sets.
         '''
 
         logical_and = numpy.logical_and
@@ -103,52 +139,37 @@ def make_instance_dataset(norb,
 
         return tuple(numpy.nonzero(m)[0] for m in (train_mask, test_mask))
 
-    a_train_indices, a_test_indices = get_row_indices(a_norb._tensors[1],
+    a_train_indices, a_test_indices = get_row_indices(a_norb.tensors[1],
                                                       test_elevation_stride,
                                                       test_azimuth_stride,
                                                       objects)
 
-    b_train_indices, b_test_indices = get_row_indices(b_norb._tensors[1],
+    b_train_indices, b_test_indices = get_row_indices(b_norb.tensors[1],
                                                       test_elevation_stride,
                                                       test_azimuth_stride,
                                                       objects)
 
-    a_size = a_norb._tensors[0].shape[0]
-    b_train_indices += a_size
-    b_test_indices += a_size
-
-    rng = numpy.random.RandomState(rng_seed)
-
-    def concat_and_shuffle(a_indices, b_indices, rng):
-        assert_equal(a_indices.ndim, 1)
-        assert_equal(b_indices.ndim, 1)
-        indices = numpy.concatenate((a_indices, b_indices), axis=0)
-        rng.shuffle(indices)
-        return indices
-
-    train_indices = concat_and_shuffle(a_train_indices, b_train_indices, rng)
-    test_indices = concat_and_shuffle(a_test_indices, b_test_indices, rng)
-
-    def create_hdf_filepath(which_norb,
-                            test_elevation_stride,
-                            test_azimuth_stride,
-                            objects):
+    def create_h5_filepath(norb_name,
+                           test_elevation_stride,
+                           test_azimuth_stride,
+                           objects):
         '''
         Creates an hdf filepath based on the args.
 
-        For --which-norb big --elevation-stride 2, --azimuth-stride 1:
+        For which-norb: "big_norb", elevation_stride: 2, azimuth_stride: 1:
           <data_dir>/big_norb_instance/e2_a1_all.h5
 
-        For same as above, but with --objects 1 2 3 7 4 1
+        For same as above, but with objects: [[1, 2], [3, 7], [4, 1]]
           <data_dir>/big_norb_instance/e2_a1_1-2_3-7_4-1.h5
         '''
-        norb_directory = os.path.join(simplelearn.data.data_path,
-                                      '%s_norb_instance' % which_norb)
-        if not os.path.isdir(norb_directory):
-            os.mkdir(norb_directory)
+        output_dir = os.path.join(simplelearn.data.data_path,
+                                  '{}_norb_instance'.format(norb_name))
 
-        filename = "e%02d_a%02d_o_" % (test_elevation_stride,
-                                       test_azimuth_stride)
+        if not os.path.isdir(output_dir):
+            os.mkdir(output_dir)
+
+        filename = "e{:02d}_a{:02d}_o_".format(test_elevation_stride,
+                                               test_azimuth_stride)
 
         if objects is None:
             filename = filename + 'all'
@@ -158,67 +179,86 @@ def make_instance_dataset(norb,
 
         filename = filename + '.h5'
 
-        return os.path.join(norb_directory, filename)
+        return os.path.join(output_dir, filename)
 
-    hdf_path = create_hdf_filepath(which_norb,
-                                   test_elevation_stride,
-                                   test_azimuth_stride,
-                                   objects)
+    h5_path = create_h5_filepath(norb_name,
+                                 test_elevation_stride,
+                                 test_azimuth_stride,
+                                 objects)
 
-    assert_all_equal(a_norb._names, b_norb._names)
-    assert_all_equal(a_norb._formats, b_norb._formats)
+    def get_mono_format(input_image_format):
+        axes = input_image_format.axes
+        shape = input_image_format.shape
 
-    def copy_examples(a_tensor, b_tensor, indices, hdf_tensor):
-        a_indices = indices[indices < a_size]
-        b_indices = indices[indices >= a_size]
-        hdf_tensor[a_indices, ...] = a_tensor[a_indices]
-        hdf_tensor[b_indices, ...] = b_tensor[b_indices - a_size]
+        if 's' in axes:
+            s_index = axes.index('s')
+            axes = list(axes)
+            del axes[s_index]
 
-    example_shapes = [a_norb._tensors[0].shape[2:],
-                      a_norb._tensors[1].shape[1:]]
+            shape = list(shape)
+            del shape[s_index]
 
-    # Remove the right stereo images
-    def get_mono_tensors(norb):
-        return [norb._tensors[0][:, 0, :, :], norb._tensors[1]]
+        return DenseFormat(axes=axes,
+                           shape=shape,
+                           dtype=input_image_format.dtype)
 
-    a_tensors, b_tensors = (get_mono_tensors(n) for n in (a_norb, b_norb))
+    mono_image_format = get_mono_format(a_norb.formats[0])
+    label_format = a_norb.formats[1]
+    partition_names = ['train', 'test']
+    partition_sizes = [len(a_train_indices) + len(b_train_indices),
+                       len(a_test_indices) + len(b_test_indices)]
+    train_indices = (a_train_indices, b_train_indices)
+    test_indices = (a_test_indices, b_test_indices)
 
-    def get_mono_formats(norb):
-        stereo_format = norb._formats[0]
-        assert_equal(stereo_format.axes, ('b', 's', '0', '1'))
-        mono_format = DenseFormat(axes=('b', '0', '1'),
-                                  shape=(-1, ) + stereo_format.shape[1:],
-                                  dtype=stereo_format.dtype)
+    with make_h5_file(h5_path,
+                      partition_names,
+                      partition_sizes,
+                      a_norb.names,
+                      [mono_image_format, label_format]) as h5_file:
+        '''
+        Creates a .h5 file, copies repartitioned data into it, and shuffles.
+        '''
+        partitions = h5_file['partitions']
 
-        return [mono_format, norb._formats[1]]
+        for partition_name, (a_indices, b_indices) \
+            in safe_izip(partition_names, [train_indices, test_indices]):
 
-    formats = get_mono_formats(a_norb)
+            partition = partitions[partition_name]
 
-    with h5py.File(hdf_path, 'w') as hdf_file:
-        for group_name, indices in safe_izip(['train', 'test'],
-                                             [train_indices, test_indices]):
-            group = hdf_file.Group(group_name)
+            a_images = a_norb.tensors[0]
+            b_images = b_norb.tensors[0]
+            out_images = partition['images']
 
-            num_examples = len(indices)
-            for (tensor_a,
-                 tensor_b,
-                 tensor_name,
-                 fmt,
-                 example_shape) in safe_izip(a_tensors,
-                                             b_tensors,
-                                             a_norb._names,
-                                             formats,
-                                             example_shapes):
-                shape = (num_examples, ) + example_shape
-                hdf_tensor = add_tensor(tensor_name,
-                                        shape,
-                                        fmt.dtype,
-                                        fmt.axes,
-                                        group)
-                copy_examples(tensor_a, tensor_b, indices, hdf_tensor)
+            print("Copying {} partition.".format(partition_name))
+
+            if 's' in a_norb.formats[0].axes:
+                assert_equal(a_norb.formats[0].axes.index('s'), 1)
+
+                out_images[:len(a_indices), ...] = a_images[a_indices, 0, ...]
+                out_images[len(a_indices):, ...] = b_images[b_indices, 0, ...]
+            else:
+                out_images[:len(a_indices), ...] = a_images[a_indices, ...]
+                out_images[len(a_indices):, ...] = b_images[b_indices, ...]
+
+            a_labels = a_norb.tensors[1]
+            b_labels = b_norb.tensors[1]
+            out_labels = partition['labels']
+
+            out_labels[:len(a_indices), :] = a_labels[a_indices, :]
+            out_labels[len(a_indices):, :] = b_labels[b_indices, :]
+
+            # Shuffles the output images and labels in the same way
+            print("Shuffling...")
+            for out_tensor in (out_images, out_labels):
+                # same seed for each loop means same shuffle order
+                rng = numpy.random.RandomState(rng_seed)
+                rng.shuffle(out_tensor)
+
+    return h5_path
 
 
-def _main():
+def main():
+
     def parse_args():
         parser = argparse.ArgumentParser(
             description=("Merges the test and training sets of a "
@@ -228,19 +268,20 @@ def _main():
                          "stereo, this will use only the left stereo "
                          "images."))
 
-        def norb_path(arg):
-            if arg == 'big':
-                return load_norb(
-
         parser.add_argument('-i',
                             "--input",
-                            type=norb_path,
                             required=True,
                             help=("'big', 'small', or the .h5 file "
                                   "of the NORB dataset."))
 
+        def positive_int(arg):
+            arg = int(arg)
+            assert_greater(arg, 0)
+            return arg
+
         parser.add_argument("-e",
                             "--test-elevation-stride",
+                            type=positive_int,
                             required=True,
                             metavar='M',
                             help=("Select every M'th elevation for "
@@ -248,6 +289,7 @@ def _main():
 
         parser.add_argument('-a',
                             '--test-azimuth-stride',
+                            type=positive_int,
                             required=True,
                             metavar='N',
                             help=("Select every N'th azimuth for the "
@@ -270,10 +312,15 @@ def _main():
                                   "object using category and "
                                   "instance labels cx ix"))
 
-        parser.add_argument('-o',
-                            '--output',
-                            required=True,
-                            help=('.h5 file to save to'))
+        def ends_with_h5(arg):
+            assert_equal(os.path.splitext(arg)[1], '.h5')
+            return arg
+
+        # parser.add_argument('-o',
+        #                     '--output',
+        #                     type=ends_with_h5,
+        #                     required=True,
+        #                     help=('.h5 file to save to'))
 
         args = parser.parse_args()
 
@@ -285,12 +332,22 @@ def _main():
 
     args = parse_args()
 
-    make_instance_dataset(norb_dataset,
-                          args.test_elevation_stride,
-                          args.test_azimuth_stride,
-                          args.objects,
-                          args.output)
+    norb_datasets = load_norb(args.input)
+    if args.input in ('big', 'small'):
+        norb_name = args.input + "_norb"
+    else:
+        # strip dir and .h5 extension from args.input
+        norb_name = os.path.splitext(os.path.split(args.input)[1])[0]
+
+    output_path = make_instance_dataset(norb_name,
+                                        norb_datasets[0],
+                                        norb_datasets[1],
+                                        args.test_elevation_stride,
+                                        args.test_azimuth_stride,
+                                        args.objects)
+
+    print("Saved instance dataset to '{}'.".format(output_path))
 
 
 if __name__ == '__main__':
-    _main()
+    main()

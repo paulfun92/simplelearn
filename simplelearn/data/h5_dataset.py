@@ -184,3 +184,20 @@ class H5Dataset(Dataset):
     def __setstate__(self, state):
         self.__init__(os.path.join(simplelearn.data.data_path, state[0]),
                       state[1])
+
+def load_h5_datasets(h5_path):
+    '''
+    Returns all the H5Datasets contained in a file created with make_h5_file().
+
+    Parameters
+    ----------
+    h5_path: str
+      Path to .h5 file created with make_h5_file().
+
+    rval: tuple
+      A tuple of H5Datasets, one for each partition in the .h5 file.
+    '''
+
+    h5_file = h5py.File(h5_path, mode='r')
+    partition_names = h5_file['partition_names']
+    return tuple(H5Dataset(h5_file, n) for n in partition_names)

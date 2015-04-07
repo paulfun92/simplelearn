@@ -10,7 +10,9 @@ from nose.tools import assert_equal, assert_in
 import simplelearn
 from simplelearn.formats import DenseFormat
 from simplelearn.utils import safe_izip, download_url
-from simplelearn.data.h5_dataset import make_h5_file, H5Dataset
+from simplelearn.data.h5_dataset import (make_h5_file,
+                                         load_h5_datasets,
+                                         H5Dataset)
 
 import pdb
 
@@ -147,9 +149,9 @@ def _read_norb_file(filepath):
     return result
 
 
-def load_norb(which_norb):
+def _load_official_norb(which_norb):
     '''
-    Returns the train and test sets of the specified NORB dataset.
+    Loads one of the official NORB dataset (big or small).
 
     The first time this is called, it will copy the NORB dataset to
     an HDF5 file called 'cache.h5' in the norb_directory, which is
@@ -164,7 +166,8 @@ def load_norb(which_norb):
 
     Returns
     -------
-    rval: None
+    rval: tuple
+      Two H5Datasets (train, test).
     '''
 
     assert_in(which_norb, ('big', 'small'))
@@ -487,6 +490,11 @@ def load_norb(which_norb):
 
     return result
 
+def load_norb(norb_spec):
+    if norb_spec in ('big', 'small'):
+        return _load_official_norb(norb_spec)
+    else:
+        load_h5_datasets(norb_spec)
 
 # def load_norb(which_norb, which_set):
 #     '''

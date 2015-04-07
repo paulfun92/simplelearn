@@ -50,6 +50,9 @@ class Dataset(DataSource):
                 raise ValueError("Expected format to contain a 'b' axis "
                                  "(batch axis).")
 
+            if fmt.dtype is None:
+                raise ValueError("Expected all formats to specify a dtype.")
+
             fmt.check(tensor)
 
         self.names = tuple(names)
