@@ -213,7 +213,7 @@ def make_instance_dataset(norb_name,
     train_indices = (a_train_indices, b_train_indices)
     test_indices = (a_test_indices, b_test_indices)
 
-    # Creates a .h5 file, copies repartitioned data into it, and shuffles.
+    # Creates a .h5 file and copies repartitioned data into it.
     with make_h5_file(h5_path,
                       partition_names,
                       partition_sizes,
