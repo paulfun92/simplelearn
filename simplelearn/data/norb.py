@@ -149,16 +149,20 @@ def _read_norb_file(filepath):
     return result
 
 
-def _load_official_norb(which_norb):
+def _get_official_norb_cache_path(which_norb):
     '''
-    Loads one of the official NORB dataset (big or small).
+    Returns the path to the .h5 file that stores an official NORB dataset.
 
-    The first time this is called, it will copy the NORB dataset to
-    an HDF5 file called 'cache.h5' in the norb_directory, which is
-    simplelearn.data.data_path/[big_norb, small_norb].
+    The first time this is called, this will create a directory D:
 
-    If the original NORB files aren't in norb_directory/original_files,
-    they will be downloaded from the web.
+      D == <simplelearn.data.data_path>/[big_norb, small_norb]
+
+    In this, it will create a cache file called 'cache.h5', and copy data into
+    it from the original NORB files, which are expected to be in
+
+      D/original_files
+
+    If they're not, they will be downloaded to there from the web.
 
     Parameters
     ----------
@@ -479,16 +483,17 @@ def _load_official_norb(which_norb):
                     index += dat.shape[0]
 
 
-    result = tuple(H5Dataset(h5_path, p) for p in ('train', 'test'))
+    return h5_path
+    # result = tuple(H5Dataset(h5_path, p) for p in ('train', 'test'))
 
-    for dataset, partition_size in safe_izip(result, partition_sizes):
-        assert_equal(len(dataset.tensors), 2)
-        assert_equal(tuple(dataset.names), tensor_names)
-        assert_equal(dataset.formats, tensor_formats)
-        for tensor in dataset.tensors:
-            assert_equal(tensor.shape[0], partition_size)
+    # for dataset, partition_size in safe_izip(result, partition_sizes):
+    #     assert_equal(len(dataset.tensors), 2)
+    #     assert_equal(tuple(dataset.names), tensor_names)
+    #     assert_equal(dataset.formats, tensor_formats)
+    #     for tensor in dataset.tensors:
+    #         assert_equal(tensor.shape[0], partition_size)
 
-    return result
+    # return result
 
 
 def load_norb(norb_spec, partition=None):
@@ -506,7 +511,7 @@ def load_norb(norb_spec, partition=None):
       supplied, this returns just the named partition.
     '''
     if norb_spec in ('big', 'small'):
-        h5_path = os.path.join(_get_norb_dir(norb_spec), 'cache.h5')
+        h5_path = _get_official_norb_cache_path(norb_spec)
     else:
         h5_path = norb_spec
 
