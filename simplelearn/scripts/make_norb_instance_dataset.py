@@ -29,8 +29,7 @@ def make_instance_dataset(norb_name,
                           b_norb,
                           test_elevation_stride,
                           test_azimuth_stride,
-                          objects=None,
-                          rng_seed=None):
+                          objects=None):
     '''
     Creates instance recognition datasets from category recognition datasets.
 
@@ -72,9 +71,6 @@ def make_instance_dataset(norb_name,
       Each (cx, ix) pair specifies an object to include, by their
       class and instance labels cx and ix.
 
-    rng_seed: int
-      Used to seed the RNG for shuffling examples.
-
     Returns
     -------
     rval: str
@@ -102,11 +98,11 @@ def make_instance_dataset(norb_name,
             assert_all_integers(id_pair)
             assert_all_greater_equal(id_pair, 0)
 
-    if rng_seed is None:
-        rng_seed = 3252
-    else:
-        assert_integer(rng_seed)
-        assert_greater_equal(rng_seed, 0)
+    # if rng_seed is None:
+    #     rng_seed = 3252
+    # else:
+    #     assert_integer(rng_seed)
+    #     assert_greater_equal(rng_seed, 0)
 
     #
     # Done sanity-checking args
@@ -252,15 +248,15 @@ def make_instance_dataset(norb_name,
             out_labels[:len(a_indices), :] = a_labels[a_indices, :]
             out_labels[len(a_indices):, :] = b_labels[b_indices, :]
 
-            # Shuffles the output images and labels in the same way
-            for out_tensor, tensor_name in safe_izip((out_images, out_labels),
-                                                     ('images', 'labels')):
-                # same seed for each loop means same shuffle order
-                rng = numpy.random.RandomState(rng_seed)
+            # # Shuffles the output images and labels in the same way
+            # for out_tensor, tensor_name in safe_izip((out_images, out_labels),
+            #                                          ('images', 'labels')):
+            #     # same seed for each loop means same shuffle order
+            #     rng = numpy.random.RandomState(rng_seed)
 
-                print("Shuffling {} {}...".format(partition_name,
-                                                  tensor_name))
-                rng.shuffle(out_tensor)
+            #     print("Shuffling {} {}...".format(partition_name,
+            #                                       tensor_name))
+            #     rng.shuffle(out_tensor)
 
     return h5_path
 
@@ -269,12 +265,16 @@ def main():
 
     def parse_args():
         parser = argparse.ArgumentParser(
-            description=("Merges the test and training sets of a "
-                         "NORB dataset, shuffles them, and re-splits "
-                         "into testing and training data according "
-                         "to camera angle. If the NORB dataset is "
-                         "stereo, this will use only the left stereo "
-                         "images."))
+            description=("Merges the test and training sets of a NORB "
+                         "dataset, and re-partitions into new testing and "
+                         "training sets according to camera angle. If the "
+                         "NORB dataset is stereo, this will use only the left "
+                         "stereo images.\n"
+                         "\n"
+                         "This preserves the example ordering. Often you'll "
+                         "want to shuffle the examples. Use "
+                         "simplelearn/scripts/shuffle_h5_dataset.py for "
+                         "that."))
 
         parser.add_argument('-i',
                             "--input",

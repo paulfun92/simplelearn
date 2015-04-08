@@ -13,6 +13,8 @@ from nose.tools import assert_false, assert_in, assert_equal
 from simplelearn.data.norb import load_norb
 from simplelearn.utils import safe_izip
 
+import pdb
+
 class LabelIndexMap(object):
     '''
     Maps between 5-D NORB labels and dense 5-D indices.
@@ -142,7 +144,11 @@ def main():
     # The current index dimension being edited.
     index_dim = [0]
 
-    figure, all_axes = pyplot.subplots(1, 3, squeeze=True, figsize=(16, 4))
+    num_axes = 3 if 's' in dataset.formats[0].axes else 2
+    figure, all_axes = pyplot.subplots(1,
+                                       num_axes,
+                                       squeeze=True,
+                                       figsize=(4 * num_axes + 2 , 4))
 
     # Hides x and y tick marks from all axes
     for axes in all_axes:

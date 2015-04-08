@@ -188,7 +188,7 @@ class H5Dataset(Dataset):
         self.__init__(os.path.join(simplelearn.data.data_path, state[0]),
                       state[1])
 
-def load_h5_dataset(h5_path, partition=None):
+def load_h5_dataset(h5_path, partition=None, mode='r'):
     '''
     Returns all the H5Datasets contained in a file created with make_h5_file().
 
@@ -202,6 +202,8 @@ def load_h5_dataset(h5_path, partition=None):
       Optional. If supplied, this returns just that partition (e.g. 'test',
       'train'). If omitted, this returns all partitions.
 
+    mode: the file mode to give to h5py.File().
+
     Returns
     -------
 
@@ -210,7 +212,7 @@ def load_h5_dataset(h5_path, partition=None):
       Otherwise, this returns just the H5Dataset of the specified partition.
     '''
 
-    h5_file = h5py.File(h5_path, mode='r')
+    h5_file = h5py.File(h5_path, mode=mode)
     partition_names = h5_file['partition_names']
     if partition is None:
         with h5py.File(h5_path, mode='r') as h5_file:
