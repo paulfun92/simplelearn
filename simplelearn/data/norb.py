@@ -248,16 +248,12 @@ def _get_official_norb_cache_path(which_norb):
                                                    file_type=file_type,
                                                    suffix=suffix)
                     file_list.append(filename)
-                    # filepath = os.path.join(originals_dir,
-                    #                         filename)
-                    # file_list.append(filepath)
 
             return cat_files, dat_files, info_files
 
         gz_filename_lists = get_norb_filename_lists_gz(which_norb, which_set)
         assert_equal(len(gz_filename_lists), 3)
 
-        # all_gz_files = mat_gz_files[0] + mat_gz_files[1] + mat_gz_files[2]
         actual_path_lists = ([], [], [])
 
         def get_actual_path(gz_filename):
@@ -307,124 +303,6 @@ def _get_official_norb_cache_path(which_norb):
 
 
         return actual_path_lists
-        # def all_files_exist(dat_files, cat_files, info_files):
-        #     '''
-        #     Returns True if all the given NORB file paths exist on disk.
-        #     '''
-        #     for files in (dat_files, cat_files, info_files):
-        #         if not all(os.path.isfile(f) for f in files):
-        #             return False
-
-        #     return True
-
-        # if all_files_exist(*mat_gz_files):
-        #     return mat_gz_files
-        # else:  # .mat.gz files weren't there; check for .mat files.
-        #     # chop off the .gz suffix
-        #     mat_files = ([f[:-3] for f in files] for files in mat_gz_files)
-
-        #     if all_files_exist(*mat_files):
-        #         return mat_files
-        #     else:
-        #         print("Couldn't find all the raw %s NORB %ing set files in "
-        #               "%s. Downloading..." % (which_norb,
-        #                                       which_set,
-        #                                       originals_dir))
-
-        #         # If the .mat files don't exist either, download .mat.gz files
-        #         for file_list in mat_gz_files:
-        #             for filepath in file_list:
-        #                 url = ('http://www.cs.nyu.edu/~ylclab/data/norb-v1.0/'
-        #                        + os.path.split(filepath)[1])
-        #                 try:
-        #                     download_url(url,
-        #                                  local_filepath=filepath,
-        #                                  show_progress=True)
-        #                 except IOError, io_error:
-        #                     raise IOError("IOError: %s\n"
-        #                                   "Error attempting to download %s to "
-        #                                   "%s. Please download the NORB files "
-        #                                   "manually, and put them in %s." %
-        #                                   (io_error,
-        #                                    url,
-        #                                    filepath,
-        #                                    os.path.split(filepath)[0]))
-
-        #         return mat_gz_files
-
-    # def add_dataset(which_norb, which_set, hdf_file):
-    #     '''
-    #     Copies a NORB dataset into a group in a HDF5 file.
-
-    #     Adds an h5py.Group named <which_set> to hdf_file,
-    #     and gives it 'images' and 'labels' tensors.
-
-    #     Parameters
-    #     ----------
-    #     which_norb: 'big' or 'small'
-    #     which_set: 'train' or 'test'
-    #     hdf_file: h5py.File
-
-    #     Returns
-    #     -------
-    #     rval: None
-    #     '''
-    #     assert_in(which_norb, ('big', 'small'))
-    #     assert_in(which_set, ('train', 'test'))
-
-    #     group = hdf_file.create_group(which_set)
-
-    #     examples_per_file = 24300 if which_norb == 'small' else 29160
-
-    #     if which_norb == 'small':
-    #         num_examples = examples_per_file
-    #     else:
-    #         num_examples = examples_per_file * (10 if which_set == 'train'
-    #                                             else 2)
-
-    #     image_dim = 96 if which_norb == 'small' else 108
-
-    #     images = add_tensor('images',
-    #                         (num_examples, 2, image_dim, image_dim),
-    #                         'uint8',
-    #                         ('b', 's', '0', '1'),
-    #                         group)
-
-    #     label_size = 5 if which_norb == 'small' else 11
-
-    #     labels = add_tensor('labels',
-    #                         (num_examples, label_size),
-    #                         'int32',
-    #                         ('b', 'f'),
-    #                         group)
-
-    #     cat_files, dat_files, info_files = get_norb_filenames(which_norb,
-    #                                                           which_set)
-
-    #     index = 0
-    #     for cat_file, dat_file, info_file in safe_izip(cat_files,
-    #                                                    dat_files,
-    #                                                    info_files):
-    #         index_range = slice(index, index + examples_per_file)
-
-    #         print("Caching %s" % dat_file)
-    #         dat = _read_norb_file(dat_file)
-    #         assert_equal(dat.dtype, images.dtype)
-    #         images[index_range, :, :, :] = dat
-
-    #         print("Caching %s" % cat_file)
-    #         cat = _read_norb_file(cat_file)
-    #         assert_equal(cat.dtype, labels.dtype)
-    #         labels[index_range, 0] = cat
-
-    #         print("Caching %s" % info_file)
-    #         info = _read_norb_file(info_file)
-    #         assert_equal(info.dtype, labels.dtype)
-    #         labels[index_range, 1:] = info
-
-    #         index += examples_per_file
-
-    #     assert_equal(index, num_examples)
 
     h5_path = os.path.join(norb_dir, 'cache.h5')
 
@@ -482,18 +360,9 @@ def _get_official_norb_cache_path(which_norb):
 
                     index += dat.shape[0]
 
+        print("Wrote cache to {}".format(h5_path))
 
     return h5_path
-    # result = tuple(H5Dataset(h5_path, p) for p in ('train', 'test'))
-
-    # for dataset, partition_size in safe_izip(result, partition_sizes):
-    #     assert_equal(len(dataset.tensors), 2)
-    #     assert_equal(tuple(dataset.names), tensor_names)
-    #     assert_equal(dataset.formats, tensor_formats)
-    #     for tensor in dataset.tensors:
-    #         assert_equal(tensor.shape[0], partition_size)
-
-    # return result
 
 
 def load_norb(norb_spec, partition=None):
