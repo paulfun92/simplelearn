@@ -15,15 +15,17 @@ from simplelearn.utils import safe_izip
 
 class LabelIndexMap(object):
     '''
-    Maps between NORB labels and dense 5-D indices.
+    Maps between 5-D NORB labels and dense 5-D indices.
     '''
 
     def __init__(self, dataset_labels):
-        dataset_labels = numpy.asarray(dataset_labels)
-        self.label_values = tuple(sorted(frozenset(label_column))
-                                  for label_column in dataset_labels.T)
+        assert_equal(len(dataset_labels.shape), 2)
+        labels_5d = dataset_labels[:, :5]
 
-        indices = self.label_to_index(dataset_labels)
+        self.label5d_values = tuple(sorted(frozenset(label_column))
+                                    for label_column in labels_5d.T)
+
+        indices = self.label5d_to_index(labels_5d)
 
         self._index_to_rows = dict()
         for row, index in enumerate(indices):
@@ -35,61 +37,26 @@ class LabelIndexMap(object):
 
         self.index_sizes = indices.max(axis=0) + 1
 
-        # # Maps index to a list of dataset row indices.
-        # def make_index_to_rows(labels):
-        #     '''
-        #     Returns a dict that maps index to (rows, row_index).
-        #     '''
-        #     dense_labels = labels[:5]
-        #     assert_is_instance(dense_labels, numpy.ndarray)
-
-        #     # Divide azimuth label by 2 to make them dense.
-        #     assert_true((numpy.mod(dense_labels[:, 3], 0) == 0).all())
-        #     dense_labels[:, 3] /= 2
-
-        #     for c, label_column in enumerate(dense_labels.T):
-        #         index_sizes[c] = label_column.max() + 1
-
-        #         # check that dense_labels are actually dense
-        #         assert_equal(sorted(frozenset(label_column)),
-        #                      range(index_sizes[c]))
-
-        #     result = dict()
-        #     for row, dense_label in enumerate(dense_labels):
-        #         dense_label = tuple(dense_label)
-
-        #         if dense_label not in result:
-        #             result[dense_label] = ([row], [0])
-        #         else:
-        #             rows = result[dense_label][0]
-        #             rows.append(row)
-
-        #     return result
-
-        # self._index_to_rows = make_index_to_rows(dataset_labels)
-
-    def label_to_index(self, labels):
+    def label5d_to_index(self, labels):
         assert_in(len(labels.shape), (1, 2))
-
-        labels = numpy.asarray(labels)
 
         was_1D = False
         if len(labels.shape) == 1:
             labels = labels[numpy.newaxis, :]
             was_1D = True
 
-        assert_equal(labels.shape[1], 5)
+        labels = numpy.asarray(labels[:, :5])
 
         indices = numpy.empty_like(labels)
         indices[...] = -1
 
-        for (label_values,
+        for (label5d_values,
              label_column,
-             index_column) in safe_izip(self.label_values,
+             index_column) in safe_izip(self.label5d_values,
                                         labels.T,
                                         indices.T):
 
-            for ind, value in enumerate(label_values):
+            for ind, value in enumerate(label5d_values):
                 mask = (label_column == value)
                 index_column[mask] = ind
 
@@ -101,14 +68,14 @@ class LabelIndexMap(object):
         else:
             return indices
 
-    def index_to_label(self, indices):
+    def index_to_label_5d(self, indices):
         assert_in(len(indices.shape), (1, 2))
 
         indices = numpy.asarray(indices)
 
         was_1D = False
         if len(indices.shape) == 1:
-            indices = indices[indices.newaxis, :]
+            indices = indices[numpy.newaxis, :]
             was_1D = True
 
         assert_equal(indices.shape[1], 5)
@@ -117,10 +84,10 @@ class LabelIndexMap(object):
 
         for (index_column,
              label_column,
-             label_values) in safe_izip(indices.T,
-                                        labels.T,
-                                        self.label_values):
-            label_column[:] = label_values[index_column]
+             label5d_values) in safe_izip(indices.T,
+                                          labels.T,
+                                          self.label5d_values):
+            label_column[:] = label5d_values[index_column]
 
         if was_1D:
             return labels[0, :]
@@ -166,6 +133,12 @@ def main():
     # such image displayed.
     index = numpy.zeros(5, dtype=int)
 
+    # Some labels have -1 as a possible value, meaning "not applicable".
+    # For such labels, place the index to point at the first real value.
+    for label_dim in range(len(index)):
+        if label_index_map.label5d_values[label_dim][0] == -1:
+            index[label_dim] = 1
+
     # The current index dimension being edited.
     index_dim = [0]
 
@@ -189,10 +162,10 @@ def main():
     categories = ['animal', 'human', 'plane', 'truck', 'car']
 
     converters = [lambda x: categories[x],
-                  lambda x: x,
-                  lambda x: 30 + x * 5,
-                  lambda x: x * 20,
-                  lambda x: x]
+                  lambda x: None if x == -1 else x,
+                  lambda x: None if x == -1 else 30 + x * 5,
+                  lambda x: None if x == -1 else x * 10,
+                  lambda x: None if x == -1 else x]
 
     if dataset_labels.shape[1] == 11:
         label_names.extend(['horiz. shift',
@@ -230,18 +203,16 @@ def main():
                                                   len(rows)))
             lines.append('')
 
-            lines[index_dim[0]] = "==> " + lines[index_dim[0]]
-
             if dataset_labels.shape[1] == 11:
                 for name, value, converter in safe_izip(label_names[5:],
                                                         label[5:],
                                                         converters[5:]):
                     lines.append('{}: {}'.format(name, converter(value)))
         else:
-            label = label_index_map.index_to_label(index)
+            label_5d = label_index_map.index_to_label_5d(index)
 
             for name, value, converter in safe_izip(label_names[:5],
-                                                    label[:5],
+                                                    label_5d,
                                                     converters[:5]):
                 lines.append('{}: {}'.format(name, converter(value)))
 
@@ -251,6 +222,8 @@ def main():
             if dataset_labels.shape[1] == 11:
                 for name in label_names[5:]:
                     lines.append('{}: N/A'.format(name))
+
+        lines[index_dim[0]] = "==> " + lines[index_dim[0]]
 
         # "transAxes": 0, 0 = bottom-left, 1, 1 at upper-right.
         text_axes = all_axes[0]
@@ -271,13 +244,18 @@ def main():
 
         rows, rows_index = label_index_map.index_to_rows(index)
 
-        if rows is not None:
+        image_axes = all_axes[1:]  # could be 1 or two axes
+
+        if rows is None:
+            for axes in image_axes:
+                axes.clear()
+        else:
             row = rows[rows_index[0]]
 
             image = dataset_images[row]
             if 's' in image_format.axes:
                 assert_equal(image_format.axes.index('s'), 1)
-                for sub_image, axes in safe_izip(image, all_axes[1:]):
+                for sub_image, axes in safe_izip(image, image_axes):
                     draw_image_impl(sub_image, axes)
             else:
                 draw_image_impl(image, all_axes[1])
@@ -327,7 +305,8 @@ def main():
         # 'image number' (5)
         disable_left_right = False
 
-        if index[0] == 5 and index_dim[0] in (0, 5):
+
+        if index[0] == 5 and index_dim[0] not in (0, 5):
             # Current class is 'blank', and we're trying to adjust something
             # other than class or image number
             disable_left_right = True
