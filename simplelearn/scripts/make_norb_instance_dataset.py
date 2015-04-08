@@ -112,6 +112,11 @@ def make_instance_dataset(norb_name,
     # Done sanity-checking args
     #
 
+    (category_index,
+     instance_index,
+     azimuth_index,
+     elevation_index) = range(4)  # no need for lighting_index (= 4)
+
     def get_row_indices(labels,
                         test_elevation_stride,
                         test_azimuth_stride,
@@ -124,16 +129,18 @@ def make_instance_dataset(norb_name,
 
         if objects is not None:
             objects = numpy.asarray(objects)
-            object_mask = (labels[:, 0:2] == objects).all(axis=1)
+            obj_cols = (category_index, instance_index)
+            object_mask = (labels[:, obj_cols] == objects).all(axis=1)
         else:
             object_mask = numpy.ones(labels.shape[0], dtype=bool)
 
-        test_mask = logical_and(object_mask,
-                                (labels[:, 3] % test_elevation_stride) == 0)
+        test_mask = logical_and(
+            object_mask,
+            (labels[:, elevation_index] % test_elevation_stride) == 0)
 
         test_mask = logical_and(
             test_mask,
-            (labels[:, 4] % (test_azimuth_stride * 2)) == 0)
+            (labels[:, azimuth_index] % (test_azimuth_stride * 2)) == 0)
 
         train_mask = logical_and(object_mask, numpy.logical_not(test_mask))
 
@@ -163,7 +170,7 @@ def make_instance_dataset(norb_name,
           <data_dir>/big_norb_instance/e2_a1_1-2_3-7_4-1.h5
         '''
         output_dir = os.path.join(simplelearn.data.data_path,
-                                  '{}_norb_instance'.format(norb_name))
+                                  '{}_instance'.format(norb_name))
 
         if not os.path.isdir(output_dir):
             os.mkdir(output_dir)
