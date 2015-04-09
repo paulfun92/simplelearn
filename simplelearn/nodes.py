@@ -22,6 +22,7 @@ from nose.tools import (assert_true,
 from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_floating,
+                               assert_all_equal,
                                assert_all_integers,
                                assert_all_is_instance,
                                assert_all_greater,
@@ -829,7 +830,62 @@ class Dropout(Node):
                                       output_symbol,
                                       input_node.output_format)
 
-def _make_gaussian_filter(filter_shape, dtype=None):
+def _normal_distribution_pdf(inputs, mean, covariance):
+    '''
+    Computes the normal distribution PDF (aka Gaussian).
+
+    Parameters
+    ----------
+    inputs: numpy.ndarray
+      Shape: (N, ) or (N, M), dtype: floating-point
+
+    mean: numpy.ndarray
+      Shape: (N, ), dtype: floating-point
+
+    covariance: numpy.ndarrray
+      Shape: (N, N) dtype: floating-point
+    '''
+    cast_float = numpy.cast[float]
+
+    if len(inputs.shape) == 1:
+        inputs = inputs[numpy.newaxis, :]
+    else:
+        assert_equal(len(inputs.shape), 2)
+
+    inputs = cast_float(inputs)
+    ndim = inputs.shape[1]
+
+    if len(mean.shape) == 1:
+        mean = mean[numpy.newaxis, :]
+    else:
+        assert_equal(len(mean.shape), 2)
+
+    assert_equal(mean.shape[1], ndim)
+
+    mean = cast_float(mean)
+
+    assert_all_equal(covariance.shape, ndim)
+    # No need to check for positive definiteness. If it isn't, numpy.linalg.inv
+    # will throw an exception below.
+
+    #
+    # Done sanity-checking inputs
+    #
+
+    covariance = cast_float(covariance)
+    inv_covariance = numpy.linalg.inv(covariance)
+
+    rt = inputs - mean
+    rt_ic = numpy.dot(rt, inv_covariance)
+    rt_ic_r = (rt_ic * rt).sum(axis=1)
+    exp_term = numpy.exp(-0.5 * rt_ic_r)
+
+    denominator = numpy.sqrt((2 * numpy.pi) ** ndim *
+                             numpy.linalg.det(covariance))
+
+    return exp_term / denominator
+
+def _make_2d_gaussian_filter(filter_shape, covariance=None, dtype=None):
     '''
     Returns a 2D Gaussian filter.
     '''
@@ -837,37 +893,31 @@ def _make_gaussian_filter(filter_shape, dtype=None):
     assert_all_integers(filter_shape)
     assert_all_greater(filter_shape, 0)
 
+    filter_shape = numpy.asarray(filter_shape, dtype=int)
+
+    if covariance is None:
+        # Set std. deviation so that filter window is 4 std.deviations across.
+        # This keeps most of the probability mass within the window.
+        std_deviations = numpy.asarray(filter_shape, dtype=dtype) / 4.0
+
+        covariance = numpy.diag(std_deviations ** 2.0)
+    else:
+        assert_equal(covariance.shape, (2, 2))
+
     if dtype is None:
         dtype = theano.config.floatX
 
-    filter_shape = numpy.asarray(filter_shape, dtype=int)
-    dtype = numpy.dtype(dtype)
 
-    #
-    # Done sanity-checking args
-    #
+    xys = numpy.indices(filter_shape)      # shape: (2, nrows, ncols)
+    xys = numpy.transpose(xys, (1, 2, 0))  # shape: (nrows, ncols, 2)
+    xys = xys.reshape((-1, 2))             # shape: (nrows * ncols, 2)
+    mean = (filter_shape // 2)             # shape: (2, )
 
-    # Default standard devation copied from pylearn2.
-    # Not sure what the justification for that value is.
-    standard_deviation = 2.0
-    variance = standard_deviation ** 2
+    # shape: (nrows * ncols, )
+    gaussian_elems = _normal_distribution_pdf(xys, mean, covariance)
 
-    mean = (filter_shape // 2)[:, numpy.newaxis, numpy.newaxis]
-    xys = numpy.indices(filter_shape)
-    squared_distances = ((xys - mean) ** 2.0).sum(axis=0)
-
-    normalizer = 1.0 / (standard_deviation * numpy.sqrt(2.0 * numpy.pi))
-
-    # As with Pylearn2, we square the normal distribution's normalizer. Not
-    # sure why this is, other than to say that without it, Lcn'ed images look
-    # horrible (comment this out and run scripts/browse_norb.py with --lcn to
-    # see).
-    normalizer = normalizer ** 2.0
-
-    cast_floatX = numpy.cast[theano.config.floatX]
-
-    return cast_floatX(normalizer * numpy.exp(-squared_distances /
-                                              (2 * variance)))
+    cast = numpy.cast[dtype]
+    return cast(gaussian_elems.reshape(filter_shape))  # shape: (nrows, ncols)
 
 
 class Lcn(Node):
@@ -915,7 +965,7 @@ class Lcn(Node):
             shape = node.output_format.shape
             bc_size = numpy.prod(shape[:2])
             fmt = DenseFormat(axes=bc01,
-                              shape=(bc_size, 1, shape[2], shape[3]),
+                              shape=(-1, 1, shape[2], shape[3]),
                               dtype=node.output_format.dtype)
             return FormatNode(node, fmt, axis_map={('b', 'c'): ('b', 'c')})
 
@@ -923,10 +973,12 @@ class Lcn(Node):
         separated_channels = separated_channels_node.output_symbol
 
         # Apply single-channel 2D convolution with a Gaussian filter
-        filters = _make_gaussian_filter(filter_shape)[numpy.newaxis,  # out ch.
-                                                      numpy.newaxis,  # in ch.
-                                                      :,          # filter row
-                                                      :]          # filter col
+        filters = _make_2d_gaussian_filter(filter_shape)[numpy.newaxis,
+                                                         numpy.newaxis,
+                                                         :,
+                                                         :]
+
+        filters /= filters.sum()
 
         # 1-channel to 1-channel convolution with a gaussian filter
         blur_node = Conv2D(input_node=separated_channels_node,

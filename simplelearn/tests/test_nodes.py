@@ -35,8 +35,9 @@ from simplelearn.nodes import (Node,
                                Softmax,
                                L2Loss,
                                CrossEntropy,
+                               Lcn,
                                _assert_is_shape2d,
-                               _make_gaussian_filter)
+                               _make_2d_gaussian_filter)
 
 from unittest import TestCase
 
@@ -736,7 +737,7 @@ def test_conv2d():
                                 supports_padding=True,
                                 rtol=1e-3)
 
-def test_gaussian_filter():
+def test_make_2d_gaussian_filter():
     dtype = theano.config.floatX  # pylint: disable=no-member
     standard_deviation = 2.0
 
@@ -744,25 +745,76 @@ def test_gaussian_filter():
     for filter_shape in itertools.product(range(3, 7), repeat=2):
         filter_shape = numpy.asarray(filter_shape)
 
-        def make_expected_filter(filter_shape, standard_deviation):
-            def scalar_gaussian(xx, yy, standard_deviation):
-                normalizer = \
-                    1.0 / (standard_deviation * numpy.sqrt(2 * numpy.pi))
-                return normalizer * numpy.exp(-(xx ** 2 + yy ** 2) /
-                                              (2 * standard_deviation ** 2))
+        def make_expected_filter(filter_shape):
+            standard_deviations = filter_shape / 4.0
 
-            result = numpy.zeros(filter_shape, dtype=dtype)
+            covariance = numpy.diag(standard_deviations**2)
+            inv_covariance = numpy.diag(1.0 / standard_deviations ** 2)
 
             mean = filter_shape // 2
-            for ii in range(filter_shape[0]):
-                for jj in range(filter_shape[1]):
-                    result[ii, jj] = scalar_gaussian(ii - mean[0],
-                                                     jj - mean[1],
-                                                     standard_deviation)
+            xys = numpy.indices(filter_shape)
+            xys = xys.transpose((1, 2, 0)).reshape(numpy.prod(filter_shape), 2)
 
-            return result
+            rt = xys - mean[numpy.newaxis, :]
+            rt_ic = numpy.dot(rt, inv_covariance)
+            rt_ic_r = (rt_ic * rt).sum(axis=1)
 
-        expected_filter = make_expected_filter(filter_shape, standard_deviation)
-        actual_filter = _make_gaussian_filter(filter_shape, dtype)
+            exp_term = numpy.exp(-0.5 * rt_ic_r)
+            denominator = numpy.sqrt((2 * numpy.pi) ** 2 *
+                                     numpy.linalg.det(covariance))
+            return (exp_term / denominator).reshape(filter_shape)
+
+        expected_filter = make_expected_filter(filter_shape)
+        actual_filter = _make_2d_gaussian_filter(filter_shape, dtype=dtype)
 
         assert_allclose(actual_filter, expected_filter)
+
+def test_lcn():
+    '''
+    This only tests whether LCN'ing a multi-channel image has the same effect
+    as LCN-ing the same data as separate mono-channel images.
+
+    To see if LCN 'looks' right, just run scripts/browse_norb.py with --lcn.
+    '''
+
+    rng = numpy.random.RandomState(48532)
+    batch_size = 2
+    num_channels = 3
+    num_rows = 96
+    num_columns = 108
+    dtype = theano.config.floatX
+    cast = numpy.cast[dtype]
+
+    rgb_image_batch = cast(rng.uniform(size=(batch_size,
+                                             num_channels,
+                                             num_rows,
+                                             num_columns)))
+
+    rgb_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                             shape=(-1, num_channels, num_rows, num_columns),
+                             dtype=dtype)
+
+    rgb_node = InputNode(rgb_format)
+    rgb_lcn = Lcn(rgb_node)
+    rgb_function = theano.function([rgb_node.output_symbol],
+                                   rgb_lcn.output_symbol)
+    rgb_lcn_batch = rgb_function(rgb_image_batch)
+
+    mono_image_batch = rgb_image_batch.reshape((batch_size * num_channels,
+                                                1,
+                                                num_rows,
+                                                num_columns))
+
+    mono_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                              shape=(-1, 1, num_rows, num_columns),
+                              dtype=dtype)
+
+    mono_node = InputNode(mono_format)
+    mono_lcn = Lcn(mono_node)
+    mono_function = theano.function([mono_node.output_symbol],
+                                    mono_lcn.output_symbol)
+    mono_lcn_batch = mono_function(mono_image_batch)
+
+
+    assert_allclose(rgb_lcn_batch.reshape((-1, 1, num_rows, num_columns)),
+                    mono_lcn_batch)
