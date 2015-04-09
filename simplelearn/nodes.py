@@ -669,6 +669,7 @@ class Conv2D(Node):
             pads)
 
         self.filters = theano.shared(
+            # n_filters, n_input_channels, filter_shape[0], filter_shape[1]
             numpy.zeros(([num_filters,
                           input_format_node.output_format.shape[1]] +
                          list(filter_shape)),
@@ -869,6 +870,148 @@ class Dropout(Node):
         super(Dropout, self).__init__([input_node],
                                       output_symbol,
                                       input_node.output_format)
+
+def _make_gaussian_filter(filter_shape, dtype=None):
+    '''
+    Returns a 2D Gaussian filter.
+    '''
+    assert_equal(len(filter_shape), 2)
+    assert_all_integers(filter_shape)
+    assert_all_greater(filter_shape, 0)
+
+    if dtype is None:
+        dtype = theano.config.floatX
+
+    filter_shape = numpy.asarray(filter_shape, dtype=int)
+    dtype = numpy.dtype(dtype)
+
+    #
+    # Done sanity-checking args
+    #
+
+    # Default standard devation copied from pylearn2.
+    # Not sure what the justification for that value is.
+    standard_deviation = 2.0
+    variance = standard_deviation ** 2
+
+    mean = (filter_shape // 2)[:, numpy.newaxis, numpy.newaxis]
+    xys = numpy.indices(filter_shape)
+    squared_distances = ((xys - mean) ** 2.0).sum(axis=0)
+
+    # This differs from pylearn2's version, which squares this for some reason.
+    normalizer = 1.0 / (standard_deviation * numpy.sqrt(2.0 * numpy.pi))
+
+    cast_floatX = numpy.cast[theano.config.floatX]
+
+    return cast_floatX(normalizer * numpy.exp(-squared_distances /
+                                              (2 * variance)))
+
+
+class Lcn(Node):
+    '''
+    LeCun-style local contrast normalization.
+
+    Internally uses Conv2D, so the output axis order is 'bc01'.
+
+    Requires floating-point input.
+
+    Performs LCN on each input channel independently.
+    '''
+
+    def __init__(self,
+                 input_node,
+                 filter_shape=(7, 7),
+                 threshold=1e-4,
+                 axis_map=None):
+        assert_floating(input_node.output_symbol.dtype)
+
+        assert_equal(len(filter_shape), 2)
+        assert_all_integers(filter_shape)
+        assert_all_greater(filter_shape, 0)
+
+        assert_greater_equal(threshold, 0.0)
+
+        if axis_map is not None:
+            assert_is_instance(axis_map, dict)
+
+        #
+        # Done sanity-checking args
+        #
+
+        # Transposes to bc01 axis order
+        bc01_node = _make_bc01_format_node(input_node, axis_map)
+
+        # Collapses b and c axes into b, so that the different channels are
+        # treated as separate single-channel images.
+        #
+        # Leaves the 'c' axis intact as a singleton dimension.
+        def make_channel_separator(node):
+            bc01 = ('b', 'c', '0', '1')
+            assert_equal(node.axes, bc01)
+
+            shape = node.output_format.shape
+            bc_size = numpy.prod(shape[:2])
+            fmt = DenseFormat(axes=bc01,
+                              shape=(bc_size, 1, shape[2], shape[3]),
+                              dtype=node.dtype)
+            return FormatNode(node, fmt, axis_map={('b', 'c'): ('b', 'c')})
+
+        separated_channels_node = make_channel_separator(input_to_bc01)
+        separated_channels = separated_channels_node.output_symbol
+
+        # Apply single-channel 2D convolution with a Gaussian filter
+        filters = _make_gaussian_filter(filter_shape)[numpy.newaxis,  # out ch.
+                                                      numpy.newaxis,  # in ch.
+                                                      :,          # filter row
+                                                      :]          # filter col
+
+        # 1-channel to 1-channel convolution with a gaussian filter
+        blur_node = Conv2D(input_node=separated_channels_node,
+                           filter_shape=filter_shape,
+                           num_filters=1,
+                           pads='same_shape')
+        blur_node.filters.set_value(filters)
+
+        high_pass = separated_channels - blur_node.output_symbol
+
+        squares_node = Node(separated_channels_node,
+                            theano.tensor.sqr(separated_channels),
+                            separated_channels_node.output_format)
+
+        # Same convolution as above, but applied on squares_node
+        blur_squares_node = Conv2D(input_node=squares_node,
+                                   filter_shape=filter_shape,
+                                   num_filters=1,
+                                   pads='same_shape')
+        blur_squares_node.filters.set_value(filters)
+        local_norms = blur_squares_node.output_symbol.sqrt()
+
+        # shape: n_images * n_channels, 1, 1, 1
+        global_norms = norms.output_symbol.mean(axis=[2, 3], keepdims=True)
+
+        denominator = tensor.largest(global_norms, local_norms)
+        denominator = tensor.maximum(denominator, threshold)
+
+        result_channels = high_pass / denominator
+
+        # Monochrome -> multi-channel images
+        def make_channel_gatherer(node):
+            bc01 = ('b', 'c', '0', '1')
+            assert_equal(node.axes, bc01)
+            assert_equal(node.output_format.shape[1], 1)
+
+            output_shape = bc01_node.output_format.shape
+
+            fmt = DenseFormat(axes=bc01,
+                              shape=output_shape,
+                              dtype=node.dtype)
+            return FormatNode(node, fmt, axis_map={('b', 'c'): ('b', 'c')})
+
+        result = make_channel_gatherer(result_channels)
+
+        super(Lcn, self).__init__(input_node,
+                                  result.output_symbol,
+                                  result.output_format)
 
 
 class L2Loss(Node):

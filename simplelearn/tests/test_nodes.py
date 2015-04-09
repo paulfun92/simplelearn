@@ -20,9 +20,7 @@ from nose.tools import (assert_is_instance,
                         assert_true)
 from simplelearn.formats import DenseFormat
 from simplelearn.utils import (safe_izip,
-                               assert_all_greater,
-                               assert_all_greater_equal,
-                               assert_all_less_equal)
+                               assert_all_greater)
 from simplelearn.nodes import (Node,
                                FormatNode,
                                InputNode,
@@ -37,7 +35,8 @@ from simplelearn.nodes import (Node,
                                Softmax,
                                L2Loss,
                                CrossEntropy,
-                               _assert_is_shape2d)
+                               _assert_is_shape2d,
+                               _make_gaussian_filter)
 
 from unittest import TestCase
 
@@ -109,6 +108,7 @@ class Function1dTo1dTester(TestCase):
     def setUp(self):
         input_format = DenseFormat(axes=('0', 'b', '1'),
                                    shape=(3, -1, 4),
+                                   # pylint: disable=no-member
                                    dtype=theano.config.floatX)
 
         self.input_node = InputNode(input_format)
@@ -640,10 +640,11 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                         kwargs['rtol'] = rtol
 
                     try:
+                        # pylint: disable=star-args
                         assert_allclose(actual_images,
                                         expected_images,
                                         **kwargs)
-                    except AssertionError, assertion_error:
+                    except AssertionError:
                         pdb.set_trace()
 
 
@@ -669,7 +670,7 @@ def test_pool2d():
     def make_average_pool_node(input_node,
                                window_shape,
                                strides,
-                               pads,  # ignored
+                               _,  # ignore 'pads' arg
                                axis_map):
         return Pool2D(input_node=input_node,
                       window_shape=window_shape,
@@ -680,7 +681,7 @@ def test_pool2d():
     def make_max_pool_node(input_node,
                            window_shape,
                            strides,
-                           pads,  # ignored
+                           _,  # ignore 'pads' arg
                            axis_map):
         return Pool2D(input_node=input_node,
                       window_shape=window_shape,
@@ -698,13 +699,13 @@ def test_conv2d():
         rng = numpy.random.RandomState(382342)
         return rng.uniform(low=-10, high=10, size=shape)
 
-    num_filters = 10  # TODO: change to 10
+    num_filters = 10
 
     def convolve(subwindow):
         '''
         Convolution without flipping the filters (aka cross-correlation).
         '''
-        floatX = theano.config.floatX
+        floatX = theano.config.floatX  # pylint: disable=no-member
         subwindow = numpy.cast[floatX](subwindow)
         filters = numpy.zeros(shape=(num_filters, ) + subwindow.shape[1:],
                               dtype=floatX)
@@ -734,3 +735,34 @@ def test_conv2d():
                                 [make_conv_node],
                                 supports_padding=True,
                                 rtol=1e-3)
+
+def test_gaussian_filter():
+    dtype = theano.config.floatX  # pylint: disable=no-member
+    standard_deviation = 2.0
+
+    # Test a range of filter shapes: square, non-square, even dims, odd dims
+    for filter_shape in itertools.product(range(3, 7), repeat=2):
+        filter_shape = numpy.asarray(filter_shape)
+
+        def make_expected_filter(filter_shape, standard_deviation):
+            def scalar_gaussian(xx, yy, standard_deviation):
+                normalizer = \
+                    1.0 / (standard_deviation * numpy.sqrt(2 * numpy.pi))
+                return normalizer * numpy.exp(-(xx ** 2 + yy ** 2) /
+                                              (2 * standard_deviation ** 2))
+
+            result = numpy.zeros(filter_shape, dtype=dtype)
+
+            mean = filter_shape // 2
+            for ii in range(filter_shape[0]):
+                for jj in range(filter_shape[1]):
+                    result[ii, jj] = scalar_gaussian(ii - mean[0],
+                                                     jj - mean[1],
+                                                     standard_deviation)
+
+            return result
+
+        expected_filter = make_expected_filter(filter_shape, standard_deviation)
+        actual_filter = _make_gaussian_filter(filter_shape, dtype)
+
+        assert_allclose(actual_filter, expected_filter)
