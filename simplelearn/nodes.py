@@ -606,51 +606,6 @@ class Conv2D(Node):
         if strides is not None:
             _assert_is_shape2d(strides)
 
-        # def get_full_axis_map(axis_map):
-        #     '''
-        #     Returns an axis_map with implicit identity mappings added.
-
-        #     This expects axis_map to map from the ('b', 'c', '0', '1')
-        #     axes to some other axes. The user may omit some identity
-        #     mappings, such as ('b'->'b'). This function adds these in.
-
-        #     If no mappings need to be added, this returns axis_map as-is.
-
-        #     For example, get_full_axis_map({('c', '0', '1'): 'f'}) returns
-        #     {'b': 'b',
-        #      ('c', '0', '1'): 'f'}
-        #     '''
-        #     expected_axes = set(('b', 'c', '0', '1'))
-
-        #     # Find which axes are missing from axis_map.keys
-        #     missing_axes = expected_axes.copy()
-        #     for key in axis_map.iterkeys():
-        #         if isinstance(key, basestring):
-        #             missing_axes.remove(key)
-        #         else:
-        #             for axis in key:
-        #                 missing_axes.remove(axis)
-
-        #     # Add any missing axis mappings to axis_map.
-        #     if len(missing_axes) > 0:
-        #         axis_map = copy.deepcopy(axis_map)
-        #         for missing_axis in missing_axes:
-        #             axis_map[missing_axis] = missing_axis
-
-        #     # Check that the axis_map's keys consist entirely of the
-        #     # expected_axes.
-        #     all_axes = set()
-        #     for key in axis_map.iterkeys():
-        #         if isinstance(key, basestring):
-        #             all_axes.add(key)
-        #         else:
-        #             for axis in key:
-        #                 all_axes.add(key)
-
-        #     assert_equal(all_axes, expected_axes)
-
-        #     return axis_map
-
         if axis_map is not None:
             assert_is_instance(axis_map, dict)
             # axis_map = get_full_axis_map(axis_map)
