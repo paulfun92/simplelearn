@@ -24,6 +24,9 @@ from theano.sandbox.cuda.type import CudaNdarrayType
 from simplelearn.utils import safe_izip, flatten, check_is_subdtype
 import pdb
 
+# Batch size to use when theano.config.compute_test_value is not 'off'.
+test_batch_size = 2
+
 class Format(object):
     '''
     The format of a numeric or symbolic data batch.
@@ -252,7 +255,8 @@ class Format(object):
           if True, return a symbolic batch. Otherwise return a numeric batch.
 
         batch_size: int
-          Number of examples in numeric batch. Omit if is_symbolic is True.
+          Number of examples in numeric batch. Omit if is_symbolic is True or
+          if there is no batch axis.
 
         dtype: str/numpy.dtype, or NoneType
           A numpy/theano dtype. Required if self.dtype is None.
@@ -385,15 +389,16 @@ class DenseFormat(Format):
                 (str(self.shape), str(self.axes), self.dtype))
 
     def _make_batch(self, is_symbolic, batch_size, dtype, name):
+        assert_equal(batch_size is None, is_symbolic or ('b' not in self.axes))
 
-        if 'b' not in self.axes:
-            raise ValueError("This format has no batch ('b') axis.")
+        # if 'b' not in self.axes:
+        #     raise ValueError("This format has no batch ('b') axis.")
 
         if is_symbolic:
-            shape = list(self.shape)
+            # shape = list(self.shape)
 
-            # ok if batch_size is None
-            shape[self.axes.index('b')] = batch_size
+            # # ok if batch_size is None
+            # shape[self.axes.index('b')] = batch_size
 
             broadcastable = [False] * len(self.axes)
             # broadcastable = tuple(size == 1 for size in shape)
@@ -412,16 +417,26 @@ class DenseFormat(Format):
             result = tensor_type.make_variable(name=name)
 
             if theano.config.compute_test_value != 'off':
-                if batch_size is None:
-                    raise ValueError("When theano.config.compute_test_values "
-                                     "is not 'off', you must supply a "
-                                     "batch_size argument even when making"
-                                     "symbolic batches.")
-                else:
-                    result.tag.test_value = \
-                        self.make_batch(is_symbolic=False,
-                                        batch_size=batch_size,
-                                        dtype=dtype)
+                test_batch_size = (None if 'b' not in self.axes
+                                   else formats.test_batch_size)
+                result.tag.test_value = self.make_batch(
+                    is_symbolic=False,
+                    batch_size=test_batch_size,
+                    dtype=dtype)
+
+                # if batch_size is None:
+                #     raise ValueError("When theano.config.compute_test_values "
+                #                      "is not 'off', you must supply a "
+                #                      "batch_size argument even when making"
+                #                      "symbolic batches.")
+                # else:
+                #     result.tag.test_value = \
+                #         self.make_batch(is_symbolic=False,
+                #                         batch_size=batch_size,
+                #                         dtype=dtype)
+
+
+
                 # Don't understand this, from
                 # pylearn2.space.ConvSpace2D.make_theano_batch, but keep it
                 # here in case it becomes clear later:

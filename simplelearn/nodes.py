@@ -21,6 +21,7 @@ from nose.tools import (assert_true,
                         assert_in)
 from simplelearn.utils import (safe_izip,
                                assert_integer,
+                               assert_floating,
                                assert_all_integers,
                                assert_all_is_instance,
                                assert_all_greater,
@@ -580,6 +581,7 @@ class Conv2D(Node):
         assert_integer(num_filters)
         assert_greater(num_filters, 0)
 
+        filter_shape = numpy.asarray(filter_shape)
         dnn_available = theano.sandbox.cuda.dnn.dnn_available
 
         if dnn_available():
@@ -703,7 +705,8 @@ class Conv2D(Node):
                               filter_shape=filters.get_value().shape,
                               border_mode=pads,
                               subsample=strides,
-                              **kwargs)
+                              **kwargs)  # pylint: disable=star-args
+
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
@@ -898,8 +901,13 @@ def _make_gaussian_filter(filter_shape, dtype=None):
     xys = numpy.indices(filter_shape)
     squared_distances = ((xys - mean) ** 2.0).sum(axis=0)
 
-    # This differs from pylearn2's version, which squares this for some reason.
     normalizer = 1.0 / (standard_deviation * numpy.sqrt(2.0 * numpy.pi))
+
+    # As with Pylearn2, we square the normal distribution's normalizer. Not
+    # sure why this is, other than to say that without it, Lcn'ed images look
+    # horrible (comment this out and run scripts/browse_norb.py with --lcn to
+    # see).
+    normalizer = normalizer ** 2.0
 
     cast_floatX = numpy.cast[theano.config.floatX]
 
@@ -923,7 +931,7 @@ class Lcn(Node):
                  filter_shape=(7, 7),
                  threshold=1e-4,
                  axis_map=None):
-        assert_floating(input_node.output_symbol.dtype)
+        assert_floating(input_node.output_symbol)
 
         assert_equal(len(filter_shape), 2)
         assert_all_integers(filter_shape)
@@ -947,16 +955,16 @@ class Lcn(Node):
         # Leaves the 'c' axis intact as a singleton dimension.
         def make_channel_separator(node):
             bc01 = ('b', 'c', '0', '1')
-            assert_equal(node.axes, bc01)
+            assert_equal(node.output_format.axes, bc01)
 
             shape = node.output_format.shape
             bc_size = numpy.prod(shape[:2])
             fmt = DenseFormat(axes=bc01,
                               shape=(bc_size, 1, shape[2], shape[3]),
-                              dtype=node.dtype)
+                              dtype=node.output_format.dtype)
             return FormatNode(node, fmt, axis_map={('b', 'c'): ('b', 'c')})
 
-        separated_channels_node = make_channel_separator(input_to_bc01)
+        separated_channels_node = make_channel_separator(bc01_node)
         separated_channels = separated_channels_node.output_symbol
 
         # Apply single-channel 2D convolution with a Gaussian filter
@@ -984,30 +992,34 @@ class Lcn(Node):
                                    num_filters=1,
                                    pads='same_shape')
         blur_squares_node.filters.set_value(filters)
-        local_norms = blur_squares_node.output_symbol.sqrt()
+        local_norms = theano.tensor.sqrt(blur_squares_node.output_symbol)
 
         # shape: n_images * n_channels, 1, 1, 1
-        global_norms = norms.output_symbol.mean(axis=[2, 3], keepdims=True)
+        global_norms = local_norms.mean(axis=[2, 3], keepdims=True)
 
-        denominator = tensor.largest(global_norms, local_norms)
-        denominator = tensor.maximum(denominator, threshold)
+        denominator = theano.tensor.largest(global_norms, local_norms)
+        denominator = theano.tensor.maximum(denominator, threshold)
+        result_with_separated_channels = high_pass / denominator
 
-        result_channels = high_pass / denominator
+        result_with_separated_channels_node = Node(
+            blur_squares_node,  # choice of node's input doesn't matter here
+            result_with_separated_channels,
+            separated_channels_node.output_format)
 
         # Monochrome -> multi-channel images
         def make_channel_gatherer(node):
             bc01 = ('b', 'c', '0', '1')
-            assert_equal(node.axes, bc01)
+            assert_equal(node.output_format.axes, bc01)
             assert_equal(node.output_format.shape[1], 1)
 
             output_shape = bc01_node.output_format.shape
 
             fmt = DenseFormat(axes=bc01,
                               shape=output_shape,
-                              dtype=node.dtype)
+                              dtype=node.output_format.dtype)
             return FormatNode(node, fmt, axis_map={('b', 'c'): ('b', 'c')})
 
-        result = make_channel_gatherer(result_channels)
+        result = make_channel_gatherer(result_with_separated_channels_node)
 
         super(Lcn, self).__init__(input_node,
                                   result.output_symbol,
@@ -1107,9 +1119,8 @@ class Misclassification(Node):
     def __init__(self, softmax_node, target_node):
         assert_equal(softmax_node.output_format.axes, ('b', 'f'))
         assert_in(target_node.output_format.axes, (('b', 'f'), ('b', )))
-
-        target_symbol = theano.tensor.cast(target_node.output_symbol,
-                                           'int64')
+        assert_integer(target_node.output_symbol)
+        assert_is_instance(softmax_node, Softmax)
 
         # If targets are one-hot vectors, convert them to target indices
         if len(target_node.output_format.axes) == 2:

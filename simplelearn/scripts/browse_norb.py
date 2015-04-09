@@ -6,14 +6,38 @@ Script for browsing a NORB dataset by label value.
 
 import sys
 import argparse
+import copy
 import numpy
 import matplotlib
 from matplotlib import pyplot
 from nose.tools import assert_false, assert_in, assert_equal
+import theano
 from simplelearn.data.norb import load_norb
 from simplelearn.utils import safe_izip
+from simplelearn.nodes import InputNode, FormatNode, RescaleImage, Lcn
+from simplelearn.formats import DenseFormat
 
 import pdb
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Browse NORB images by label.")
+
+    parser.add_argument('--which-norb',
+                        help="'big', 'small', or a path to a .h5 file.'")
+
+    parser.add_argument('--which-set',
+                        required=True,
+                        help=("Which partition to use (typically 'test' "
+                              "or 'train')."))
+
+    parser.add_argument('--lcn',
+                        default=False,
+                        action='store_true',
+                        help="Preprocess images with LCN.")
+
+    return parser.parse_args()
+
 
 class LabelIndexMap(object):
     '''
@@ -103,20 +127,6 @@ class LabelIndexMap(object):
 
 
 def main():
-    def parse_args():
-        parser = argparse.ArgumentParser(
-            description="Browse NORB images by label.")
-
-        parser.add_argument('--which-norb',
-                            help="'big', 'small', or a path to a .h5 file.'")
-
-        parser.add_argument('--which-set',
-                            required=True,
-                            help=("Which partition to use (typically 'test' "
-                                  "or 'train')."))
-
-        return parser.parse_args()
-
     args = parse_args()
 
     dataset = load_norb(args.which_norb, args.which_set)
@@ -243,9 +253,79 @@ def main():
     dataset_images = dataset.tensors[0]
     image_format = dataset.formats[0]
 
+    def make_lcn_func():
+        '''
+        Returns a function that takes a NORB image and applies LCN to it.
+        '''
+
+        image_node = InputNode(image_format)
+        assert_in(image_node.output_format.axes,
+                  (('b', 's', '0', '1'), ('b', '0', '1')))
+
+        if 's' in image_node.output_format.axes:
+            b01_shape = (-1, ) + image_node.output_format.shape[2:]
+            b01_format = DenseFormat(axes=('b', '0', '1'),
+                                     shape=b01_shape,
+                                     dtype=image_node.output_format.dtype)
+            b01_node = FormatNode(image_node,
+                                  b01_format,
+                                  axis_map={('b', 's'): 'b'})
+        else:
+            b01_node = image_node
+
+        b01_shape = b01_node.output_format.shape
+        bc01_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                                  shape=(-1, 1) + b01_shape[1:],
+                                  dtype=b01_node.output_format.dtype)
+        # image_shape = image_node.output_format.shape
+        # bc01_shape = (-1, 1, image_shape[0], image_shape[1])
+        # bc01_format = DenseFormat(axes=('b', 'c', '0', '1'),
+        #                           shape=bc01_shape,
+        #                           dtype=image_node.output_format.dtype)
+
+        bc01_node = FormatNode(b01_node,
+                               bc01_format,
+                               axis_map={'b': ('b', 'c')})
+
+        float_image_node = RescaleImage(bc01_node)
+        lcn = Lcn(float_image_node)
+
+        # Re-shape to original shape
+        output_format = copy.deepcopy(image_node.output_format)
+        output_format.dtype = lcn.output_format.dtype
+        if 's' in image_node.output_format.axes:
+            output_axis_map = {('b', 'c') : ('b', 's')}
+        else:
+            output_axis_map = {('b', 'c') : 'b'}
+
+        output_node = FormatNode(lcn,
+                                 output_format,
+                                 axis_map=output_axis_map)
+
+        batch_function = theano.function([image_node.output_symbol],
+                                         output_node.output_symbol)
+
+        def single_example_function(image):
+            '''
+            Takes a single example and adds a singleton batch axis to it before
+            feeding it to batch_function.
+            '''
+            image = image[numpy.newaxis, ...]
+            result_batch = batch_function(image)
+            return result_batch[0]
+
+        return single_example_function
+
+    lcn = make_lcn_func() if args.lcn else None
+
     def draw_images():
         def draw_image_impl(image, axes):
-            axes.imshow(image, cmap='gray', norm=matplotlib.colors.NoNorm())
+            if args.lcn:
+                axes.imshow(image, cmap='gray')
+            else:
+                axes.imshow(image,
+                            cmap='gray',
+                            norm=matplotlib.colors.NoNorm())
 
 
         rows, rows_index = label_index_map.index_to_rows(index)
@@ -257,8 +337,10 @@ def main():
                 axes.clear()
         else:
             row = rows[rows_index[0]]
-
             image = dataset_images[row]
+            if args.lcn:
+                image = lcn(image)
+
             if 's' in image_format.axes:
                 assert_equal(image_format.axes.index('s'), 1)
                 for sub_image, axes in safe_izip(image, image_axes):
