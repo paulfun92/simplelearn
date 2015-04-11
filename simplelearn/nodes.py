@@ -438,7 +438,7 @@ def _make_bc01_output_format(bc01_input_format,
                              window_shape,
                              num_filters,
                              pad):
-    '''
+    """
     Constructs an appropriately-sized output format for a convolution-like
     operator.
 
@@ -456,7 +456,7 @@ def _make_bc01_output_format(bc01_input_format,
     -------
     rval: DenseFormat
       Output format of this Conv2D node.
-    '''
+    """
 
     assert_equal(bc01_input_format.axes, ('b', 'c', '0', '1'))
     assert_equal(bc01_input_format.shape[0], -1)
@@ -523,8 +523,8 @@ class Conv2D(Node):
     '''
     Returns a convolution over 2D space.
 
-    The output axis format is ('b', 'c', '0', '1'), or batch, channel, row,
-    column. Output dtype is theano.config.floatX.
+    The output axis order is batch-channel-row-column ('b', 'c', '0', '1').
+    Output dtype is theano.config.floatX.
 
     The input may be in any 4D DenseFormat. This will internally be converted
     to the above axis ordering and dtype.
