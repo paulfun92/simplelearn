@@ -830,6 +830,116 @@ class Dropout(Node):
                                       output_symbol,
                                       input_node.output_format)
 
+
+class AffineLayer(Function1dTo1d):
+    '''
+    A sequence of affine -> ReLU.
+    '''
+
+    def __init__(self,
+                 input_node,
+                 output_format,
+                 input_to_bf_map=None,
+                 bf_to_output_map=None)
+        '''
+        Parameters
+        ----------
+        See docs for simplelearn.nodes.AffineTransform constructor.
+        '''
+        super(AffineLayer, self).__init__(input_node,
+                                          output_format,
+                                          input_to_bf_map,
+                                          bf_to_output_map)
+
+
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            output_bf_format,
+                            **kwargs):
+        dropout_include_rate = kwargs['dropout_include_rate']
+
+        input_to_affine = input_bf_node
+
+        if dropout_include_rate == 1.0:
+            self.dropout_node = None
+        else:
+            self.dropout_node = Dropout(input_bf_node,
+                                        dropout_include_rate,
+                                        theano_rng)
+            input_to_affine = self.dropout_node
+
+        self.affine_node = AffineTransform(input_to_affine, output_bf_format)
+        self.relu_node = ReLU(self.affine_node)
+
+        return self.relu_node
+
+
+class Conv2DLayer(Node):
+    '''
+    A sequence of conv2d -> channel-wise bias -> ReLU -> pool2d
+    '''
+    def __init__(self,
+                 input_node,
+                 filter_shape,
+                 num_filters,
+                 conv_pads,
+                 pool_window_shape,
+                 pool_strides,
+                 pool_mode=None,
+                 filter_strides=(1, 1),
+                 axis_map=None,
+                 **kwargs):
+        '''
+        Parameters
+        ----------
+        input_node, filter_shape, num_filters, filter_strides, conv_pads,
+        axis_map, kwargs:
+          See equivalent arguments of simplelearn.nodes.Conv2D constructor.
+
+        pool_window_shape, pool_strides, pool_mode:
+          See equivalent arguments of simplelearn.nodes.Pool2D constructor.
+        '''
+
+        input_to_conv = input_node
+
+        if dropout_include_rate == 1.0:
+            self.dropout_node = None
+        else:
+            self.dropout_node = Dropout(last_node,
+                                        dropout_include_rate,
+                                        theano_rng)
+            input_to_conv = self.dropout_node
+
+        self.conv2d_node = Conv2D(input_to_conv,
+                                  filter_shape,
+                                  num_filters,
+                                  pads,
+                                  filter_strides=(1, 1),
+                                  axis_map=None,
+                                  **kwargs)
+
+        non_channel_axes = tuple(axis for axis
+                                 in self.conv2d_node.output_format.axes
+                                 if axis != channel_axis)
+        self.bias_node = Bias(self.conv2d_node,
+                              output_format=top_layer.output_format,
+                              input_to_bf_map={non_channel_axes: 'b',
+                                               channel_axis: 'f'},
+                              bf_to_output_map={'b': non_channel_axes,
+                                                'f': channel_axis})
+        assert_equal(top_layer.params.get_value().shape[1], num_filters)
+
+        self.relu_node = ReLU(self.bias_node)
+        self.pool2d_node = Pool2D(input_node=self.relu_node,
+                                  window_shape=pool_shape,
+                                  strides=pool_strides,
+                                  mode=pool_mode)
+
+        super(Conv2DLayer, self).__init__([input_node],
+                                          self.pool2d_node.output_symbol,
+                                          self.pool2d_node.output_format)
+
+
 def _normal_distribution_pdf(inputs, mean, covariance):
     '''
     Computes the normal distribution PDF (aka Gaussian).
