@@ -125,18 +125,22 @@ def parse_args():
                         default=100,
                         help="batch size")
 
-    parser.add_argument("--dropout-include-rates",
-                        default=(1.0, 1.0),  # i.e. no dropout
-                        type=positive_0_to_1,
-                        nargs=2,
-                        help=("The dropout include rates for the outputs of "
-                              "the first two layers. Must be in the range "
-                              "(0.0, 1.0]. If 1.0, the Dropout node will "
-                              "simply be omitted. For no dropout, use "
-                              "1.0 1.0 (this is the default). Make sure to "
-                              "lower the learning rate when using dropout. "
-                              "I'd suggest a learning rate of 0.001 for "
-                              "dropout-include-rates of 0.5 0.5."))
+    parser.add_argument("--dropout",
+                        action='store_true',
+                        default=False,
+                        help="Use dropout.")
+    # parser.add_argument("--dropout-include-rates",
+    #                     default=(1.0, 1.0, 1.0),  # i.e. no dropout
+    #                     type=positive_0_to_1,
+    #                     nargs=2,
+    #                     help=("The dropout include rates for the outputs of "
+    #                           "the first two layers. Must be in the range "
+    #                           "(0.0, 1.0]. If 1.0, the Dropout node will "
+    #                           "simply be omitted. For no dropout, use "
+    #                           "1.0 1.0 (this is the default). Make sure to "
+    #                           "lower the learning rate when using dropout. "
+    #                           "I'd suggest a learning rate of 0.001 for "
+    #                           "dropout-include-rates of 0.5 0.5."))
 
     parser.add_argument("--final-momentum",
                         type=positive_0_to_1,
@@ -160,6 +164,23 @@ def parse_args():
                         type=positive_float,
                         default=max_norm,
                         help="Max. L2 norm of weight matrix columns.")
+
+    parser.add_argument("--weight-decay",
+                        type=non_negative_float,
+                        default=0.00005,
+                        metavar="K",
+                        help=("For each weight matrix or filters tensor W, "
+                              "add K * sqr(W).sum() to each batch's cost, for "
+                              "all weights and filters"))
+
+    parser.add_argument("--validation-size",
+                        type=non_negative_int,
+                        default=10000,
+                        metavar="V",
+                        help=("If this is zero, use the test set as the "
+                              "validation set. Otherwise, use the last V "
+                              "elements of the training set as the validation "
+                              "set."))
 
     return parser.parse_args()
 
@@ -391,12 +412,23 @@ def main():
     affine_output_sizes = [10]
     affine_init_stddevs = [.05] * len(affine_output_sizes)
     # dropout_include_rates += [.5] * (len(affine_output_sizes) - 1)
-    dropout_include_rates = [.5] * (len(filter_counts) +
-                                    len(affine_output_sizes))
+    dropout_include_rates = ([.5 if args.dropout else 1.0] *
+                             (len(filter_counts) + len(affine_output_sizes)))
 
     assert_equal(affine_output_sizes[-1], 10)
 
     mnist_training, mnist_testing = load_mnist()
+
+    if args.validation_size != 0:
+        tensors = mnist_training.tensors
+        training_tensors = [t[:-args.validation_size, ...] for t in tensors]
+        testing_tensors = [t[args.validation_size:, ...] for t in tensors]
+        mnist_training = Dataset(tensors=training_tensors,
+                                 names=mnist_training.names,
+                                 formats=mnist_training.formats)
+        mnist_testing = Dataset(tensors=testing_tensors,
+                                 names=mnist_training.names,
+                                 formats=mnist_training.formats)
 
     mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
                                                     batch_size=args.batch_size)
@@ -423,6 +455,18 @@ def main():
 
     loss_node = CrossEntropy(output_node, label_node)
     scalar_loss = loss_node.output_symbol.mean()
+
+    if args.weight_decay != 0.0:
+        for conv_layer in conv_layers:
+            filters = conv_layer.conv2d_node.filters
+            filter_loss = args.weight_decay * theano.tensor.sqr(filters).sum()
+            scalar_loss = scalar_loss + filter_loss
+
+        for affine_layer in affine_layers:
+            weights = affine_layer.affine_node.weights
+            weight_loss = args.weight_decay * theano.tensor.sqr(weights).sum()
+            scalar_loss = scalar_loss + weight_loss
+
     max_epochs = 500
 
     #
