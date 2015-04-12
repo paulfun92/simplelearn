@@ -16,12 +16,9 @@ from nose.tools import (assert_true,
                         assert_greater_equal,
                         assert_less_equal,
                         assert_equal)
-from simplelearn.nodes import (Node,
-                               Conv2D,
-                               Pool2D,
-                               ReLU,
+from simplelearn.nodes import (Conv2DLayer,
+                               AffineLayer,
                                Dropout,
-                               AffineTransform,
                                CrossEntropy,
                                Misclassification,
                                Softmax,
@@ -31,7 +28,6 @@ from simplelearn.utils import (safe_izip,
                                assert_floating,
                                assert_all_equal,
                                assert_all_greater,
-                               assert_all_less_equal,
                                assert_all_integers)
 from simplelearn.io import SerializableModel
 from simplelearn.data.mnist import load_mnist
@@ -41,7 +37,6 @@ from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
                                   LogsToLists,
                                   SavesAtMinimum,
-                                  Monitor,
                                   AverageMonitor,
                                   LimitsNumEpochs,
                                   LinearlyInterpolatesOverEpochs,
@@ -120,7 +115,7 @@ def parse_args():
                         help=("Initial momentum."))
 
     parser.add_argument("--no-nesterov",
-                        default=False,  # True used in pylearn2 demo
+                        default=True,  # True used in pylearn2 demo, False used here
                         action="store_true",
                         help=("Don't use Nesterov accelerated gradients "
                               "(default: False)."))
@@ -209,38 +204,39 @@ def build_conv_classifier(input_node,
     assert_equal(len(affine_output_sizes), len(affine_init_stddevs))
 
     assert_equal(len(dropout_include_rates),
-                 len(filter_shapes) + len(affine_output_sizes) - 1)
+                 len(filter_shapes) + len(affine_output_sizes))
+                 # len(filter_shapes) + len(affine_output_sizes) - 1)
 
     assert_equal(affine_output_sizes[-1], 10)  # for MNIST
 
-    #
-    # Converts from MNIST's ('b', '0', '1') to ('b', 'c', '0', '1')
-    #
-
     assert_equal(input_node.output_format.axes, ('b', '0', '1'))
+
+
+    #
+    # Done sanity-checking args.
+    #
 
     input_shape = input_node.output_format.shape
 
-    last_node = FormatNode(
-        input_node,
-        DenseFormat(axes=('b', 'c', '0', '1'),
-                    shape=(input_shape[0],
-                           1,
-                           input_shape[1],
-                           input_shape[2]),
-                    dtype=None),
-        {'1': ('1', 'c')})
+    # Converts from MNIST's ('b', '0', '1') to ('b', 'c', '0', '1')
+    last_node = FormatNode(input_node,
+                           DenseFormat(axes=('b', 'c', '0', '1'),
+                                       shape=(input_shape[0],
+                                              1,
+                                              input_shape[1],
+                                              input_shape[2]),
+                                       dtype=None),
+                           {'b': ('b', 'c')})
+        # {'1': ('1', 'c')})
 
     conv_dropout_include_rates = \
         dropout_include_rates[:len(filter_shapes)]
 
-    # last_node = input_node
 
-    #
-    # Adds a conv-relu-maxpool-dropout stack for each element in filter_XXXX
-    #
+    # Adds a dropout-conv-bias-relu-maxpool stack for each element in
+    # filter_XXXX
 
-    conv_nodes = []
+    conv_layers = []
 
     def uniform_init(rng, params, init_range):
         '''
@@ -268,26 +264,38 @@ def build_conv_classifier(input_node,
                                                  pool_shapes,
                                                  pool_strides,
                                                  conv_dropout_include_rates):
-        last_node = Conv2D(last_node,
-                           filter_shape,
-                           filter_count,
-                           pads='valid')
-        uniform_init(rng, last_node.filters, filter_init_range)
-        conv_nodes.append(last_node)
-
-        last_node = ReLU(last_node)
-
-        last_node = Pool2D(last_node, pool_shape, pool_stride, mode='max')
-
         if conv_dropout_include_rate != 1.0:
             last_node = Dropout(last_node,
                                 conv_dropout_include_rate,
                                 theano_rng)
 
-    affine_dropout_include_rates = \
-        dropout_include_rates[len(filter_shapes):] + [None]
+        last_node = Conv2DLayer(last_node,
+                                filter_shape,
+                                filter_count,
+                                conv_pads='valid',
+                                pool_window_shape=pool_shape,
+                                pool_strides=pool_stride)
+        conv_layers.append(last_node)
 
-    affine_nodes = []
+        uniform_init(rng, last_node.conv2d_node.filters, filter_init_range)
+
+        # last_node = Conv2D(last_node,
+        #                    filter_shape,
+        #                    filter_count,
+        #                    pads='valid')
+        # uniform_init(rng, last_node.filters, filter_init_range)
+        # conv_nodes.append(last_node)
+
+        # last_node = ReLU(last_node)
+
+        # last_node = Pool2D(last_node, pool_shape, pool_stride, mode='max')
+
+
+    # affine_dropout_include_rates = \
+    #     dropout_include_rates[len(filter_shapes):] + [None]
+    affine_dropout_include_rates = dropout_include_rates[len(filter_shapes):]
+
+    affine_layers = []
 
     def normal_distribution_init(rng, params, stddev):
         '''
@@ -303,7 +311,7 @@ def build_conv_classifier(input_node,
         params.set_value(values)
 
     #
-    # Adds an affine-relu-dropout stack for each element in affine_XXXX,
+    # Adds a dropout-affine-relu stack for each element in affine_XXXX,
     # except for the last one, where it omits the dropout.
     #
 
@@ -314,35 +322,46 @@ def build_conv_classifier(input_node,
                   affine_init_stddevs,
                   affine_dropout_include_rates):
 
-        # The first affine node needs an axis map to collapse a feature map
-        # (axes: 'b', 'c', '0', '1') into a feature vector (axes: 'b', 'f')
-        axis_map = ({('c', '0', '1'): 'f'}
-                    if len(affine_nodes) == 0
-                    else None)
-
-        last_node = AffineTransform(last_node,
-                                    DenseFormat(axes=('b', 'f'),
-                                                shape=(-1, affine_size),
-                                                dtype=None),
-                                    input_to_bf_map=axis_map)
-        normal_distribution_init(rng,
-                                 last_node.linear_node.params,
-                                 affine_init_stddev)
-        # stddev_init(rng, last_node.bias_node.params, affine_init_stddev)
-        affine_nodes.append(last_node)
-
-        last_node = ReLU(last_node)
-
-        if len(affine_nodes) == len(affine_output_sizes):
-            assert affine_dropout_include_rate is None
-        elif affine_dropout_include_rate < 1.0:
+        if affine_dropout_include_rate < 1.0:
             last_node = Dropout(last_node,
                                 affine_dropout_include_rate,
                                 theano_rng)
 
+        # The first affine node needs an axis map to collapse a feature map
+        # (axes: 'b', 'c', '0', '1') into a feature vector (axes: 'b', 'f')
+        # axis_map = ({('c', '0', '1'): 'f'}
+        #             if len(affine_layers) == 0
+        #             else None)
+
+        last_node = AffineLayer(last_node,
+                                DenseFormat(axes=('b', 'f'),
+                                            shape=(-1, affine_size),
+                                            dtype=None))
+
+        # last_node = AffineTransform(last_node,
+        #                             DenseFormat(axes=('b', 'f'),
+        #                                         shape=(-1, affine_size),
+        #                                         dtype=None)) #,
+        #                             # input_to_bf_map=axis_map)
+
+        normal_distribution_init(rng,
+                                 last_node.affine_node.linear_node.params,
+                                 affine_init_stddev)
+        # stddev_init(rng, last_node.bias_node.params, affine_init_stddev)
+        affine_layers.append(last_node)
+
+        # last_node = ReLU(last_node)
+
+        # if len(affine_nodes) == len(affine_output_sizes):
+        #     assert affine_dropout_include_rate is None
+        # elif affine_dropout_include_rate < 1.0:
+        #     last_node = Dropout(last_node,
+        #                         affine_dropout_include_rate,
+        #                         theano_rng)
+
     last_node = Softmax(last_node)
 
-    return conv_nodes, affine_nodes, last_node
+    return conv_layers, affine_layers, last_node
 
 
 def print_mcr(values, _):
@@ -366,13 +385,14 @@ def main():
 
     filter_counts = [64, 64]
     filter_init_uniform_ranges = [.05] * len(filter_counts)
-    dropout_include_rates = [.5] * len(filter_counts)
     filter_shapes = [(5, 5), (5, 5)]
     pool_shapes = [(4, 4), (4, 4)]
     pool_strides = [(2, 2), (2, 2)]
     affine_output_sizes = [10]
     affine_init_stddevs = [.05] * len(affine_output_sizes)
-    dropout_include_rates += [.5] * (len(affine_output_sizes) - 1)
+    # dropout_include_rates += [.5] * (len(affine_output_sizes) - 1)
+    dropout_include_rates = [.5] * (len(filter_counts) +
+                                    len(affine_output_sizes))
 
     assert_equal(affine_output_sizes[-1], 10)
 
@@ -387,8 +407,8 @@ def main():
     rng = numpy.random.RandomState(34523)
     theano_rng = RandomStreams(23845)
 
-    (conv_nodes,
-     affine_nodes,
+    (conv_layers,
+     affine_layers,
      output_node) = build_conv_classifier(image_node,
                                           filter_shapes,
                                           filter_counts,
@@ -432,19 +452,27 @@ def main():
             args.final_momentum,
             args.epochs_to_momentum_saturation))
 
-    for conv_node in conv_nodes:
-        parameters.append(conv_node.filters)
-        add_updaters(conv_node.filters,
+    for conv_layer in conv_layers:
+        filters = conv_layer.conv2d_node.filters
+        parameters.append(filters)
+        add_updaters(filters,
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
         limit_param_norms(parameter_updaters[-1],
-                          conv_node.filters,
+                          filters,
                           args.max_filter_norm,
                           (1, 2, 3))
 
-    for affine_node in affine_nodes:
-        weights = affine_node.linear_node.params
+        bias = conv_layer.bias_node.params
+        parameters.append(bias)
+        add_updaters(bias,
+                     scalar_loss,
+                     parameter_updaters,
+                     momentum_updaters)
+
+    for affine_layer in affine_layers:
+        weights = affine_layer.affine_node.linear_node.params
         parameters.append(weights)
         add_updaters(weights,
                      scalar_loss,
@@ -455,7 +483,7 @@ def main():
                           max_norm=args.max_col_norm,
                           input_axes=[0])
 
-        biases = affine_node.bias_node.params
+        biases = affine_layer.affine_node.bias_node.params
         parameters.append(biases)
         add_updaters(biases,
                      scalar_loss,
@@ -512,7 +540,12 @@ def main():
         '''
         assert_equal(os.path.splitext(args.output_prefix)[1], "")
 
-        output_dir, output_prefix = os.path.split(args.output_prefix)
+        if os.path.isdir(args.output_prefix):
+            output_dir, output_prefix = args.output_prefix, ""
+        else:
+            output_dir, output_prefix = os.path.split(args.output_prefix)
+            assert_true(os.path.isdir(output_dir))
+
         if output_prefix != "":
             output_prefix = output_prefix + "_"
 

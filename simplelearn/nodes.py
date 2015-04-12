@@ -18,7 +18,9 @@ from nose.tools import (assert_true,
                         assert_greater,
                         assert_greater_equal,
                         assert_is_instance,
-                        assert_in)
+                        assert_is,
+                        assert_in,
+                        assert_not_in)
 from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_floating,
@@ -168,18 +170,43 @@ class Function1dTo1d(Node):
     """
 
     @staticmethod
-    def _get_bf_shape(fmt):
+    def _get_bf_shape(input_format, input_to_bf_map):
         """
         Returns the shape of an equivalent format with ('b', 'f') axes.
 
-        Does this by collapsing all axes other than 'b' into a single axis 'f'.
+        The shape is (-1, N), where N is the product of all input axes that
+        input_to_bf_map maps to 'f'. If input_to_bf_map is omitted, N is
+        the product of all input axes other than 'b'.
         """
+        assert_is_instance(input_to_bf_map, dict)  # no Nones allowed
 
-        non_b_sizes = [fmt.shape[fmt.axes.index(a)]
-                       for a in fmt.axes if a != 'b']
-        f_size = 1 if len(non_b_sizes) == 0 else numpy.prod(non_b_sizes)
-        b_size = fmt.shape[fmt.axes.index('b')]
-        return (b_size, f_size)
+        # No duplicate values
+        assert_equal(len(frozenset(input_to_bf_map.itervalues())),
+                     len(input_to_bf_map))
+
+        bf_to_input_map = dict()
+        for key, value in input_to_bf_map.iteritems():
+            bf_to_input_map[value] = key
+
+        if 'f' not in bf_to_input_map:
+            # Return input 'f' axis' size unchanged.
+            f_index = input_format.axes.index('f')
+            return (-1, input_format.shape[f_index])
+        else:
+            # Return the product of sizes of axes mapped to 'f'.
+            axes_mapped_to_f = bf_to_input_map['f']
+            if isinstance(axes_mapped_to_f, basestring):
+                axes_mapped_to_f = (axes_mapped_to_f, )
+
+            # This would be complicated to code around, and is probably
+            # user error anyway.
+            assert_not_in('b', axes_mapped_to_f)
+
+            dims_mapped_to_f = \
+                [input_format.shape[input_format.axes.index(a)]
+                 for a in axes_mapped_to_f]
+
+            return (-1, numpy.prod(dims_mapped_to_f))
 
     def __init__(self,
                  input_node,
@@ -231,17 +258,7 @@ class Function1dTo1d(Node):
         assert_in('b', output_axes)
 
         #
-        # Creates equivalent bf format to input format.
-        #
-
-        get_bf_shape = Function1dTo1d._get_bf_shape
-
-        input_bf_format = DenseFormat(axes=('b', 'f'),
-                                      shape=get_bf_shape(input_format),
-                                      dtype=input_format.dtype)
-
-        #
-        # Creates axis mappings to and from input_bf_format
+        # Creates axis mappings to and from ('b', 'f') format
         #
 
         if input_to_bf_map is None:
@@ -249,8 +266,8 @@ class Function1dTo1d(Node):
             if len(input_non_b_axes) == 0:
                 input_to_bf_map = {'b': ('b', 'f')}
             else:
-                input_to_bf_map = {input_non_b_axes: 'f',
-                                   'b': 'b'}
+                input_to_bf_map = {'b': 'b',
+                                   input_non_b_axes: 'f'}
 
         if bf_to_output_map is None:
             output_non_b_axes = tuple(a for a in output_format.axes
@@ -258,20 +275,39 @@ class Function1dTo1d(Node):
             if len(output_non_b_axes) == 0:
                 bf_to_output_map = {('b', 'f'): 'b'}
             else:
-                bf_to_output_map = {'f': output_non_b_axes,
-                                    'b': 'b'}
+                bf_to_output_map = {'b': 'b',
+                                    'f': output_non_b_axes}
 
-        input_to_bf_node = FormatNode(input_node,
-                                      input_bf_format,
-                                      input_to_bf_map)
+        #
+        # Creates equivalent bf format to input format.
+        #
+
+        get_bf_shape = Function1dTo1d._get_bf_shape
+
+        input_bf_format = DenseFormat(axes=('b', 'f'),
+                                      shape=get_bf_shape(input_format,
+                                                         input_to_bf_map),
+                                      dtype=input_format.dtype)
+
+        input_bf_node = FormatNode(input_node,
+                                   input_bf_format,
+                                   input_to_bf_map)
 
         # format to output format
+        output_to_bf_map = None
+        if bf_to_output_map is not None:
+            output_to_bf_map = dict()
+            for key, value in bf_to_output_map.iteritems():
+                output_to_bf_map[value] = key
+
         output_bf_format = DenseFormat(axes=('b', 'f'),
-                                       shape=get_bf_shape(output_format),
+                                       shape=get_bf_shape(output_format,
+                                                          output_to_bf_map),
                                        dtype=output_format.dtype)
 
         # compute function of feature vectors
-        output_bf_node = self._get_output_bf_node(input_to_bf_node,
+        output_bf_node = self._get_output_bf_node(input_bf_node,
+                                                  input_bf_format,
                                                   output_bf_format)
 
         assert_is_instance(output_bf_node, Node)
@@ -286,6 +322,7 @@ class Function1dTo1d(Node):
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
         '''
         Returns a Node that takes input with axes=('b', 'f'), and
@@ -300,23 +337,39 @@ class Linear(Function1dTo1d):
     Applies a linear transformation to the input.
     '''
 
-    def __init__(self, input_node, output_format):
+    def __init__(self, input_node, output_format, **kwargs):
         get_bf_shape = Function1dTo1d._get_bf_shape
 
-        num_input_features = get_bf_shape(input_node.output_format)[1]
-        num_output_features = get_bf_shape(output_format)[1]
+        # num_input_features = get_bf_shape(input_node.output_format, input_to_bf_map)[1]
+        # num_output_features = get_bf_shape(output_format)[1]
 
-        params = numpy.zeros((num_input_features, num_output_features),
-                             dtype=input_node.output_symbol.dtype)
-        self.params = theano.shared(params)
+        # params = numpy.zeros((num_input_features, num_output_features),
+        #                      dtype=input_node.output_symbol.dtype)
+        # self.params = theano.shared(params)
+        self.params = None
 
-        super(Linear, self).__init__(input_node, output_format)
+        super(Linear, self).__init__(input_node, output_format, **kwargs)
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
+        assert_is(self.params, None)
+
+        params = numpy.zeros((input_bf_format.shape[1],
+                              output_bf_format.shape[1]),
+                             dtype=input_bf_node.output_symbol.dtype)
+        self.params = theano.shared(params)
         output_symbol = theano.tensor.dot(input_bf_node.output_symbol,
                                           self.params)
+
+        if output_bf_format.dtype is None:
+            output_dtype = input_bf_node.output_symbol.dtype
+        else:
+            output_dtype = output_bf_format.dtype
+
+        output_symbol = theano.tensor.cast(output_symbol, str(output_dtype))
+
         return Node(input_bf_node, output_symbol, output_bf_format)
 
 
@@ -325,24 +378,50 @@ class Bias(Function1dTo1d):
     Adds a bias to the input.
     '''
 
-    def __init__(self, input_node, output_format):
-        get_bf_shape = Function1dTo1d._get_bf_shape
+    def __init__(self, input_node, output_format, **kwargs):
+        # get_bf_shape = Function1dTo1d._get_bf_shape
 
-        num_input_features = get_bf_shape(input_node.output_format)[1]
-        num_output_features = get_bf_shape(output_format)[1]
+        # num_input_features = get_bf_shape(input_node.output_format)[1]
+        # num_output_features = get_bf_shape(output_format)[1]
 
-        assert_equal(num_output_features, num_input_features)
+        # assert_equal(num_output_features, num_input_features)
 
-        params = numpy.zeros((1, num_output_features),
-                             dtype=input_node.output_symbol.dtype)
+        # params = numpy.zeros((1, num_output_features),
+        #                      dtype=input_node.output_symbol.dtype)
 
-        self.params = theano.shared(params, broadcastable=[True, False])
-        super(Bias, self).__init__(input_node, output_format)
+        # self.params = theano.shared(params, broadcastable=[True, False])
+
+        self.params = None
+        super(Bias, self).__init__(input_node, output_format, **kwargs)
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
+        # get_bf_shape = Function1dTo1d._get_bf_shape
+
+        # num_input_features = get_bf_shape(input_node.output_format)[1]
+        # num_output_features = get_bf_shape(output_format)[1]
+
+        # assert_equal(num_output_features, num_input_features)
+
+        assert_is(self.params, None)
+        assert_equal(input_bf_format.shape, output_bf_format.shape)
+
+        params = numpy.zeros((1, output_bf_format.shape[1]),
+                             dtype=input_bf_node.output_symbol.dtype)
+
+        self.params = theano.shared(params, broadcastable=[True, False])
+
         output_symbol = input_bf_node.output_symbol + self.params
+
+        if output_bf_format.dtype is None:
+            output_dtype = input_bf_node.output_symbol.dtype
+        else:
+            output_dtype = output_bf_format.dtype
+
+        output_symbol = theano.tensor.cast(output_symbol, str(output_dtype))
+
         return Node(input_bf_node, output_symbol, output_bf_format)
 
 
@@ -351,24 +430,19 @@ class AffineTransform(Function1dTo1d):
     Implements dot(X, M) + B (multiplying by a matrix, then adding a bias)
     '''
 
-    def __init__(self,
-                 input_node,
-                 output_format,
-                 input_to_bf_map=None,
-                 bf_to_output_map=None):
+    def __init__(self, input_node, output_format, **kwargs):
         super(AffineTransform, self).__init__(input_node,
                                               output_format,
-                                              input_to_bf_map,
-                                              bf_to_output_map)
+                                              **kwargs)
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
         self.linear_node = Linear(input_bf_node, output_bf_format)
 
         # bias node's output format is the same as its input format
-        self.bias_node = Bias(self.linear_node,
-                              output_format=output_bf_format)
+        self.bias_node = Bias(self.linear_node, output_bf_format)
 
         return self.bias_node
 
@@ -406,8 +480,6 @@ def _make_bc01_format_node(i_node, i_to_bc01_axis_map):
     else:
         # keys are all strings (as opposed to tuples of strings)
         assert_all_is_instance(i_to_bc01_axis_map.iterkeys(), basestring)
-        # for key in i_to_bc01_axis_map.iterkeys():
-        #     assert_is_instance(key, basestring)
 
         # values are some permutation of bc01_axes
         assert_equal(set(i_to_bc01_axis_map.itervalues()),
@@ -748,7 +820,10 @@ class Softmax(Function1dTo1d):
                                       input_to_bf_map,
                                       bf_to_output_map)
 
-    def _get_output_bf_node(self, input_bf_node, output_bf_format):
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            input_bf_format,
+                            output_bf_format):
         softmaxes = theano.tensor.nnet.softmax(input_bf_node.output_symbol)
         return Node(input_bf_node, softmaxes, output_bf_format)
 
@@ -840,7 +915,7 @@ class AffineLayer(Function1dTo1d):
                  input_node,
                  output_format,
                  input_to_bf_map=None,
-                 bf_to_output_map=None)
+                 bf_to_output_map=None):
         '''
         Parameters
         ----------
@@ -854,23 +929,10 @@ class AffineLayer(Function1dTo1d):
 
     def _get_output_bf_node(self,
                             input_bf_node,
-                            output_bf_format,
-                            **kwargs):
-        dropout_include_rate = kwargs['dropout_include_rate']
-
-        input_to_affine = input_bf_node
-
-        if dropout_include_rate == 1.0:
-            self.dropout_node = None
-        else:
-            self.dropout_node = Dropout(input_bf_node,
-                                        dropout_include_rate,
-                                        theano_rng)
-            input_to_affine = self.dropout_node
-
-        self.affine_node = AffineTransform(input_to_affine, output_bf_format)
+                            input_bf_format,
+                            output_bf_format):
+        self.affine_node = AffineTransform(input_bf_node, output_bf_format)
         self.relu_node = ReLU(self.affine_node)
-
         return self.relu_node
 
 
@@ -885,8 +947,9 @@ class Conv2DLayer(Node):
                  conv_pads,
                  pool_window_shape,
                  pool_strides,
-                 pool_mode=None,
+                 pool_mode='max',
                  filter_strides=(1, 1),
+                 channel_axis='c',
                  axis_map=None,
                  **kwargs):
         '''
@@ -899,39 +962,38 @@ class Conv2DLayer(Node):
         pool_window_shape, pool_strides, pool_mode:
           See equivalent arguments of simplelearn.nodes.Pool2D constructor.
         '''
+        assert_in(channel_axis, input_node.output_format.axes)
 
-        input_to_conv = input_node
-
-        if dropout_include_rate == 1.0:
-            self.dropout_node = None
-        else:
-            self.dropout_node = Dropout(last_node,
-                                        dropout_include_rate,
-                                        theano_rng)
-            input_to_conv = self.dropout_node
-
-        self.conv2d_node = Conv2D(input_to_conv,
+        self.conv2d_node = Conv2D(input_node,
                                   filter_shape,
                                   num_filters,
-                                  pads,
-                                  filter_strides=(1, 1),
-                                  axis_map=None,
+                                  conv_pads,
+                                  filter_strides=filter_strides,
+                                  axis_map=axis_map,
                                   **kwargs)
 
+        # Implements channel-wise bias by collapsing non-channel axes into
+        # batch axes in the bias node. Bias node then adds a bias per
+        # channel, then reshapes output to original shape.
+
+        # TODO: replace this with a solution that doesn't involve a potentially
+        # expensive transpose? We just need to take a <num_channels>-sized
+        # bias vector, dimshuffle it to add singleton axes along other axes,
+        # then add it. No need to transpose an entire feature map.
         non_channel_axes = tuple(axis for axis
                                  in self.conv2d_node.output_format.axes
                                  if axis != channel_axis)
         self.bias_node = Bias(self.conv2d_node,
-                              output_format=top_layer.output_format,
+                              output_format=self.conv2d_node.output_format,
                               input_to_bf_map={non_channel_axes: 'b',
                                                channel_axis: 'f'},
                               bf_to_output_map={'b': non_channel_axes,
                                                 'f': channel_axis})
-        assert_equal(top_layer.params.get_value().shape[1], num_filters)
+        assert_equal(self.bias_node.params.get_value().shape, (1, num_filters))
 
         self.relu_node = ReLU(self.bias_node)
         self.pool2d_node = Pool2D(input_node=self.relu_node,
-                                  window_shape=pool_shape,
+                                  window_shape=pool_window_shape,
                                   strides=pool_strides,
                                   mode=pool_mode)
 
@@ -1073,7 +1135,6 @@ class Lcn(Node):
             assert_equal(node.output_format.axes, bc01)
 
             shape = node.output_format.shape
-            bc_size = numpy.prod(shape[:2])
             fmt = DenseFormat(axes=bc01,
                               shape=(-1, 1, shape[2], shape[3]),
                               dtype=node.output_format.dtype)

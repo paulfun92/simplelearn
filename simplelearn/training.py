@@ -138,7 +138,7 @@ class PicklesOnEpoch(EpochCallback):
         else:
             path, filename = os.path.split(filepath)
 
-        assert_true(os.path.isdir(path))
+        assert_true(os.path.isdir(path), "{} isn't a directory".format(path))
         assert_equal(os.path.splitext(filename)[1], '.pkl')
 
         # if isinstance(objects, Sequence) and \
