@@ -36,6 +36,7 @@ from simplelearn.nodes import (Node,
                                L2Loss,
                                CrossEntropy,
                                Lcn,
+                               Conv2DLayer,
                                _assert_is_shape2d,
                                _make_2d_gaussian_filter)
 
@@ -740,7 +741,7 @@ def ntest_conv2d():
 
 def test_make_2d_gaussian_filter():
     dtype = theano.config.floatX  # pylint: disable=no-member
-    standard_deviation = 2.0
+    # standard_deviation = 2.0
 
     # Test a range of filter shapes: square, non-square, even dims, odd dims
     for filter_shape in itertools.product(range(3, 7), repeat=2):
@@ -828,5 +829,90 @@ def test_conv_layer():
 
     image_format = DenseFormat(axes=('b', 'c', '0', '1'),  # TODO: shuffle
                                shape=(-1, 3, 10, 12),
-                               dtype=theano.conv.floatX)
+                               dtype=theano.config.floatX)
+
     image_node = InputNode(fmt=image_format)
+
+    rng_seed = 13515
+    # theano_rng_seed = 42235
+
+    # Conv layer parameters
+    filter_shape = (3, 3)
+    num_filters = 2
+    conv_pads = 'same_shape'
+    pool_shape = (4, 4)
+    pool_strides = (2, 2)
+
+    def randomize(rng, params):
+        values = params.get_value()
+        values[...] = rng.uniform(low=-.05, high=.05, size=values.shape)
+        params.set_value(values)
+
+    def make_conv_layer():
+
+        conv_layer_node = Conv2DLayer(image_node,
+                                      filter_shape=filter_shape,
+                                      num_filters=num_filters,
+                                      conv_pads=conv_pads,
+                                      pool_window_shape=pool_shape,
+                                      pool_strides=pool_strides)
+
+        filters = conv_layer_node.conv2d_node.filters
+        biases = conv_layer_node.bias_node.params
+
+        rng = numpy.random.RandomState(rng_seed)
+
+        randomize(rng, filters)
+        randomize(rng, biases)
+        return conv_layer_node
+
+    conv_layer_node = make_conv_layer()
+    conv_layer_function = theano.function([image_node.output_symbol],
+                                          conv_layer_node.output_symbol)
+
+    #
+    # Construct a series of lesser nodes that should have the same effect as
+    # conv_layer_node. In particular, use a more direct way of expressing the
+    # bias.
+    #
+
+    def make_conv_sequence():
+        conv2d_node = Conv2D(image_node,
+                             filter_shape=filter_shape,
+                             num_filters=num_filters,
+                             pads=conv_pads)
+
+        biases = theano.shared(numpy.zeros((1, num_filters, 1, 1),
+                                           dtype=theano.config.floatX),
+                               broadcastable=(True, False, True, True))
+
+        bias_node = Node(conv2d_node,
+                         conv2d_node.output_symbol + biases,
+                         conv2d_node.output_format)
+
+        relu_node = ReLU(bias_node)
+        pool_node = Pool2D(relu_node,
+                           mode='max',
+                           window_shape=pool_shape,
+                           strides=pool_strides)
+
+        rng = numpy.random.RandomState(rng_seed)
+        randomize(rng, conv2d_node.filters)
+        randomize(rng, biases)
+
+        return pool_node
+
+    conv_sequence_output_node = make_conv_sequence()
+    conv_sequence_function = theano.function(
+        [image_node.output_symbol],
+        conv_sequence_output_node.output_symbol)
+
+
+    batch_size = 3
+    image = image_node.output_format.make_batch(is_symbolic=False,
+                                                batch_size=batch_size)
+
+    actual_output = conv_layer_function(image)
+    expected_output = conv_sequence_function(image)
+
+    assert_allclose(actual_output, expected_output)
