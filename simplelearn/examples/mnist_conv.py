@@ -4,6 +4,8 @@
 Demonstrates training a convolutional net on MNIST.
 '''
 
+from __future__ import print_function
+
 import os
 import argparse
 import numpy
@@ -30,6 +32,7 @@ from simplelearn.utils import (safe_izip,
                                assert_all_greater,
                                assert_all_integers)
 from simplelearn.io import SerializableModel
+from simplelearn.data.dataset import Dataset
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
@@ -106,7 +109,7 @@ def parse_args():
 
     parser.add_argument("--learning-rate",
                         type=positive_float,
-                        default=0.005,  # .01 used in pylearn2 demo
+                        default=0.001,  # .01 used in pylearn2 demo
                         help=("Learning rate."))
 
     parser.add_argument("--initial-momentum",
@@ -144,7 +147,7 @@ def parse_args():
 
     parser.add_argument("--final-momentum",
                         type=positive_0_to_1,
-                        default=.5,  # .99 used in pylearn2 demo
+                        default=.5,  # .99 used in pylearn2 demo, .5 used here
                         help="Value for momentum to linearly scale up to.")
 
     parser.add_argument("--epochs-to-momentum-saturation",
@@ -153,7 +156,7 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    max_norm = 1.9365 / 2  # 1.9365 used in pylearn2 demo
+    max_norm = 1.9365 / 2  # 1.9365 used in pylearn2 demo, half that used here
 
     parser.add_argument("--max-filter-norm",
                         type=positive_float,
@@ -427,8 +430,8 @@ def main():
                                  names=mnist_training.names,
                                  formats=mnist_training.formats)
         mnist_testing = Dataset(tensors=testing_tensors,
-                                 names=mnist_training.names,
-                                 formats=mnist_training.formats)
+                                names=mnist_training.names,
+                                formats=mnist_training.formats)
 
     mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
                                                     batch_size=args.batch_size)
@@ -463,7 +466,7 @@ def main():
             scalar_loss = scalar_loss + filter_loss
 
         for affine_layer in affine_layers:
-            weights = affine_layer.affine_node.weights
+            weights = affine_layer.affine_node.linear_node.params
             weight_loss = args.weight_decay * theano.tensor.sqr(weights).sum()
             scalar_loss = scalar_loss + weight_loss
 
