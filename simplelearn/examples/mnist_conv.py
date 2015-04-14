@@ -645,7 +645,6 @@ def main():
     biases = ([c.bias_node.params for c in conv_layers] +
               [a.affine_node.bias_node.params for a in affine_layers])
 
-    sgd.set_trace()
     trainer.train()
 
 

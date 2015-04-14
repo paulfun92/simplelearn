@@ -1177,6 +1177,8 @@ class Sgd(object):
                 # gets batch of data
                 cost_arguments = self._input_iterator.next()
 
+                pdb.set_trace()
+
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
                 outputs = self._update_function(*cost_arguments)
