@@ -115,7 +115,7 @@ def parse_args():
 
     parser.add_argument("--learning-rate",
                         type=positive_float,
-                        default=0.001,  # .01 used in pylearn2 demo
+                        default=0.01,  # .01 used in pylearn2 demo
                         help=("Learning rate."))
 
     parser.add_argument("--initial-momentum",
@@ -141,7 +141,7 @@ def parse_args():
 
     parser.add_argument("--final-momentum",
                         type=non_negative_0_to_1,
-                        default=.5,  # .99 used in pylearn2 demo, .5 used here
+                        default=.99,  # .99 used in pylearn2 demo, .5 used here
                         help="Value for momentum to linearly scale up to.")
 
     parser.add_argument("--epochs-to-momentum-saturation",
@@ -150,7 +150,7 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    max_norm = 1.9365 / 2  # 1.9365 used in pylearn2 demo, half that used here
+    max_norm = 1.9365  # 1.9365 used in pylearn2 demo, half that used here
 
     parser.add_argument("--max-filter-norm",
                         type=positive_float,
@@ -639,6 +639,13 @@ def main():
                                 validation_callback,
                                 LimitsNumEpochs(max_epochs)])
 
+    # Debugging code
+    weights = ([c.conv2d_node.filters for c in conv_layers] +
+               [a.affine_node.linear_node.weights for a in affine_layers])
+    biases = ([c.bias_node.params for c in conv_layers] +
+              [a.affine_node.bias_node.params for a in affine_layers])
+
+    sgd.set_trace()
     trainer.train()
 
 
