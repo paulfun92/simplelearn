@@ -93,6 +93,12 @@ def parse_args():
         assert_less_equal(result, 1.0)
         return result
 
+    def non_negative_0_to_1(arg):
+        result = float(arg)
+        assert_greater_equal(result, 0.0)
+        assert_less_equal(result, 1.0)
+        return result
+
     parser.add_argument("--output-prefix",
                         type=legit_prefix,
                         required=True,
@@ -113,7 +119,7 @@ def parse_args():
                         help=("Learning rate."))
 
     parser.add_argument("--initial-momentum",
-                        type=non_negative_float,
+                        type=non_negative_0_to_1,
                         default=0.5,
                         help=("Initial momentum."))
 
@@ -132,21 +138,9 @@ def parse_args():
                         action='store_true',
                         default=False,
                         help="Use dropout.")
-    # parser.add_argument("--dropout-include-rates",
-    #                     default=(1.0, 1.0, 1.0),  # i.e. no dropout
-    #                     type=positive_0_to_1,
-    #                     nargs=2,
-    #                     help=("The dropout include rates for the outputs of "
-    #                           "the first two layers. Must be in the range "
-    #                           "(0.0, 1.0]. If 1.0, the Dropout node will "
-    #                           "simply be omitted. For no dropout, use "
-    #                           "1.0 1.0 (this is the default). Make sure to "
-    #                           "lower the learning rate when using dropout. "
-    #                           "I'd suggest a learning rate of 0.001 for "
-    #                           "dropout-include-rates of 0.5 0.5."))
 
     parser.add_argument("--final-momentum",
-                        type=positive_0_to_1,
+                        type=non_negative_0_to_1,
                         default=.5,  # .99 used in pylearn2 demo, .5 used here
                         help="Value for momentum to linearly scale up to.")
 
