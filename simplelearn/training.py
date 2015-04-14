@@ -17,6 +17,7 @@ from collections import Sequence, OrderedDict
 import numpy
 import theano
 import theano.tensor as T
+from numpy.testing import assert_allclose, assert_array_equal
 from nose.tools import (assert_true,
                         assert_equal,
                         assert_less_equal,
@@ -35,6 +36,8 @@ from simplelearn.utils import safe_izip, check_is_subdtype
 from simplelearn.formats import Format
 import pdb
 
+from simplelearn import debug_mnist
+from simplelearn.debug_mnist import load_mnist_params, load_mnist_batch
 # pylint: disable=too-few-public-methods
 
 
@@ -1172,12 +1175,53 @@ class Sgd(object):
             for callback in all_callbacks:
                 callback.on_start_training()
 
+            batch_num = 0  # mkg
+
+            mnist_weights = debug_mnist.mnist_weights
+            mnist_biases = debug_mnist.mnist_biases
+            assert_is_not(mnist_weights, None)
+            assert_is_not(mnist_biases, None)
+
+            pylearn2_weights, pylearn2_biases = load_mnist_params(
+                '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
+
+            def compare_weights(mnist_weights,
+                                mnist_biases,
+                                pylearn2_weights,
+                                pylearn2_biases):
+                atol = .00001
+                for (layer_index,
+                     (mnist_weight,
+                      mnist_bias,
+                      pylearn2_weight,
+                      pylearn2_bias)) in enumerate(safe_izip(mnist_weights,
+                                                             mnist_biases,
+                                                             pylearn2_weights,
+                                                             pylearn2_biases)):
+                    assert_allclose(mnist_weight.get_value(),
+                                    pylearn2_weight,
+                                    atol=atol)
+                    assert_allclose(mnist_bias.get_value()[0, :],
+                                    pylearn2_bias,
+                                    atol=atol)
+
+            compare_weights(mnist_weights,
+                            mnist_biases,
+                            pylearn2_weights,
+                            pylearn2_biases)
+
             while True:
 
                 # gets batch of data
                 cost_arguments = self._input_iterator.next()
 
-                pdb.set_trace()
+                pylearn2_cost_arguments = load_mnist_batch(
+                    '/tmp/pylearn2_batch_{:06d}.h5'.format(batch_num))
+
+                assert_array_equal(cost_arguments[0],
+                                   pylearn2_cost_arguments[0])
+                assert_array_equal(cost_arguments[1],
+                                   pylearn2_cost_arguments[1])
 
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
@@ -1199,6 +1243,14 @@ class Sgd(object):
                 if self._input_iterator.next_is_new_epoch():
                     for callback in all_callbacks:
                         callback.on_epoch()
+
+            batch_num += 1
+            pylearn2_weights, pylearn2_biases = load_mnist_params(
+                '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
+            compare_weights(mnist_weights,
+                            mnist_biases,
+                            pylearn2_weights,
+                            pylearn2_biases)
 
         except StopTraining, exception:
             if exception.status == 'ok':

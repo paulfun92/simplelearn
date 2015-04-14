@@ -46,6 +46,9 @@ from simplelearn.training import (SgdParameterUpdater,
                                   PicklesOnEpoch,
                                   ValidationCallback,
                                   StopsOnStagnation)
+
+from simplelearn import debug_mnist
+
 import pdb
 
 
@@ -283,6 +286,9 @@ def build_conv_classifier(input_node,
                                                  pool_strides,
                                                  conv_dropout_include_rates):
         if conv_dropout_include_rate != 1.0:
+            assert_true(False,
+                        "should never see this code if we're trying to "
+                        "replicate pylearn2's MNIST demo")
             last_node = Dropout(last_node,
                                 conv_dropout_include_rate,
                                 theano_rng)
@@ -433,7 +439,7 @@ def main():
     image_uint8_node, label_node = mnist_testing_iterator.make_input_nodes()
     image_node = RescaleImage(image_uint8_node)
 
-    rng = numpy.random.RandomState(34523)
+    rng = numpy.random.RandomState(1234)
     theano_rng = RandomStreams(23845)
 
     (conv_layers,
@@ -640,10 +646,10 @@ def main():
                                 LimitsNumEpochs(max_epochs)])
 
     # Debugging code
-    weights = ([c.conv2d_node.filters for c in conv_layers] +
-               [a.affine_node.linear_node.weights for a in affine_layers])
-    biases = ([c.bias_node.params for c in conv_layers] +
-              [a.affine_node.bias_node.params for a in affine_layers])
+    debug_mnist.mnist_weights = ([c.conv2d_node.filters for c in conv_layers] +
+                                 [a.affine_node.linear_node.params for a in affine_layers])
+    debug_mnist.mnist_biases = ([c.bias_node.params for c in conv_layers] +
+                                [a.affine_node.bias_node.params for a in affine_layers])
 
     trainer.train()
 
