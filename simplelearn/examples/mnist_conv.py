@@ -111,7 +111,7 @@ def parse_args():
 
     parser.add_argument("--learning-rate",
                         type=positive_float,
-                        default=0.005,  # .01 used in pylearn2 demo
+                        default=0.001,  # .01 used in pylearn2 demo
                         help=("Learning rate."))
 
     parser.add_argument("--initial-momentum",
@@ -285,7 +285,7 @@ def build_conv_classifier(input_node,
                                 theano_rng)
 
     affine_dropout_include_rates = \
-        dropout_include_rates[len(filter_shapes):] + [None]
+        list(dropout_include_rates[len(filter_shapes):]) + [None]
 
     affine_nodes = []
 
@@ -366,13 +366,13 @@ def main():
 
     filter_counts = [64, 64]
     filter_init_uniform_ranges = [.05] * len(filter_counts)
-    dropout_include_rates = [.5] * len(filter_counts)
     filter_shapes = [(5, 5), (5, 5)]
     pool_shapes = [(4, 4), (4, 4)]
     pool_strides = [(2, 2), (2, 2)]
     affine_output_sizes = [10]
     affine_init_stddevs = [.05] * len(affine_output_sizes)
-    dropout_include_rates += [.5] * (len(affine_output_sizes) - 1)
+    # dropout_include_rates = [.5] * len(filter_counts)
+    # dropout_include_rates += [.5] * (len(affine_output_sizes) - 1)
 
     assert_equal(affine_output_sizes[-1], 10)
 
@@ -397,7 +397,7 @@ def main():
                                           pool_strides,
                                           affine_output_sizes,
                                           affine_init_stddevs,
-                                          dropout_include_rates,
+                                          args.dropout_include_rates,
                                           rng,
                                           theano_rng)
 
