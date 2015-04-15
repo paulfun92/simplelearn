@@ -477,11 +477,11 @@ def main():
         callbacks=[validation_loss_logger, saves_best])
 
     validation_callback = ValidationCallback(
-        inputs=[image_node.output_symbol, label_node.output_symbol],
+        inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_testing_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
-    trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
+    trainer = Sgd([image_uint8_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
                                           batch_size=args.batch_size),
                   parameters,

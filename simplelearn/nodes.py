@@ -526,8 +526,15 @@ def _make_bc01_output_format(bc01_input_format,
 
     Returns
     -------
-    rval: DenseFormat
-      Output format of this Conv2D node.
+    rval: tuple
+      (fmt, pads), where
+        fmt: a DenseFormat
+          Output format of this Conv2D node.
+        pads: str, or tuple
+          A suitable padding argument to pass to Theano's dnn_conv or dnn_pool.
+          If pad was 'valid' or 'full', it's returned as-is to take advantage
+          of Theano's efficient special-casing of those values. Otherwise
+          this will be two ints, the row and column pad amounts.
     """
 
     assert_equal(bc01_input_format.axes, ('b', 'c', '0', '1'))
@@ -557,6 +564,9 @@ def _make_bc01_output_format(bc01_input_format,
                              "only odd numbers. Instead, got %s." %
                              str(window_shape))
             pads = window_shape // 2
+        elif pad == 'min':
+            pads = numpy.ceil((i_img_shape - window_shape) % strides / 2.0)
+            pads = numpy.cast[int](pads)
         elif isinstance(pad, basestring):
             raise ValueError("Unrecognized pad value '%s'" % pad)
         else:
@@ -565,9 +575,9 @@ def _make_bc01_output_format(bc01_input_format,
 
         return numpy.asarray(pads)
 
-    pads = get_pads(pad)
+    pad_pair = get_pads(pad)
 
-    padded_input_shape = i_img_shape + pads * 2
+    padded_input_shape = i_img_shape + pad_pair * 2
     o_img_shape = (padded_input_shape - window_shape + 1 - 1) // strides + 1
 
     # Confirm that output sizes work out to be the predicted sizes from
@@ -584,12 +594,15 @@ def _make_bc01_output_format(bc01_input_format,
             elif pad == 'same_shape':
                 assert_equal(o_img_size, i_img_size)
 
-    return DenseFormat(axes=('b', 'c', '0', '1'),
-                       shape=(-1,
-                              num_filters,
-                              o_img_shape[0],
-                              o_img_shape[1]),
-                       dtype=theano.config.floatX)
+    output_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                                shape=(-1,
+                                       num_filters,
+                                       o_img_shape[0],
+                                       o_img_shape[1]),
+                                dtype=theano.config.floatX)
+
+    pads_arg = pad if pad in ('valid', 'full') else tuple(pad_pair)
+    return output_format, pads_arg
 
 class Conv2D(Node):
     '''
@@ -627,6 +640,9 @@ class Conv2D(Node):
                    output_shape: input_shape - filter_shape + 1
           'full': maximal zero-padding.
                   output_shape: input_shape + filter_shape + 1
+          'min': minimal zero-padding.
+                 Just enough padding to ensure that all input pixels get used
+                 in the output.
           'same_shape': (cuDNN only) Enough padding to preserve image shape.
                        output_shape = input_shape.
           (R, C): (cuDNN only) Pad rows and columns by this many zeros on each
@@ -691,7 +707,7 @@ class Conv2D(Node):
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
-        output_format = _make_bc01_output_format(
+        output_format, pad_arg = _make_bc01_output_format(
             input_format_node.output_format,
             strides,
             filter_shape,
@@ -738,7 +754,7 @@ class Conv2D(Node):
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
-                                    pads,
+                                    pad_arg,
                                     strides)
 
         super(Conv2D, self).__init__([input_node], output, output_format)
@@ -750,7 +766,8 @@ class Pool2D(Node):
                  input_node,
                  window_shape,
                  strides,
-                 mode=None,
+                 mode,
+                 pad,
                  axis_map=None):
         '''
         cuDNN spatial pooling over image maps.
@@ -769,6 +786,19 @@ class Pool2D(Node):
         mode: str
           'max' or 'average' (default: 'max')
 
+        pad: string or Sequence
+          Either a pair of ints, or one of the following strings:
+            'valid': zero padding
+            'full': maximal padding
+            'min': minimal padding needed to ensure that all input pixels find
+                   themselves in some pooling window.
+            'same_size': Enough padding to preserve size.
+                         Requires odd-numbered rows and cols in window_shape.
+            'pylearn2': Same padding as used by pylearn2.mlp.ConvElemwise. This
+                        is nominally zero-padding, except it adds some padding
+                        to one side if it's needed to ensure that all of the
+                        input pixels find themselves in some pooling window.
+
         axis_map: dict
           Maps the axis names in input_node.output_format.axes to
           'b', 'c', '0', and '1' (batch, channel, row, column).
@@ -783,18 +813,20 @@ class Pool2D(Node):
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
-        output_format = _make_bc01_output_format(
-            input_format_node.output_format,
-            strides,
-            window_shape,
-            input_format_node.output_format.shape[1],  # num channels unchanged
-            (0, 0))  # dnn_pool always uses zero padding
+        output_format, pad_arg = _make_bc01_output_format(
+            bc01_input_format=input_format_node.output_format,
+            strides=strides,
+            window_shape=window_shape,
+            num_filters=input_format_node.output_format.shape[1],
+            pad=pad)
+        #(0, 0))  # dnn_pool always uses zero padding
 
         output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
             img=input_format_node.output_symbol,
             ws=tuple(window_shape),
             stride=tuple(strides),
-            mode=mode)
+            mode=mode,
+            pad=pad_arg)
 
         super(Pool2D, self).__init__([input_node],
                                      output_symbol,
@@ -995,7 +1027,8 @@ class Conv2DLayer(Node):
         self.pool2d_node = Pool2D(input_node=self.relu_node,
                                   window_shape=pool_window_shape,
                                   strides=pool_strides,
-                                  mode=pool_mode)
+                                  mode=pool_mode,
+                                  pad='min')
 
         super(Conv2DLayer, self).__init__([input_node],
                                           self.pool2d_node.output_symbol,

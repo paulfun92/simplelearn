@@ -34,6 +34,7 @@ from simplelearn.utils import (assert_integer,
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip, check_is_subdtype
 from simplelearn.formats import Format
+from simplelearn.nodes import Node
 import pdb
 
 from simplelearn import debug_mnist
@@ -1025,8 +1026,9 @@ class Sgd(object):
         Parameters
         ----------
 
-        inputs: sequence of theano.gof.Variables
+        inputs: sequence of Nodes.
           Symbols for the outputs of the input_iterator.
+          These should come from input_iterator.make_input_nodes()
 
         input_iterator: simplelearn.data.DataIterator
           Yields tuples of training set batches, such as (values, labels).
@@ -1057,11 +1059,15 @@ class Sgd(object):
         #
 
         assert_is_instance(inputs, Sequence)
-        for input_symbol in inputs:
-            assert_is_instance(input_symbol, theano.gof.Variable)
+        for input in inputs:
+            assert_is_instance(input, Node)
 
         assert_is_instance(input_iterator, DataIterator)
         assert_true(input_iterator.next_is_new_epoch())
+
+        for input, iterator_input in safe_izip(inputs,
+                                               input_iterator.make_input_nodes()):
+            assert_equal(input.output_format, iterator_input.output_format)
 
         assert_is_instance(parameters, Sequence)
         assert_is_instance(parameter_updaters, Sequence)
@@ -1096,8 +1102,9 @@ class Sgd(object):
         self._parameter_updaters = tuple(parameter_updaters)
         self._monitors = tuple(monitors)
 
+        input_symbols = [i.output_symbol for i in inputs]
         self._compile_update_function_args={
-            'inputs': inputs,
+            'input_symbols': input_symbols,
             'monitors': self._monitors,
             'parameter_updaters': self._parameter_updaters,
             'theano_function_mode': theano_function_mode}
@@ -1119,7 +1126,7 @@ class Sgd(object):
         self._train_called = False
 
     @staticmethod
-    def _compile_update_function(inputs,
+    def _compile_update_function(input_symbols,
                                  monitors,
                                  parameter_updaters,
                                  theano_function_mode):
@@ -1127,17 +1134,17 @@ class Sgd(object):
         Compiles the function that computes the monitored values.
         '''
 
-        outputs = []
+        output_symbols = []
         for monitor in monitors:
-            outputs.extend(monitor.monitored_values)
+            output_symbols.extend(monitor.monitored_values)
 
         updates = OrderedDict()
         for updater in parameter_updaters:
             assert_is_instance(updater.updates, OrderedDict)
             updates.update(updater.updates)
 
-        return theano.function(inputs,
-                               outputs,
+        return theano.function(input_symbols,
+                               output_symbols,
                                updates=updates,
                                mode=theano_function_mode)
 
@@ -1182,46 +1189,46 @@ class Sgd(object):
             assert_is_not(mnist_weights, None)
             assert_is_not(mnist_biases, None)
 
-            pylearn2_weights, pylearn2_biases = load_mnist_params(
-                '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
+            # pylearn2_weights, pylearn2_biases = load_mnist_params(
+            #     '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
 
-            def compare_weights(mnist_weights,
-                                mnist_biases,
-                                pylearn2_weights,
-                                pylearn2_biases):
-                atol = .00001
-                for (layer_index,
-                     (mnist_weight,
-                      mnist_bias,
-                      pylearn2_weight,
-                      pylearn2_bias)) in enumerate(safe_izip(mnist_weights,
-                                                             mnist_biases,
-                                                             pylearn2_weights,
-                                                             pylearn2_biases)):
-                    assert_allclose(mnist_weight.get_value(),
-                                    pylearn2_weight,
-                                    atol=atol)
-                    assert_allclose(mnist_bias.get_value()[0, :],
-                                    pylearn2_bias,
-                                    atol=atol)
+            # def compare_weights(mnist_weights,
+            #                     mnist_biases,
+            #                     pylearn2_weights,
+            #                     pylearn2_biases):
+            #     atol = .00001
+            #     for (layer_index,
+            #          (mnist_weight,
+            #           mnist_bias,
+            #           pylearn2_weight,
+            #           pylearn2_bias)) in enumerate(safe_izip(mnist_weights,
+            #                                                  mnist_biases,
+            #                                                  pylearn2_weights,
+            #                                                  pylearn2_biases)):
+            #         assert_allclose(mnist_weight.get_value(),
+            #                         pylearn2_weight,
+            #                         atol=atol)
+            #         assert_allclose(mnist_bias.get_value()[0, :],
+            #                         pylearn2_bias,
+            #                         atol=atol)
 
-            compare_weights(mnist_weights,
-                            mnist_biases,
-                            pylearn2_weights,
-                            pylearn2_biases)
+            # compare_weights(mnist_weights,
+            #                 mnist_biases,
+            #                 pylearn2_weights,
+            #                 pylearn2_biases)
 
             while True:
 
                 # gets batch of data
                 cost_arguments = self._input_iterator.next()
 
-                pylearn2_cost_arguments = load_mnist_batch(
-                    '/tmp/pylearn2_batch_{:06d}.h5'.format(batch_num))
+                # pylearn2_cost_arguments = load_mnist_batch(
+                #     '/tmp/pylearn2_batch_{:06d}.h5'.format(batch_num))
 
-                assert_array_equal(cost_arguments[0],
-                                   pylearn2_cost_arguments[0])
-                assert_array_equal(cost_arguments[1],
-                                   pylearn2_cost_arguments[1])
+                # assert_array_equal(cost_arguments[0],
+                #                    pylearn2_cost_arguments[0])
+                # assert_array_equal(cost_arguments[1],
+                #                    pylearn2_cost_arguments[1])
 
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
@@ -1245,12 +1252,12 @@ class Sgd(object):
                         callback.on_epoch()
 
             batch_num += 1
-            pylearn2_weights, pylearn2_biases = load_mnist_params(
-                '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
-            compare_weights(mnist_weights,
-                            mnist_biases,
-                            pylearn2_weights,
-                            pylearn2_biases)
+            # pylearn2_weights, pylearn2_biases = load_mnist_params(
+            #     '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
+            # compare_weights(mnist_weights,
+            #                 mnist_biases,
+            #                 pylearn2_weights,
+            #                 pylearn2_biases)
 
         except StopTraining, exception:
             if exception.status == 'ok':

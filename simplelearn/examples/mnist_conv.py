@@ -108,8 +108,8 @@ def parse_args():
                         help=("Directory and optional prefix of filename to "
                               "save the log to."))
 
-    # Most of the default hyperparameter values below are taken from
-    # Pylearn2, in pylearn2/scripts/tutorials/multilayer_perceptron/:
+    # The default hyperparameter values below are taken from
+    # Pylearn2's mlp tutorial, in pylearn2/scripts/tutorials/multilayer_perceptron/:
     #   multilayer_perceptron.ipynb
     #   mlp_tutorial_part_3.yaml
     #
@@ -127,7 +127,7 @@ def parse_args():
                         help=("Initial momentum."))
 
     parser.add_argument("--no-nesterov",
-                        default=True,  # True used in pylearn2 demo, False used here
+                        default=True,
                         action="store_true",
                         help=("Don't use Nesterov accelerated gradients "
                               "(default: False)."))
@@ -144,7 +144,7 @@ def parse_args():
 
     parser.add_argument("--final-momentum",
                         type=non_negative_0_to_1,
-                        default=.99,  # .99 used in pylearn2 demo, .5 used here
+                        default=.99,
                         help="Value for momentum to linearly scale up to.")
 
     parser.add_argument("--epochs-to-momentum-saturation",
@@ -153,7 +153,7 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    max_norm = 1.9365  # 1.9365 used in pylearn2 demo, half that used here
+    max_norm = 1.9365
 
     parser.add_argument("--max-filter-norm",
                         type=positive_float,
@@ -226,7 +226,6 @@ def build_conv_classifier(input_node,
 
     assert_equal(len(dropout_include_rates),
                  len(filter_shapes) + len(affine_output_sizes))
-                 # len(filter_shapes) + len(affine_output_sizes) - 1)
 
     assert_equal(affine_output_sizes[-1], 10)  # for MNIST
 
@@ -303,20 +302,7 @@ def build_conv_classifier(input_node,
 
         uniform_init(rng, last_node.conv2d_node.filters, filter_init_range)
 
-        # last_node = Conv2D(last_node,
-        #                    filter_shape,
-        #                    filter_count,
-        #                    pads='valid')
-        # uniform_init(rng, last_node.filters, filter_init_range)
-        # conv_nodes.append(last_node)
 
-        # last_node = ReLU(last_node)
-
-        # last_node = Pool2D(last_node, pool_shape, pool_stride, mode='max')
-
-
-    # affine_dropout_include_rates = \
-    #     dropout_include_rates[len(filter_shapes):] + [None]
     affine_dropout_include_rates = dropout_include_rates[len(filter_shapes):]
 
     affine_layers = []
@@ -351,37 +337,20 @@ def build_conv_classifier(input_node,
                                 affine_dropout_include_rate,
                                 theano_rng)
 
-        # The first affine node needs an axis map to collapse a feature map
-        # (axes: 'b', 'c', '0', '1') into a feature vector (axes: 'b', 'f')
-        # axis_map = ({('c', '0', '1'): 'f'}
-        #             if len(affine_layers) == 0
-        #             else None)
+        # No need to supply an axis map for the first affine layer. By default,
+        # it collapses all non-'b' axes into a feature vector, which is what we
+        # want.
 
         last_node = AffineLayer(last_node,
                                 DenseFormat(axes=('b', 'f'),
                                             shape=(-1, affine_size),
                                             dtype=None))
 
-        # last_node = AffineTransform(last_node,
-        #                             DenseFormat(axes=('b', 'f'),
-        #                                         shape=(-1, affine_size),
-        #                                         dtype=None)) #,
-        #                             # input_to_bf_map=axis_map)
-
         normal_distribution_init(rng,
                                  last_node.affine_node.linear_node.params,
                                  affine_init_stddev)
         # stddev_init(rng, last_node.bias_node.params, affine_init_stddev)
         affine_layers.append(last_node)
-
-        # last_node = ReLU(last_node)
-
-        # if len(affine_nodes) == len(affine_output_sizes):
-        #     assert affine_dropout_include_rate is None
-        # elif affine_dropout_include_rate < 1.0:
-        #     last_node = Dropout(last_node,
-        #                         affine_dropout_include_rate,
-        #                         theano_rng)
 
     last_node = Softmax(last_node)
 
@@ -414,7 +383,6 @@ def main():
     pool_strides = [(2, 2), (2, 2)]
     affine_output_sizes = [10]
     affine_init_stddevs = [.05] * len(affine_output_sizes)
-    # dropout_include_rates += [.5] * (len(affine_output_sizes) - 1)
     dropout_include_rates = ([.5 if args.dropout else 1.0] *
                              (len(filter_counts) + len(affine_output_sizes)))
 
@@ -619,8 +587,8 @@ def main():
         input_iterator=mnist_testing_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
-    # pdb.set_trace()
-    trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
+    # trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
+    trainer = Sgd([image_uint8_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
                                           batch_size=args.batch_size),
                   parameters,
@@ -645,11 +613,58 @@ def main():
                                 validation_callback,
                                 LimitsNumEpochs(max_epochs)])
 
-    # Debugging code
-    debug_mnist.mnist_weights = ([c.conv2d_node.filters for c in conv_layers] +
-                                 [a.affine_node.linear_node.params for a in affine_layers])
-    debug_mnist.mnist_biases = ([c.bias_node.params for c in conv_layers] +
-                                [a.affine_node.bias_node.params for a in affine_layers])
+    # start debugging code
+    debug_mnist.mnist_weights = (
+        [c.conv2d_node.filters for c in conv_layers] +
+        [a.affine_node.linear_node.params for a in affine_layers])
+
+    debug_mnist.mnist_biases = (
+        [c.bias_node.params for c in conv_layers] +
+        [a.affine_node.bias_node.params for a in affine_layers])
+
+    def debug_formats():
+        conv_output_syms = [c.conv2d_node.output_symbol for c in conv_layers]
+        conv_formats = [c.conv2d_node.output_format for c in conv_layers]
+
+        pool_output_syms = [c.pool2d_node.output_symbol for c in conv_layers]
+        pool_formats = [c.pool2d_node.output_format for c in conv_layers]
+
+        affine_output_syms = [a.affine_node.output_symbol for a in affine_layers]
+        affine_formats = [a.affine_node.output_format for a in affine_layers]
+
+        func = theano.function([image_uint8_node.output_symbol],
+                               conv_output_syms +
+                               pool_output_syms +
+                               affine_output_syms)
+
+        iterator = mnist_training.iterator(iterator_type='sequential',
+                                           batch_size=10)
+        image_batch = iterator.next()[0]
+        outputs = func(image_batch)
+        last_index = 0
+
+        conv_outputs = outputs[last_index:len(conv_output_syms)]
+        last_index += len(conv_outputs)
+
+        pool_outputs = outputs[last_index:last_index + len(pool_output_syms)]
+        last_index += len(pool_outputs)
+
+        affine_outputs = outputs[last_index:last_index + len(affine_output_syms)]
+        last_index += len(affine_outputs)
+
+        def check_formats(outputs, formats):
+            for output, fmt in safe_izip(outputs, formats):
+                fmt.check(output)
+
+
+        check_formats(conv_outputs, conv_formats)
+        check_formats(pool_outputs, pool_formats)
+        check_formats(affine_outputs, affine_formats)
+        pdb.set_trace()
+
+    # debug_formats()
+
+    # end debugging code
 
     trainer.train()
 
