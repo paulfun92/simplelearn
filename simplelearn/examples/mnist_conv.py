@@ -185,6 +185,20 @@ def parse_args():
     return parser.parse_args()
 
 
+class EpochTimer(EpochCallback):
+
+    def on_start_training(self):
+        self.start_time = timeit.default_timer()
+
+    def on_epoch(self):
+        end_time = timeit.default_timer()
+
+        print("Epoch {} duration: {}".filter(self.epoch_number,
+                                             end_time - self.start_time))
+
+        self.start_time = end_time
+
+
 def build_conv_classifier(input_node,
                           filter_shapes,
                           filter_counts,
@@ -607,7 +621,8 @@ def main():
     #      ('model', model)))
 
     trainer.epoch_callbacks = (momentum_updaters +
-                               [PicklesOnEpoch(stuff_to_pickle,
+                               [EpochTimer(),
+                                PicklesOnEpoch(stuff_to_pickle,
                                                make_output_filename(args),
                                                overwrite=False),
                                 validation_callback,
