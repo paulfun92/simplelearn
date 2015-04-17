@@ -846,32 +846,76 @@ class Pool2D(Node):
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
-        output_format = _make_bc01_output_format(
-            bc01_input_format=input_format_node.output_format,
-            strides=strides,
-            window_shape=window_shape,
-            num_filters=input_format_node.output_format.shape[1],
-            pad=pad)
-        #(0, 0))  # dnn_pool always uses zero padding
+        if pad != 'pylearn2':
+            output_format = _make_bc01_output_format(
+                bc01_input_format=input_format_node.output_format,
+                strides=strides,
+                window_shape=window_shape,
+                num_filters=input_format_node.output_format.shape[1],
+                pad=pad)
+            #(0, 0))  # dnn_pool always uses zero padding
 
-        pads = _get_pads(pad,
-                         image_shape=input_format_node.output_format.shape[2:],
-                         window_shape=window_shape,
-                         strides=strides)
+            pads = _get_pads(pad,
+                             image_shape=input_format_node.output_format.shape[2:],
+                             window_shape=window_shape,
+                             strides=strides)
 
-        assert_true((numpy.asarray(pads) < numpy.asarray(window_shape)).all())
+            assert_true((numpy.asarray(pads) < numpy.asarray(window_shape)).all())
 
-        output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
-            img=input_format_node.output_symbol,
-            ws=tuple(window_shape),
-            stride=tuple(strides),
-            mode=mode,
-            pad=pads)
+            output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
+                img=input_format_node.output_symbol,
+                ws=tuple(window_shape),
+                stride=tuple(strides),
+                mode=mode,
+                pad=pads)
 
-        super(Pool2D, self).__init__([input_node],
-                                     output_symbol,
-                                     output_format)
+            super(Pool2D, self).__init__([input_node],
+                                         output_symbol,
+                                         output_format)
 
+        else:
+            image_shape = numpy.asarray(input_format_node.output_format.shape[2:])
+            window_shape = numpy.asarray(window_shape)
+            strides = numpy.asarray(strides)
+            overflow = (image_shape - window_shape) % strides
+            single_sided_pads = strides - overflow
+            single_sided_pads[single_sided_pads == strides] = 0
+
+            # new_window_shape = window_shape + single_sided_pads
+            bc01_symbol = input_format_node.output_symbol
+            T = theano.tensor
+            floatX = theano.config.floatX
+            padded_image = T.alloc(T.constant(-numpy.inf if mode == 'max' else 0,
+                                              dtype=floatX),
+                                   bc01_symbol.shape[0],
+                                   bc01_symbol.shape[1],
+                                   bc01_symbol.shape[2] + single_sided_pads[0],
+                                   bc01_symbol.shape[3] + single_sided_pads[1])
+
+            padded_image = T.set_subtensor(padded_image[:,
+                                                        :,
+                                                        :bc01_symbol.shape[2],
+                                                        :bc01_symbol.shape[3]],
+                                           bc01_symbol)
+
+            output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
+                img=padded_image,
+                ws=tuple(window_shape),
+                stride=tuple(strides),
+                mode=mode,
+                pad=(0, 0))
+
+            bc01_shape = input_format_node.output_format.shape
+            output_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                                        shape=(bc01_shape[0],
+                                               bc01_shape[1],
+                                               bc01_shape[2] + single_sided_pads[0],
+                                               bc01_shape[3] + single_sided_pads[1]),
+                                        dtype=floatX)
+
+            super(Pool2D, self).__init__([input_node],
+                                         output_symbol,
+                                         output_format)
 
 class Softmax(Function1dTo1d):
     '''

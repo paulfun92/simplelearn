@@ -728,6 +728,10 @@ def test_pool2d_quick():
 
     # TODO: max_pooled_pylearn2_padding, avg_pooled_pylearn2_padding
 
+    max_pooled_pylearn2_padding = \
+        make_pool_func(mode='max', pad='pylearn2')(input_image)
+    assert_array_equal(max_pooled_pylearn2_padding, [-1, -1, -2])
+
     max_pooled_min_padding = make_pool_func(mode='max', pad='min')(input_image)
     assert_array_equal(max_pooled_min_padding, [-2, -1, -1])
 
@@ -741,6 +745,10 @@ def test_pool2d_quick():
 
     max_pooled_2_padding = make_pool_func(mode='max', pad=(0, 2))(input_image)
     assert_array_equal(max_pooled_2_padding, [-3, -1, -1, -2])
+
+    avg_pooled_pylearn2_padding = \
+        make_pool_func(mode='average', pad='pylearn2')(input_image)
+    assert_array_equal(avg_pooled_pylearn2_padding, [-2.5, -2, -9/4.])
 
     avg_pooled_min_padding = \
         make_pool_func(mode='average', pad='min')(input_image)
