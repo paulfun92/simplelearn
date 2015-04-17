@@ -505,6 +505,41 @@ def _make_bc01_format_node(i_node, i_to_bc01_axis_map):
     return FormatNode(i_node, bc01_format, i_to_bc01_axis_map)
 
 
+def _get_pads(pad_arg, image_shape, window_shape, strides):
+    '''
+    Converts pad argument to an ndarray of two ints.
+    '''
+    _assert_is_shape2d(image_shape)
+    _assert_is_shape2d(window_shape)
+    _assert_is_shape2d(strides)
+
+    image_shape = numpy.asarray(image_shape)
+    window_shape = numpy.asarray(window_shape)
+    strides = numpy.asarray(strides)
+
+    if pad_arg == 'valid':
+        pads = [0, 0]
+    elif pad_arg == 'full':
+        pads = window_shape - 1
+    elif pad_arg == 'same_shape':
+        for window_size in window_shape:
+            assert_equal(window_size % 2,
+                         1,
+                         "when pad_arg = 'same_shape', window_shape must have "
+                         "only odd numbers. Instead, got %s." %
+                         str(window_shape))
+        pads = window_shape // 2
+    elif pad_arg == 'min':
+        pads = numpy.ceil((image_shape - window_shape) % strides / 2.0)
+        pads = numpy.cast[int](pads)
+    elif isinstance(pad_arg, basestring):
+        raise ValueError("Unrecognized pad_arg value '%s'" % pad_arg)
+    else:
+        _assert_is_shape2d(pad_arg)
+        pads = pad_arg
+
+    return tuple(pads)
+
 def _make_bc01_output_format(bc01_input_format,
                              strides,
                              window_shape,
@@ -548,36 +583,12 @@ def _make_bc01_output_format(bc01_input_format,
                                    strides,
                                    window_shape))
 
-    def get_pads(pad):
-        '''
-        Converts pad argument to an ndarray of two ints.
-        '''
-        if pad == 'valid':
-            pads = [0, 0]
-        elif pad == 'full':
-            pads = window_shape - 1
-        elif pad == 'same_shape':
-            for window_size in window_shape:
-                assert_equal(window_size % 2,
-                             1,
-                             "when pad = 'same_shape', window_shape must have "
-                             "only odd numbers. Instead, got %s." %
-                             str(window_shape))
-            pads = window_shape // 2
-        elif pad == 'min':
-            pads = numpy.ceil((i_img_shape - window_shape) % strides / 2.0)
-            pads = numpy.cast[int](pads)
-        elif isinstance(pad, basestring):
-            raise ValueError("Unrecognized pad value '%s'" % pad)
-        else:
-            _assert_is_shape2d(pad)
-            pads = pad
+    pad_pair = _get_pads(pad_arg=pad,
+                         image_shape=i_img_shape,
+                         window_shape=window_shape,
+                         strides=strides)
 
-        return numpy.asarray(pads)
-
-    pad_pair = get_pads(pad)
-
-    padded_input_shape = i_img_shape + pad_pair * 2
+    padded_input_shape = i_img_shape + numpy.asarray(pad_pair) * 2
     o_img_shape = (padded_input_shape - window_shape + 1 - 1) // strides + 1
 
     # Confirm that output sizes work out to be the predicted sizes from
@@ -601,8 +612,7 @@ def _make_bc01_output_format(bc01_input_format,
                                        o_img_shape[1]),
                                 dtype=theano.config.floatX)
 
-    pads_arg = pad if pad in ('valid', 'full') else tuple(pad_pair)
-    return output_format, pads_arg
+    return output_format
 
 class Conv2D(Node):
     '''
@@ -707,7 +717,7 @@ class Conv2D(Node):
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
-        output_format, pad_arg = _make_bc01_output_format(
+        output_format = _make_bc01_output_format(
             input_format_node.output_format,
             strides,
             filter_shape,
@@ -723,8 +733,7 @@ class Conv2D(Node):
 
 
         def make_output_symbol(t_node, filters, pads, strides):
-            if not isinstance(pads, basestring):
-                pads = tuple(pads)
+            assert_is_instance(pads, (basestring, tuple))
 
             strides = tuple(strides)
 
@@ -746,20 +755,41 @@ class Conv2D(Node):
                 return conv2d(input=t_node.output_symbol,
                               filters=filters,
                               image_shape=image_shape,
-                              filter_shape=filters.get_value().shape,
+                              filter_shape=filters.get_value().shape,  # sic
                               border_mode=pads,
                               subsample=strides,
                               **kwargs)  # pylint: disable=star-args
 
 
+        if pads not in ('valid', 'full'):
+            pads = _get_pads(pads,
+                             image_shape=output_format.shape[2:],
+                             window_shape=filter_shape,
+                             strides=strides)
+
+            assert_true((numpy.asarray(pads) <
+                         numpy.asarray(filter_shape)).all())
+
         output = make_output_symbol(input_format_node,
                                     self.filters,
-                                    pad_arg,
+                                    pads,
                                     strides)
 
         super(Conv2D, self).__init__([input_node], output, output_format)
 
 
+# TODO: Add unit tests to make sure that the pad is being handled correctly.
+#       Confirm that:
+#
+#       1) cuDNN pads with -inf when max-pooling, and 0 when mean-pooling?
+#       2) The 'min' padding mode works as expected
+#       3) the 'pylearn2' padding mode works as expected.
+# 2) and 3) can be tested with 7x7 input, 4x4 pool window, and 2x2 pool stride.
+# Both 'min' and 'pylearn2' should produce a 3x3 output, wheras pad='valid'
+# would produce a 2x2 output.
+#
+# Fill the first row of input with -5, the last with -6, and the middle with
+# -10. When using 'min', the output pool should be
 class Pool2D(Node):
 
     def __init__(self,
@@ -794,10 +824,13 @@ class Pool2D(Node):
                    themselves in some pooling window.
             'same_size': Enough padding to preserve size.
                          Requires odd-numbered rows and cols in window_shape.
-            'pylearn2': Same padding as used by pylearn2.mlp.ConvElemwise. This
-                        is nominally zero-padding, except it adds some padding
-                        to one side if it's needed to ensure that all of the
-                        input pixels find themselves in some pooling window.
+            'pylearn2': Similar in intent to 'min', except this is how
+                        pylearn2.mlp.ConvElemwise does it. It adds padding to
+                        the far end of the input (maximal rows and columns), as
+                        much as is needed to ensure that all input pixels
+                        affect the pool output. This is different from 'min',
+                        which adds this padding to both sides of the input
+                        image.
 
         axis_map: dict
           Maps the axis names in input_node.output_format.axes to
@@ -813,7 +846,7 @@ class Pool2D(Node):
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
-        output_format, pad_arg = _make_bc01_output_format(
+        output_format = _make_bc01_output_format(
             bc01_input_format=input_format_node.output_format,
             strides=strides,
             window_shape=window_shape,
@@ -821,12 +854,19 @@ class Pool2D(Node):
             pad=pad)
         #(0, 0))  # dnn_pool always uses zero padding
 
+        pads = _get_pads(pad,
+                         image_shape=input_format_node.output_format.shape[2:],
+                         window_shape=window_shape,
+                         strides=strides)
+
+        assert_true((numpy.asarray(pads) < numpy.asarray(window_shape)).all())
+
         output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
             img=input_format_node.output_symbol,
             ws=tuple(window_shape),
             stride=tuple(strides),
             mode=mode,
-            pad=pad_arg)
+            pad=pads)
 
         super(Pool2D, self).__init__([input_node],
                                      output_symbol,

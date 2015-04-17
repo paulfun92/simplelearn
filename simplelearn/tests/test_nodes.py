@@ -697,6 +697,63 @@ def ntest_pool2d():
                                 supports_padding=False)
 
 
+def test_pool2d_quick():
+    '''
+    Tests max and avg pooling for all pad keyword values.
+    Confirms that they pad with -inf and 0, respectively.
+    '''
+    # make all inputs negative, to make sure max pooling pads with -inf, while
+    # avg pooling pads with 0.
+    input_image = numpy.asarray([1, 2, 3, 4, 3, 2, 1], dtype='float32')
+    input_image -= 5.0
+    assert_true((input_image < 0).all())
+
+    # convert to bc01 format
+    newaxis = numpy.newaxis
+    input_image = input_image[newaxis, newaxis, newaxis, :]
+
+    def make_pool_func(mode, pad):
+        shape = list(input_image.shape)
+        shape[0] = -1
+        input_node = InputNode(DenseFormat(shape=shape,
+                                           axes=('b', 'c', '0', '1'),
+                                           dtype=input_image.dtype))
+        pool_node = Pool2D(input_node,
+                           (1, 4),
+                           (1, 2),
+                           mode=mode,
+                           pad=pad)
+        return theano.function([input_node.output_symbol],
+                               pool_node.output_symbol[0, 0, 0, :])
+
+    # TODO: max_pooled_pylearn2_padding, avg_pooled_pylearn2_padding
+
+    max_pooled_min_padding = make_pool_func(mode='max', pad='min')(input_image)
+    assert_array_equal(max_pooled_min_padding, [-2, -1, -1])
+
+    max_pooled_valid_padding = \
+        make_pool_func(mode='max', pad='valid')(input_image)
+    assert_array_equal(max_pooled_valid_padding, [-1, -1])
+
+    max_pooled_full_padding = \
+        make_pool_func(mode='max', pad='full')(input_image)
+    assert_array_equal(max_pooled_full_padding, [-4, -2, -1, -1, -3])
+
+    max_pooled_2_padding = make_pool_func(mode='max', pad=(0, 2))(input_image)
+    assert_array_equal(max_pooled_2_padding, [-3, -1, -1, -2])
+
+    avg_pooled_min_padding = \
+        make_pool_func(mode='average', pad='min')(input_image)
+    assert_allclose(avg_pooled_min_padding, [-2.25, -2, -2.5])
+
+    avg_pooled_valid_padding = \
+        make_pool_func(mode='average', pad='valid')(input_image)
+    assert_allclose(avg_pooled_valid_padding, [-2.5, -2])
+
+    avg_pooled_full_padding = \
+        make_pool_func(mode='average', pad='full')(input_image)
+    assert_allclose(avg_pooled_full_padding, [-1, -9/4., -2, -2.5, -7/4.])
+
 def ntest_conv2d():
     def rand_floats(shape):
         rng = numpy.random.RandomState(382342)
@@ -871,7 +928,7 @@ def test_conv_layer():
                                           conv_layer_node.output_symbol)
 
     #
-    # Construct a series of lesser nodes that should have the same effect as
+    # Construct a chain of lesser nodes that should have the same effect as
     # conv_layer_node. In particular, use a more direct way of expressing the
     # bias.
     #
@@ -894,7 +951,8 @@ def test_conv_layer():
         pool_node = Pool2D(relu_node,
                            mode='max',
                            window_shape=pool_shape,
-                           strides=pool_strides)
+                           strides=pool_strides,
+                           pad='valid')
 
         rng = numpy.random.RandomState(rng_seed)
         randomize(rng, conv2d_node.filters)
