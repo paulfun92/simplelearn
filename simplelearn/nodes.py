@@ -1064,6 +1064,7 @@ class Conv2DLayer(Node):
                  pool_window_shape,
                  pool_strides,
                  pool_mode='max',
+                 pool_pads='min',
                  filter_strides=(1, 1),
                  channel_axis='c',
                  axis_map=None,

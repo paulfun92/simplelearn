@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import os
 import argparse
+import timeit
 import numpy
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
@@ -41,6 +42,7 @@ from simplelearn.training import (SgdParameterUpdater,
                                   LogsToLists,
                                   SavesAtMinimum,
                                   AverageMonitor,
+                                  EpochCallback,
                                   LimitsNumEpochs,
                                   LinearlyInterpolatesOverEpochs,
                                   PicklesOnEpoch,
@@ -189,14 +191,16 @@ class EpochTimer(EpochCallback):
 
     def on_start_training(self):
         self.start_time = timeit.default_timer()
+        self.epoch_number = 0
 
     def on_epoch(self):
         end_time = timeit.default_timer()
 
-        print("Epoch {} duration: {}".filter(self.epoch_number,
+        print("Epoch {} duration: {}".format(self.epoch_number,
                                              end_time - self.start_time))
 
         self.start_time = end_time
+        self.epoch_number += 1
 
 
 def build_conv_classifier(input_node,
@@ -311,7 +315,8 @@ def build_conv_classifier(input_node,
                                 filter_count,
                                 conv_pads='valid',
                                 pool_window_shape=pool_shape,
-                                pool_strides=pool_stride)
+                                pool_strides=pool_stride,
+                                pool_pads='pylearn2')
         conv_layers.append(last_node)
 
         uniform_init(rng, last_node.conv2d_node.filters, filter_init_range)
