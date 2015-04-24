@@ -45,10 +45,10 @@ Documentation
 
 Installation instructions are in simplelearn/INSTALL.md
 
-Beginners should start by browsing the complete working examples in examples/.
+Beginners should start by with the
+[GitHub wiki](https://github.com/SuperElectric/simplelearn/wiki), then explore
+the complete working examples in simplelearn/examples/.
 
-API docs will be available online shortly. You can build your own HTML docs
-by following the doc-building instructions in simplelearn/INSTALL.md
 
 License
 -------
