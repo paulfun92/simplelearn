@@ -36,7 +36,8 @@ from simplelearn.io import SerializableModel
 from simplelearn.data.dataset import Dataset
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
-from simplelearn.training import (SgdParameterUpdater,
+from simplelearn.training import (Monitor,
+                                  SgdParameterUpdater,
                                   limit_param_norms,
                                   Sgd,
                                   LogsToLists,
@@ -104,6 +105,14 @@ def parse_args():
         assert_less_equal(result, 1.0)
         return result
 
+    def max_norm_arg(arg):
+        arg = float(arg)
+        if arg < 0.0:
+            return numpy.inf
+        else:
+            assert_greater(arg, 0.0)
+            return arg
+
     parser.add_argument("--output-prefix",
                         type=legit_prefix,
                         required=True,
@@ -155,17 +164,20 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    max_norm = 1.9365
+    default_max_norm = 1.9365
 
     parser.add_argument("--max-filter-norm",
-                        type=positive_float,
-                        default=max_norm,
-                        help="Max. L2 norm of the convolutional filters.")
+                        type=max_norm_arg,
+                        default=default_max_norm,
+                        help=("Max. L2 norm of the convolutional filters. "
+                              "Enter a negative number to not impose any "
+                              "max norm."))
 
     parser.add_argument("--max-col-norm",
-                        type=positive_float,
-                        default=max_norm,
-                        help="Max. L2 norm of weight matrix columns.")
+                        type=max_norm_arg,
+                        default=default_max_norm,
+                        help=("Max. L2 norm of weight matrix columns. Enter a "
+                              "negative number to not imppose any max norm."))
 
     parser.add_argument("--weight-decay",
                         type=non_negative_float,
@@ -384,6 +396,40 @@ def print_loss(values, _):  # 2nd argument: formats
     print("Average loss: %s" % str(values))
 
 
+class GradMonitor(Monitor):
+    def __init__(self, grads, shapes):
+
+        assert_equal(len(grads), len(shapes))
+        assert_equal(len(grads), 3*2)
+
+        formats = []
+
+        for layer in range(2):
+            formats.append(DenseFormat(axes=('oc', 'ic', '0', '1'),
+                                       shape=shapes[layer * 2],
+                                       dtype='floatX'))
+
+            formats.append(DenseFormat(axes=('bias_singleton', 'bd'),
+                                       shape=shapes[layer * 2 + 1],
+                                       dtype='floatX'))
+
+
+        formats.append(DenseFormat(axes=('if', 'of'),
+                                   shape=shapes[-2],
+                                   dtype='floatX'))
+
+        formats.append(DenseFormat(axes=('bias_singleton', 'bd'),
+                                   shape=shapes[-1],
+                                   dtype='floatX'))
+
+        super(GradMonitor, self).__init__(grads, formats, [])
+
+    def _on_epoch(self):
+        pass
+
+    def _on_batch(self):
+        pass
+
 def main():
     '''
     Entry point of this script.
@@ -421,6 +467,7 @@ def main():
                                 formats=mnist_training.formats)
 
     mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
+                                                    loop_style='divisible',
                                                     batch_size=args.batch_size)
 
     image_uint8_node, label_node = mnist_testing_iterator.make_input_nodes()
@@ -464,6 +511,7 @@ def main():
     #
 
     parameters = []
+    DEBUG_grads = []
     parameter_updaters = []
     momentum_updaters = []
 
@@ -476,6 +524,7 @@ def main():
         LinearlyInterpolatesOverEpochs to momentum_updaters.
         '''
         gradient = theano.gradient.grad(scalar_loss, parameter)
+        DEBUG_grads.append(gradient)
         parameter_updaters.append(SgdParameterUpdater(parameter,
                                                       gradient,
                                                       args.learning_rate,
@@ -493,10 +542,12 @@ def main():
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
-        limit_param_norms(parameter_updaters[-1],
-                          filters,
-                          args.max_filter_norm,
-                          (1, 2, 3))
+
+        if args.max_filter_norm != numpy.inf:
+            limit_param_norms(parameter_updaters[-1],
+                              filters,
+                              args.max_filter_norm,
+                              (1, 2, 3))
 
         bias = conv_layer.bias_node.params
         parameters.append(bias)
@@ -512,10 +563,11 @@ def main():
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
-        limit_param_norms(parameter_updater=parameter_updaters[-1],
-                          params=weights,
-                          max_norm=args.max_col_norm,
-                          input_axes=[0])
+        if args.max_col_norm != numpy.inf:
+            limit_param_norms(parameter_updater=parameter_updaters[-1],
+                              params=weights,
+                              max_norm=args.max_col_norm,
+                              input_axes=[0])
 
         biases = affine_layer.affine_node.bias_node.params
         parameters.append(biases)
@@ -523,6 +575,7 @@ def main():
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
+
 
     # updates = [updater.updates.values()[0] - updater.updates.keys()[0]
     #            for updater in parameter_updaters]
@@ -559,6 +612,8 @@ def main():
                                            loss_node.output_format,
                                            callbacks=[print_loss,
                                                       training_loss_logger])
+    gradients_monitor = GradMonitor(DEBUG_grads,
+                                    [p.get_value().shape for p in parameters])
 
     # print out 10-D feature vector
     # feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
@@ -609,10 +664,11 @@ def main():
     # trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
     trainer = Sgd([image_uint8_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
+                                          loop_style='divisible',
                                           batch_size=args.batch_size),
                   parameters,
                   parameter_updaters,
-                  monitors=[training_loss_monitor],
+                  monitors=[gradients_monitor, training_loss_monitor],
                   epoch_callbacks=[])
 
     stuff_to_pickle = OrderedDict(

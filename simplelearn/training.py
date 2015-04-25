@@ -38,7 +38,9 @@ from simplelearn.nodes import Node
 import pdb
 
 from simplelearn import debug_mnist
-from simplelearn.debug_mnist import load_mnist_params, load_mnist_batch
+from simplelearn.debug_mnist import (load_mnist_params,
+                                     load_mnist_grads,
+                                     load_mnist_batch)
 # pylint: disable=too-few-public-methods
 
 
@@ -998,6 +1000,23 @@ def limit_param_norms(parameter_updater, params, max_norm, input_axes):
 
     parameter_updater.updates[params] = updated_params * scales
 
+def _DEBUG_compare_cost_arguments(cost_arguments, pylearn2_cost_arguments):
+    assert_equal(str(cost_arguments[0].dtype), 'uint8')
+    assert_equal(str(pylearn2_cost_arguments[0].dtype), 'float32')
+
+    # Convert Pylearn2 labels from onehot to index format
+    pl_labels_indices = pylearn2_cost_arguments[1].argmax(axis=1)
+    assert_array_equal(cost_arguments[1], pl_labels_indices)
+
+    # onehot_sl_labels = numpy.zeros_like(pylearn2_cost_arguments[1])
+    # onehot_sl_labels[xrange(onehot_sl_labels.shape[0]), cost_arguments[1]] = 1.
+    # assert_array_equal(onehot_sl_labels,
+    #                    pylearn2_cost_arguments[1])
+
+    scaled_sl_images = numpy.cast['float32'](cost_arguments[0]) / 255.
+    assert_array_equal(scaled_sl_images[..., numpy.newaxis],
+                       pylearn2_cost_arguments[0])
+
 
 class Sgd(object):
 
@@ -1177,6 +1196,13 @@ class Sgd(object):
                                "Please add an EpochCallback or "
                                "Monitor that will throw a "
                                "StopTraining exception at some point.")
+
+        #
+        # End sanity checks
+        #
+
+        DEBUG_compare_to_pylearn2 = True
+
         try:
             all_callbacks = self._monitors + tuple(self.epoch_callbacks)
             for callback in all_callbacks:
@@ -1189,50 +1215,107 @@ class Sgd(object):
             assert_is_not(mnist_weights, None)
             assert_is_not(mnist_biases, None)
 
-            # pylearn2_weights, pylearn2_biases = load_mnist_params(
-            #     '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
+            if DEBUG_compare_to_pylearn2:
+                pylearn2_weights, pylearn2_biases = load_mnist_params(
+                    '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
 
-            # def compare_weights(mnist_weights,
-            #                     mnist_biases,
-            #                     pylearn2_weights,
-            #                     pylearn2_biases):
-            #     atol = .00001
-            #     for (layer_index,
-            #          (mnist_weight,
-            #           mnist_bias,
-            #           pylearn2_weight,
-            #           pylearn2_bias)) in enumerate(safe_izip(mnist_weights,
-            #                                                  mnist_biases,
-            #                                                  pylearn2_weights,
-            #                                                  pylearn2_biases)):
-            #         assert_allclose(mnist_weight.get_value(),
-            #                         pylearn2_weight,
-            #                         atol=atol)
-            #         assert_allclose(mnist_bias.get_value()[0, :],
-            #                         pylearn2_bias,
-            #                         atol=atol)
+                def compare_weights(mnist_weights,
+                                    mnist_biases,
+                                    pylearn2_weights,
+                                    pylearn2_biases):
+                    atol = .00001
+                    for (layer_index,
+                         (mnist_weight,
+                          mnist_bias,
+                          pylearn2_weight,
+                          pylearn2_bias)) in enumerate(safe_izip(mnist_weights,
+                                                                 mnist_biases,
+                                                                 pylearn2_weights,
+                                                                 pylearn2_biases)):
+                        assert_allclose(mnist_weight.get_value(),
+                                        pylearn2_weight,
+                                        atol=atol)
+                        assert_allclose(mnist_bias.get_value()[0, :],
+                                        pylearn2_bias,
+                                        atol=atol)
 
-            # compare_weights(mnist_weights,
-            #                 mnist_biases,
-            #                 pylearn2_weights,
-            #                 pylearn2_biases)
+                compare_weights(mnist_weights,
+                                mnist_biases,
+                                pylearn2_weights,
+                                pylearn2_biases)
+
+
+                def compare_grads(mnist_weights,
+                                  mnist_biases,
+                                  pylearn2_weights,
+                                  pylearn2_biases):
+                    atol = .00001
+                    for (layer_index,
+                         (mnist_weight,
+                          mnist_bias,
+                          pylearn2_weight,
+                          pylearn2_bias)) in enumerate(safe_izip(mnist_weights,
+                                                                 mnist_biases,
+                                                                 pylearn2_weights,
+                                                                 pylearn2_biases)):
+                        if layer_index == 2:
+                            pdb.set_trace()
+                            assert_allclose(mnist_weight,
+                                            pylearn2_weight,
+                                            atol=atol)
+                            assert_allclose(mnist_bias[0, :],
+                                            pylearn2_bias,
+                                            atol=atol)
+
+                # No such thing as 00000'th gradient (it starts at 00001).
+                # pylearn2_weight_grads, pylearn2_bias_grads = load_mnist_grads(
+                #     '/tmp/pylearn_grads_{:06d}_batches.h5'.format(batch_num))
+                # compare_weights(mnist_weight_grads,
+                #                 mnist_bias_grads,
+                #                 pylearn2_weight_grads,
+                #                 pylearn2_bias_grads)
 
             while True:
 
                 # gets batch of data
                 cost_arguments = self._input_iterator.next()
 
-                # pylearn2_cost_arguments = load_mnist_batch(
-                #     '/tmp/pylearn2_batch_{:06d}.h5'.format(batch_num))
+                # Compare inputs
+                if DEBUG_compare_to_pylearn2:
+                    pylearn2_cost_arguments = load_mnist_batch(
+                        '/tmp/pylearn_batch_{:06d}.h5'.format(batch_num))
 
-                # assert_array_equal(cost_arguments[0],
-                #                    pylearn2_cost_arguments[0])
-                # assert_array_equal(cost_arguments[1],
-                #                    pylearn2_cost_arguments[1])
+                    _DEBUG_compare_cost_arguments(cost_arguments,
+                                                  pylearn2_cost_arguments)
 
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
                 outputs = self._update_function(*cost_arguments)
+                DEBUG_grads = outputs[:6]
+                outputs = outputs[6:]
+
+                batch_num += 1
+
+
+                if DEBUG_compare_to_pylearn2:
+
+                    # compare gradients
+                    mnist_weight_grads = DEBUG_grads[::2]
+                    mnist_bias_grads = DEBUG_grads[1::2]
+                    pylearn2_weight_grads, pylearn2_bias_grads = load_mnist_grads(
+                        '/tmp/pylearn_grads_{:06d}_batches.h5'.format(batch_num))
+                    compare_grads(mnist_weight_grads,
+                                  mnist_bias_grads,
+                                  pylearn2_weight_grads,
+                                  pylearn2_bias_grads)
+
+                    # Compare weights
+                    pylearn2_weights, pylearn2_biases = load_mnist_params(
+                        '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
+                    compare_weights(mnist_weights,
+                                    mnist_biases,
+                                    pylearn2_weights,
+                                    pylearn2_biases)
 
                 # updates monitors
                 output_index = 0
@@ -1251,13 +1334,7 @@ class Sgd(object):
                     for callback in all_callbacks:
                         callback.on_epoch()
 
-            batch_num += 1
-            # pylearn2_weights, pylearn2_biases = load_mnist_params(
-            #     '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
-            # compare_weights(mnist_weights,
-            #                 mnist_biases,
-            #                 pylearn2_weights,
-            #                 pylearn2_biases)
+
 
         except StopTraining, exception:
             if exception.status == 'ok':
