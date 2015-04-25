@@ -134,7 +134,8 @@ def parse_args():
 
     parser.add_argument("--initial-momentum",
                         type=non_negative_0_to_1,
-                        default=0.5,
+                        default=0.0,  # changed
+                        #default=0.5, # original
                         help=("Initial momentum."))
 
     parser.add_argument("--no-nesterov",
@@ -155,7 +156,8 @@ def parse_args():
 
     parser.add_argument("--final-momentum",
                         type=non_negative_0_to_1,
-                        default=.99,
+                        default=0.0,  # changed
+                        # default=.99,  # original
                         help="Value for momentum to linearly scale up to.")
 
     parser.add_argument("--epochs-to-momentum-saturation",
@@ -164,7 +166,8 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    default_max_norm = 1.9365
+    default_max_norm = numpy.inf  # changed
+    # default_max_norm = 1.9365  # original
 
     parser.add_argument("--max-filter-norm",
                         type=max_norm_arg,
