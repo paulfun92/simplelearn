@@ -20,11 +20,10 @@ from nose.tools import (assert_true,
                         assert_less_equal,
                         assert_equal)
 from simplelearn.nodes import (Conv2DLayer,
-                               AffineLayer,
                                Dropout,
                                CrossEntropy,
                                Misclassification,
-                               Softmax,
+                               SoftmaxLayer,
                                RescaleImage,
                                FormatNode)
 from simplelearn.utils import (safe_izip,
@@ -336,7 +335,6 @@ def build_conv_classifier(input_node,
 
         uniform_init(rng, last_node.conv2d_node.filters, filter_init_range)
 
-
     affine_dropout_include_rates = dropout_include_rates[len(filter_shapes):]
 
     affine_layers = []
@@ -371,22 +369,20 @@ def build_conv_classifier(input_node,
                                 affine_dropout_include_rate,
                                 theano_rng)
 
-        # No need to supply an axis map for the first affine layer. By default,
-        # it collapses all non-'b' axes into a feature vector, which is what we
-        # want.
+        # No need to supply an axis map for the first affine transform.
+        # By default, it collapses all non-'b' axes into a feature vector,
+        # which is what we want.
 
-        last_node = AffineLayer(last_node,
-                                DenseFormat(axes=('b', 'f'),
-                                            shape=(-1, affine_size),
-                                            dtype=None))
+        last_node = SoftmaxLayer(last_node,
+                                 DenseFormat(axes=('b', 'f'),
+                                             shape=(-1, affine_size),
+                                             dtype=None))
 
         normal_distribution_init(rng,
                                  last_node.affine_node.linear_node.params,
                                  affine_init_stddev)
         # stddev_init(rng, last_node.bias_node.params, affine_init_stddev)
         affine_layers.append(last_node)
-
-    last_node = Softmax(last_node)
 
     return conv_layers, affine_layers, last_node
 
@@ -397,6 +393,10 @@ def print_mcr(values, _):
 
 def print_loss(values, _):  # 2nd argument: formats
     print("Average loss: %s" % str(values))
+
+# class OutputMonitor(Monitor):
+#     def __init__(self, outputs, shapes):
+#         formats = []
 
 
 class GradMonitor(Monitor):
@@ -432,6 +432,18 @@ class GradMonitor(Monitor):
 
     def _on_batch(self):
         pass
+
+
+class OutputMonitor(Monitor):
+    def __init__(self, outputs, formats):
+        super(OutputMonitor, self).__init__(outputs, formats, [])
+
+    def _on_epoch(self):
+        pass
+
+    def _on_batch(self):
+        pass
+
 
 def main():
     '''
@@ -618,6 +630,21 @@ def main():
     gradients_monitor = GradMonitor(DEBUG_grads,
                                     [p.get_value().shape for p in parameters])
 
+    def get_outputs_monitor():
+        outputs = []
+        formats = []
+        for conv_layer in conv_layers:
+            outputs.append(conv_layer.output_symbol)
+            formats.append(conv_layer.output_format)
+
+        for affine_layer in affine_layers:
+            outputs.append(affine_layer.output_symbol)
+            formats.append(affine_layer.output_format)
+
+        return OutputMonitor(outputs, formats)
+
+    outputs_monitor = get_outputs_monitor()
+
     # print out 10-D feature vector
     # feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
     #                                         affine_nodes[-1].output_format,
@@ -671,7 +698,9 @@ def main():
                                           batch_size=args.batch_size),
                   parameters,
                   parameter_updaters,
-                  monitors=[gradients_monitor, training_loss_monitor],
+                  monitors=[gradients_monitor,
+                            outputs_monitor,
+                            training_loss_monitor],
                   epoch_callbacks=[])
 
     stuff_to_pickle = OrderedDict(

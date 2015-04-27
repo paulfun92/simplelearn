@@ -39,6 +39,7 @@ import pdb
 
 from simplelearn import debug_mnist
 from simplelearn.debug_mnist import (load_mnist_params,
+                                     load_mnist_outputs,
                                      load_mnist_grads,
                                      load_mnist_batch)
 # pylint: disable=too-few-public-methods
@@ -1291,13 +1292,25 @@ class Sgd(object):
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
                 outputs = self._update_function(*cost_arguments)
+                assert_equal(len(mnist_weights), 3)
                 DEBUG_grads = outputs[:6]
-                outputs = outputs[6:]
+                DEBUG_outputs = outputs[6:9]
+                outputs = outputs[9:]
 
                 batch_num += 1
 
-
+                print("batch_num: {}".format(batch_num))
                 if DEBUG_compare_to_pylearn2:
+
+                    # compare outputs
+                    pylearn2_outputs = load_mnist_outputs(
+                        '/tmp/pylearn_mlpoutputs_{:06d}_batches.h5'.format(batch_num))
+
+                    pdb.set_trace()
+                    for layer_index, (sl_output, pl_output) \
+                        in enumerate(safe_izip(DEBUG_outputs,
+                                               pylearn2_outputs)):
+                        assert_allclose(sl_output, pl_output)
 
                     # compare gradients
                     mnist_weight_grads = DEBUG_grads[::2]
@@ -1309,13 +1322,14 @@ class Sgd(object):
                                   pylearn2_weight_grads,
                                   pylearn2_bias_grads)
 
-                    # Compare weights
+                    # Compare weights after update
                     pylearn2_weights, pylearn2_biases = load_mnist_params(
                         '/tmp/pylearn_params_{:06d}_batches.h5'.format(batch_num))
                     compare_weights(mnist_weights,
                                     mnist_biases,
                                     pylearn2_weights,
                                     pylearn2_biases)
+
 
                 # updates monitors
                 output_index = 0

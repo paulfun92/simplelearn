@@ -1052,6 +1052,30 @@ class AffineLayer(Function1dTo1d):
         return self.relu_node
 
 
+class SoftmaxLayer(Function1dTo1d):
+    '''
+    A sequence of affine -> softmax
+    '''
+
+    def __init__(self,
+                 input_node,
+                 output_format,
+                 input_to_bf_map=None,
+                 bf_to_output_map=None):
+        super(SoftmaxLayer, self).__init__(input_node,
+                                           output_format,
+                                           input_to_bf_map,
+                                           bf_to_output_map)
+
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            input_bf_format,
+                            output_bf_format):
+        self.affine_node = AffineTransform(input_bf_node, output_bf_format)
+        self.softmax_node = Softmax(self.affine_node)
+        return self.softmax_node
+
+
 class Conv2DLayer(Node):
     '''
     A sequence of conv2d -> channel-wise bias -> ReLU -> pool2d
@@ -1416,7 +1440,7 @@ class Misclassification(Node):
         assert_equal(softmax_node.output_format.axes, ('b', 'f'))
         assert_in(target_node.output_format.axes, (('b', 'f'), ('b', )))
         assert_integer(target_node.output_symbol)
-        assert_is_instance(softmax_node, Softmax)
+        assert_is_instance(softmax_node, (Softmax, SoftmaxLayer))
 
         # If targets are one-hot vectors, convert them to target indices
         if len(target_node.output_format.axes) == 2:

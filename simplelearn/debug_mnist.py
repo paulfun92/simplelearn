@@ -71,7 +71,6 @@ def save_mnist_params(weights, biases, path):
 
     _save_mnist_params_impl(weights, biases, path, prefix="")
 
-
 def save_mnist_grads(weight_grads, bias_grads, path):
     assert_all_is_instance(weight_grads, CudaNdarray)
     assert_all_is_instance(bias_grads, CudaNdarray)
@@ -120,3 +119,22 @@ def load_mnist_batch(h5_path):
         raise
 
     return tuple(result)
+
+
+def save_mnist_outputs(outputs, path):
+    assert_equal(len(outputs), 3)
+    with h5py.File(path, mode='w-') as h5_file:
+        for layer_index, output in enumerate(outputs):
+            h5_file.create_dataset("output_{}".format(layer_index),
+                                   data=output)
+
+
+def load_mnist_outputs(path):
+    outputs = []
+
+    with h5py.File(path, mode='r') as h5_file:
+        for layer_index in range(3):
+            output = numpy.asarray(h5_file["output_{}".format(layer_index)])
+            outputs.append(output)
+
+    return outputs
