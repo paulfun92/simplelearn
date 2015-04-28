@@ -113,7 +113,7 @@ class InputNode(Node):
                                         output_format=fmt)
 
 
-class RescaleImage(Node):
+class RescaleImage(Node):  # TODO: rename to be a noun
     '''
     Converts a int image to a floating-point image.
     Remaps pixel value range from [0, 255] to [0.0, 1.0].
