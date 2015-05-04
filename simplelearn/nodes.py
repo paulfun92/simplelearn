@@ -709,7 +709,7 @@ class Conv2D(Node):
             assert_is_instance(axis_map, dict)
             # axis_map = get_full_axis_map(axis_map)
 
-        if not dnn_available():
+        if dnn_available():
             assert_equal(len(kwargs), 0,
                          "cuDNN implementation does not accept kwargs. Switch "
                          "to default Theano implementation using Theano "
@@ -743,8 +743,10 @@ class Conv2D(Node):
                                 kerns=filters,
                                 border_mode=pads,
                                 subsample=strides,
-                                # don't flip filters
-                                conv_mode='cross')
+                                # flip filters
+                                conv_mode='conv')  # TODO: change back to 'cross' after splitting Conv2D into
+                                # # don't flip filters
+                                # conv_mode='cross')
             else:
                 image_shape = list(copy.deepcopy(t_node.output_format.shape))
                 assert_equal(image_shape[0], -1)
@@ -760,6 +762,19 @@ class Conv2D(Node):
                               subsample=strides,
                               **kwargs)  # pylint: disable=star-args
 
+            # image_shape = list(copy.deepcopy(t_node.output_format.shape))
+            # assert_equal(image_shape[0], -1)
+            # image_shape[0] = None
+            # image_shape = tuple(image_shape)
+
+            # conv2d = theano.tensor.nnet.conv2d
+            # return conv2d(input=t_node.output_symbol,
+            #               filters=filters,
+            #               image_shape=image_shape,
+            #               filter_shape=filters.get_value().shape,  # sic
+            #               border_mode=pads,
+            #               subsample=strides,
+            #               **kwargs)  # pylint: disable=star-args
 
         if pads not in ('valid', 'full'):
             pads = _get_pads(pads,
@@ -874,6 +889,7 @@ class Pool2D(Node):
                                          output_format)
 
         else:
+            # pdb.set_trace()
             image_shape = numpy.asarray(input_format_node.output_format.shape[2:])
             window_shape = numpy.asarray(window_shape)
             strides = numpy.asarray(strides)
@@ -898,6 +914,8 @@ class Pool2D(Node):
                                                         :bc01_symbol.shape[3]],
                                            bc01_symbol)
 
+            self.DEBUG_padded_image_symbol = padded_image
+
             output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
                 img=padded_image,
                 ws=tuple(window_shape),
@@ -906,13 +924,18 @@ class Pool2D(Node):
                 pad=(0, 0))
 
             bc01_shape = input_format_node.output_format.shape
+            padded_image_shape = (numpy.asarray(bc01_shape[2:]) +
+                                  single_sided_pads)
+            assert_equal(padded_image_shape[0] % strides[0], 0)
+            assert_equal(padded_image_shape[1] % strides[1], 0)
+
             output_format = DenseFormat(axes=('b', 'c', '0', '1'),
                                         shape=(bc01_shape[0],
                                                bc01_shape[1],
-                                               bc01_shape[2] + single_sided_pads[0],
-                                               bc01_shape[3] + single_sided_pads[1]),
+                                               padded_image_shape[0] // strides[0],
+                                               padded_image_shape[1] // strides[1]),
                                         dtype=floatX)
-
+            # pdb.set_trace()
             super(Pool2D, self).__init__([input_node],
                                          output_symbol,
                                          output_format)
@@ -952,9 +975,15 @@ class ReLU(Node):
     '''
     def __init__(self, input_node):
         input_symbol = input_node.output_symbol
-        output_symbol = theano.tensor.switch(input_symbol > 0.0,
-                                             input_symbol,
-                                             0.0)
+        # As in pylearn2/models/mlp.py, which uses:
+        # "linear_response * (linear_response > 0.) + self.left_slope * \
+        #  linear_response * (linear_response < 0.)"
+        output_symbol = input_symbol * (input_symbol > 0.0)
+
+        assert_equal(output_symbol.dtype, input_symbol.dtype)
+        # output_symbol = theano.tensor.switch(input_symbol > 0.0,
+        #                                      input_symbol,
+        #                                      0.0)
         super(ReLU, self).__init__([input_node],
                                    output_symbol,
                                    input_node.output_format)
@@ -1109,7 +1138,7 @@ class Conv2DLayer(Node):
                                   filter_shape,
                                   num_filters,
                                   conv_pads,
-                                  filter_strides=filter_strides,
+                                  strides=filter_strides,
                                   axis_map=axis_map,
                                   **kwargs)
 
@@ -1137,7 +1166,7 @@ class Conv2DLayer(Node):
                                   window_shape=pool_window_shape,
                                   strides=pool_strides,
                                   mode=pool_mode,
-                                  pad='min')
+                                  pad=pool_pads)
 
         super(Conv2DLayer, self).__init__([input_node],
                                           self.pool2d_node.output_symbol,
@@ -1378,9 +1407,11 @@ class L2Loss(Node):
                                                 if axis != 'b'))
 
                 non_b_axes = tuple(axis for axis in fmt.axes if axis != 'b')
-                return DenseFormat(shape=(batch_size, feature_size),
-                                   axes=('b', 'f'),
-                                   dtype=fmt.dtype), non_b_axes
+                pdb.set_trace()
+                return (DenseFormat(shape=(batch_size, feature_size),
+                                    axes=('b', 'f'),
+                                    dtype=fmt.dtype),
+                        non_b_axes)
 
             bf_format, non_b_axes = make_bf_format(node.output_format)
             axis_map = {'b': 'b',

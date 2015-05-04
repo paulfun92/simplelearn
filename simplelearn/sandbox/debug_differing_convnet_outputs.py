@@ -13,19 +13,36 @@ from simplelearn.nodes import (InputNode,
                                Conv2DLayer,
                                SoftmaxLayer)
 from simplelearn.formats import DenseFormat
+from simplelearn.utils import safe_izip
 
 import pylearn2
 from pylearn2.models import mlp
 # from pylearn2.models.mlp import MLP, Softmax, ConvRectifiedLinear
 
+import pdb
+
 
 def main():
     floatX = theano.config.floatX
 
+    num_rows = 3
+    num_cols = 4
+
     mnist_image_node = InputNode(DenseFormat(axes=('b', '0', '1'),
-                                             shape=(-1, 3, 4),
+                                             shape=(-1, num_rows, num_cols),
                                              dtype='uint8'))
     scaled_image_node = RescaleImage(mnist_image_node)
+    pl_input_node = FormatNode(scaled_image_node,
+                               DenseFormat(axes=('b', '0', '1', 'c'),
+                                           shape=(-1, num_rows, num_cols, 1),
+                                           dtype=None),
+                               axis_map={'1': ('1', 'c')})
+
+    sl_input_node = FormatNode(scaled_image_node,
+                               DenseFormat(axes=('b', 'c', '0', '1'),
+                                           shape=(-1, 1, num_rows, num_cols),
+                                           dtype=None),
+                               axis_map={'b': ('b', 'c')})
 
     num_filters = 2
     filter_shape = (2, 2)
@@ -37,7 +54,7 @@ def main():
     num_classes = 2
     batch_size = 2
 
-    def make_sl_model(scaled_image_node):
+    def make_sl_model(sl_input_node):
         '''
         Builds a convlayer-softmaxlayer network on top of mnist_image_node.
 
@@ -48,16 +65,18 @@ def main():
           input to output (it omits the scaling and formatting nodes).
         '''
 
-        assert_equal(str(scaled_image_node.output_format.dtype), 'float32')
+        assert_equal(str(sl_input_node.output_symbol.dtype), 'float32')
+        assert_equal(sl_input_node.output_format.axes,
+                     ('b', 'c', '0', '1'))
+
+        cast = numpy.cast[floatX]
 
         rng = numpy.random.RandomState(seed)
         layers = []
 
-        last_node = scaled_image_node
-        last_node = RescaleImage(last_node)
+        image_dims = scaled_image_node.output_format.shape[1:]
 
-        image_dims = mnist_image_node.output_format.shape[1:]
-
+        last_node = sl_input_node
         last_node = FormatNode(last_node,
                                DenseFormat(axes=('b', 'c', '0', '1'),
                                            shape=(-1, 1) + image_dims,
@@ -74,9 +93,9 @@ def main():
         layers.append(last_node)
 
         filters = last_node.conv2d_node.filters
-        filters.set_value(rng.uniform(low=-conv_uniform_range,
-                                      high=conv_uniform_range,
-                                      size=filters.get_value().shape))
+        filters.set_value(cast(rng.uniform(low=-conv_uniform_range,
+                                           high=conv_uniform_range,
+                                           size=filters.get_value().shape)))
 
         last_node = SoftmaxLayer(last_node,
                                  DenseFormat(axes=('b', 'f'),
@@ -85,21 +104,64 @@ def main():
         layers.append(last_node)
 
         weights = last_node.affine_node.linear_node.params
-        weights.set_value(rng.standard_normal(weights.get_value().shape) *
-                          affine_stddev)
+        weights.set_value(cast(rng.standard_normal(weights.get_value().shape) *
+                               affine_stddev))
 
         return layers
 
-    sl_layers = make_sl_model(mnist_image_node)
+    sl_layers = make_sl_model(sl_input_node)
 
     def get_sl_function(sl_layers):
-        input_symbol = scaled_image_node.output_symbol
+        input_symbol = sl_input_node.output_symbol
         output_symbols = [layer.output_symbol for layer in sl_layers]
-        return theano.function(input_symbol, output_symbols)
+        return theano.function([input_symbol], output_symbols)
 
     sl_function = get_sl_function(sl_layers)
 
-    def make_pylearn2_model(mnist_image_node):
+    def get_sl_conv_function():
+        input_symbol = sl_input_node.output_symbol
+        output_symbol = sl_layers[0].conv2d_node.output_symbol
+        return theano.function([input_symbol],
+                               output_symbol)
+
+    sl_conv_function = get_sl_conv_function()
+
+    def get_sl_conv_bias_function():
+        input_symbol = sl_input_node.output_symbol
+        output_symbol = sl_layers[0].bias_node.output_symbol
+        return theano.function([input_symbol],
+                               output_symbol)
+
+    sl_conv_bias_function = get_sl_conv_bias_function()
+
+    def get_sl_conv_pool_function():
+        input_symbol = sl_input_node.output_symbol
+        output_symbol = sl_layers[0].pool2d_node.output_symbol
+        return theano.function([input_symbol],
+                               output_symbol)
+
+    sl_conv_pool_function = get_sl_conv_pool_function()
+
+    # def get_sl_conv_padded_pool_input_function():
+    #     input_symbol = sl_input_node.output_symbol
+    #     output_symbol = sl_layers[0].bias_node.output_symbol
+    #     return theano.function([input_symbol],
+    #                            output_symbol)
+
+
+
+    def make_pl_model(pl_input_node):
+        '''
+        Returns a pylearn2.models.mlp.MLP.
+
+        This MLP expects a float32 image as input. See pylearn2's mnist.py,
+        which calls pylearn2.utils.mnist_ubyte.read_mnist_images(path,
+        'float32'), which rescales from [0, 255] to [0.0, 1.0].
+        '''
+        assert_equal(pl_input_node.output_format.axes,
+                     ('b', '0', '1', 'c'))
+        assert_equal(pl_input_node.output_symbol.dtype, 'float32')
+
         layers = []
         layers.append(mlp.ConvRectifiedLinear(layer_name='conv',
                                               tied_b=True,
@@ -120,7 +182,7 @@ def main():
         # weights.set_value(sl_weights.get_value())
         # assert_true(numpy.all(biases.get_value() == 0.0))
 
-        image_shape = mnist_image_node.output_format.shape[1:]
+        image_shape = pl_input_node.output_format.shape[1:3]
 
         result = mlp.MLP(
             layers=layers,
@@ -129,38 +191,101 @@ def main():
             input_space=pylearn2.space.Conv2DSpace(shape=image_shape,
                                                    num_channels=1))
 
-        weights, biases = layers[-1].get_params()
+        weights, biases = layers[0].get_params()
         sl_weights = sl_layers[0].conv2d_node.filters
         assert_array_equal(weights.get_value(), sl_weights.get_value())
         sl_biases = sl_layers[0].bias_node.params
-        assert_array_equal(biases.get_value(), sl_biases.get_value())
+        assert_equal(sl_biases.get_value().shape, (1, 2))
+        assert_array_equal(biases.get_value(), sl_biases.get_value()[0])
 
-        biases, weights = layers[-1].get_params()
+        biases, weights = layers[1].get_params()
         sl_weights = sl_layers[1].affine_node.linear_node.params
         assert_array_equal(weights.get_value(), sl_weights.get_value())
         sl_biases = sl_layers[1].affine_node.bias_node.params
-        assert_array_equal(biases.get_value(), sl_biases.get_value())
+        assert_equal(sl_biases.get_value().shape, (1, num_classes))
+        assert_array_equal(biases.get_value(), sl_biases.get_value()[0])
 
         return result
 
-    pl_mlp = make_pylearn2_model(mnist_image_node)
+    pl_mlp = make_pl_model(pl_input_node)
 
-    def get_mlp_function(pl_mlp):
-        input_state = scaled_image_node.output_symbol
+    def get_pl_function(pl_mlp):
+        '''
+        Returns a compiled function that takes an floatX image batch
+        and returns outputs from each of the MLP's layers.
+        '''
+        input_state = pl_input_node.output_symbol
         outputs = pl_mlp.fprop(state_below=input_state,
                                return_all=True)
-        return theano.function(input_state, outputs)
+        return theano.function([input_state], outputs)
 
-    pl_function = get_mlp_function(pl_mlp)
+    pl_function = get_pl_function(pl_mlp)
 
-    image_batch = mnist_image_node.output_format.make_batch(
+    def get_pl_conv_function(pl_mlp):
+        input_state = pl_input_node.output_symbol
+        output = pl_mlp.layers[0].DEBUG_conv_output
+        return theano.function([input_state], output)
+
+    pl_conv_function = get_pl_conv_function(pl_mlp)
+
+    def get_pl_conv_bias_function(pl_mlp):
+        input_state = pl_input_node.output_symbol
+        output = pl_mlp.layers[0].DEBUG_bias_output
+        return theano.function([input_state], output)
+
+    pl_conv_bias_function = get_pl_conv_bias_function(pl_mlp)
+
+    def get_pl_conv_pool_function(pl_mlp):
+        input_state = pl_input_node.output_symbol
+        output = pl_mlp.layers[0].DEBUG_pool_output
+        return theano.function([input_state], output)
+
+    pl_conv_pool_function = get_pl_conv_pool_function(pl_mlp)
+
+    get_sl_input = theano.function([mnist_image_node.output_symbol],
+                                   sl_input_node.output_symbol)
+
+    get_pl_input = theano.function([mnist_image_node.output_symbol],
+                                   pl_input_node.output_symbol)
+
+    mnist_image_batch = mnist_image_node.output_format.make_batch(
         batch_size=batch_size,
         is_symbolic=False)
 
-    sl_outputs = sl_function(image_batch)
-    pl_outputs = pl_function(image_batch)
+    image_rng = numpy.random.RandomState(2352)
+    mnist_image_batch[...] = image_rng.random_integers(
+        255,
+        size=mnist_image_batch.shape)
 
-    assert_array_equal(sl_outputs, pl_outputs)
+    sl_input_batch = get_sl_input(mnist_image_batch)
+    sl_outputs = sl_function(sl_input_batch)
+    sl_conv_outputs = sl_conv_function(sl_input_batch)
+    sl_conv_bias_outputs = sl_conv_bias_function(sl_input_batch)
+    sl_conv_pool_outputs = sl_conv_pool_function(sl_input_batch)
+
+    pl_input_batch = get_pl_input(mnist_image_batch)
+    pl_outputs = pl_function(pl_input_batch)
+    pl_conv_outputs = pl_conv_function(pl_input_batch)
+    pl_conv_bias_outputs = pl_conv_bias_function(pl_input_batch)
+    pl_conv_pool_outputs = pl_conv_pool_function(pl_input_batch)
+
+
+    assert_array_equal(sl_input_batch, pl_input_batch.transpose((0, 3, 1, 2)))
+
+    assert_array_equal(sl_conv_outputs, pl_conv_outputs)
+
+    assert_array_equal(sl_conv_bias_outputs, pl_conv_bias_outputs)
+
+    assert_array_equal(sl_conv_pool_outputs, pl_conv_pool_outputs)
+
+    assert_array_equal(sl_outputs[0], pl_outputs[0])
+
+    # Done checking conv layer
+
+    assert_array_equal(sl_outputs[1], pl_outputs[1])
+
+    # for sl_output, pl_output in safe_izip(sl_outputs, pl_outputs):
+    #     assert_array_equal(sl_output, pl_output)
 
 
 if __name__ == '__main__':

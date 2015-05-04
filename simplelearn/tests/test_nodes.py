@@ -19,8 +19,7 @@ from nose.tools import (assert_is_instance,
                         assert_greater_equal,
                         assert_true)
 from simplelearn.formats import DenseFormat
-from simplelearn.utils import (safe_izip,
-                               assert_all_greater)
+from simplelearn.utils import safe_izip, assert_all_greater
 from simplelearn.nodes import (Node,
                                FormatNode,
                                InputNode,
@@ -41,6 +40,12 @@ from simplelearn.nodes import (Node,
                                _make_2d_gaussian_filter)
 
 from unittest import TestCase
+
+pylearn2_installed = True
+try:
+    from pylearn2.models import mlp
+except ImportError:
+    pylearn2_installed = False
 
 import pdb
 
@@ -312,7 +317,7 @@ def test_l2loss():
                                      input_node_b.output_symbol],
                                     loss_node.output_symbol)
 
-    for batch_size in xrange(4):
+    for batch_size in xrange(1, 4):
         batch_a = _make_random_batch(rng, input_format, batch_size)
         batch_b = _make_random_batch(rng, input_format, batch_size)
 
@@ -379,7 +384,7 @@ def test_crossentropy():
 
                 actual_losses = loss_function(softmaxes, targets)
                 expected_losses = expected_loss_function(softmaxes, targets)
-                assert_allclose(actual_losses, expected_losses)
+                assert_allclose(actual_losses, expected_losses, atol=1e-6)
 
 
 def _sliding_window_2d_testimpl(expected_subwindow_funcs,
@@ -696,6 +701,47 @@ def ntest_pool2d():
                                 [make_average_pool_node, make_max_pool_node],
                                 supports_padding=False)
 
+def test_pool2d_pylearn2():
+    '''
+    Tests that pool2d's 'pylearn2' padding mode indeed creates the same results
+    as pylearn2's pooling operator.
+    '''
+    if not pylearn2_installed:
+        return
+
+    floatX = theano.config.floatX
+
+    batch_size = 2
+    num_channels = 2  # num. of conv filters
+    image_shape = (2, 3)  # size of conv+bias output
+    input_node = InputNode(DenseFormat(axes=('b', 'c', '0', '1'),
+                                       shape=(-1, 1) + image_shape,
+                                       dtype=floatX))
+
+    pool_shape = (2, 2)
+    pool_strides = (2, 2)
+    pl_pooled_symbol = mlp.max_pool(bc01=input_node.output_symbol,
+                                    pool_shape=pool_shape,
+                                    pool_stride=pool_strides,
+                                    image_shape=image_shape)
+
+    pl_pool_func = theano.function([input_node.output_symbol],
+                                   pl_pooled_symbol)
+
+    sl_pool_node = Pool2D(input_node=input_node, window_shape=pool_shape,
+                          strides=pool_strides, mode='max',
+                          pad='pylearn2')
+
+    sl_pool_func = theano.function([input_node.output_symbol],
+                                   sl_pool_node.output_symbol)
+
+    input_batch = numpy.arange(batch_size *
+                               numpy.prod(input_node.output_format.shape[1:]))
+    input_batch = numpy.cast[floatX](input_batch)
+    input_batch = input_batch.reshape(input_node.output_format.shape)
+
+    pl_pooled_batch = pl_pool_func(input_batch)
+    sl_pooled_batch = sl_pool_func(input_batch)
 
 def test_pool2d_quick():
     '''
