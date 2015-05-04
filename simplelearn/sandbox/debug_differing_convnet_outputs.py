@@ -1,6 +1,8 @@
 #! /usr/bin/env python
 # pylint: disable=missing-docstring
 
+from __future__ import print_function
+
 import numpy
 from numpy.testing import assert_array_equal
 from nose.tools import assert_equal
@@ -97,10 +99,14 @@ def main():
                                            high=conv_uniform_range,
                                            size=filters.get_value().shape)))
 
+        # Transposes from bc01 to b01c before flattening to bf, as is done
+        # in Pylearn2's Conv2DSpace._format_as_impl()
         last_node = SoftmaxLayer(last_node,
                                  DenseFormat(axes=('b', 'f'),
                                              shape=(-1, num_classes),
-                                             dtype=None))
+                                             dtype=None),
+                                 input_to_bf_map={('0', '1', 'c'): 'f'})
+
         layers.append(last_node)
 
         weights = last_node.affine_node.linear_node.params
@@ -142,13 +148,29 @@ def main():
 
     sl_conv_pool_function = get_sl_conv_pool_function()
 
-    # def get_sl_conv_padded_pool_input_function():
+    def get_sl_softmax_linear_function():
+        input_symbol = sl_input_node.output_symbol
+        output_symbol = sl_layers[1].affine_node.linear_node.output_symbol
+        return theano.function([input_symbol],
+                               output_symbol)
+
+    sl_softmax_linear_function = get_sl_softmax_linear_function()
+
+    def get_sl_softmax_bias_function():
+        input_symbol = sl_input_node.output_symbol
+        output_symbol = sl_layers[1].affine_node.bias_node.output_symbol
+        return theano.function([input_symbol],
+                               output_symbol)
+
+    sl_softmax_bias_function = get_sl_softmax_bias_function()
+
+    # def get_sl_softmax_softmax_function():
     #     input_symbol = sl_input_node.output_symbol
-    #     output_symbol = sl_layers[0].bias_node.output_symbol
+    #     output_symbol = sl_layers[1].softmax_node.output_symbol
     #     return theano.function([input_symbol],
     #                            output_symbol)
 
-
+    # sl_softmax_relu_function = get_sl_softmax_relu_function()
 
     def make_pl_model(pl_input_node):
         '''
@@ -242,6 +264,20 @@ def main():
 
     pl_conv_pool_function = get_pl_conv_pool_function(pl_mlp)
 
+    def get_pl_softmax_linear_function(pl_mlp):
+        input_state = pl_input_node.output_symbol
+        output = pl_mlp.layers[1].DEBUG_linear_output
+        return theano.function([input_state], output)
+
+    pl_softmax_linear_function = get_pl_softmax_linear_function(pl_mlp)
+
+    def get_pl_softmax_bias_function(pl_mlp):
+        input_state = pl_input_node.output_symbol
+        output = pl_mlp.layers[1].DEBUG_bias_output
+        return theano.function([input_state], output)
+
+    pl_softmax_bias_function = get_pl_softmax_bias_function(pl_mlp)
+
     get_sl_input = theano.function([mnist_image_node.output_symbol],
                                    sl_input_node.output_symbol)
 
@@ -258,12 +294,14 @@ def main():
         size=mnist_image_batch.shape)
 
     sl_input_batch = get_sl_input(mnist_image_batch)
+
     sl_outputs = sl_function(sl_input_batch)
     sl_conv_outputs = sl_conv_function(sl_input_batch)
     sl_conv_bias_outputs = sl_conv_bias_function(sl_input_batch)
     sl_conv_pool_outputs = sl_conv_pool_function(sl_input_batch)
 
     pl_input_batch = get_pl_input(mnist_image_batch)
+
     pl_outputs = pl_function(pl_input_batch)
     pl_conv_outputs = pl_conv_function(pl_input_batch)
     pl_conv_bias_outputs = pl_conv_bias_function(pl_input_batch)
@@ -282,11 +320,21 @@ def main():
 
     # Done checking conv layer
 
+    sl_softmax_linear_output = sl_softmax_linear_function(sl_input_batch)
+    sl_softmax_bias_output = sl_softmax_linear_function(sl_input_batch)
+
+    pl_softmax_linear_output = pl_softmax_linear_function(pl_input_batch)
+    pl_softmax_bias_output = pl_softmax_linear_function(pl_input_batch)
+
+    # pdb.set_trace()
+    assert_array_equal(sl_softmax_linear_output, pl_softmax_linear_output)
+    assert_array_equal(sl_softmax_bias_output, pl_softmax_bias_output)
     assert_array_equal(sl_outputs[1], pl_outputs[1])
 
     # for sl_output, pl_output in safe_izip(sl_outputs, pl_outputs):
     #     assert_array_equal(sl_output, pl_output)
 
+    print("All outputs are equal.")
 
 if __name__ == '__main__':
     main()
