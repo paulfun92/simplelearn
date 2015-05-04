@@ -2,6 +2,7 @@ Simplelearn: A library for machine learning research
 ====================================================
 
 [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.17306.svg)](http://dx.doi.org/10.5281/zenodo.17306)
+[![Apache 2](http://img.shields.io/badge/license-Apache%202-red.svg)](http://www.apache.org/licenses/LICENSE-2.0)
 
 Author: [Matthew Koichi Grimes](http://mkg.cc)
 
