@@ -373,17 +373,21 @@ def build_conv_classifier(input_node,
         # By default, it collapses all non-'b' axes into a feature vector,
         # which is what we want.
 
+        # remap from bc01 to b01c before flattening to bf, as pylearn2 does,
+        # just so that they do identical things.
         last_node = SoftmaxLayer(last_node,
                                  DenseFormat(axes=('b', 'f'),
                                              shape=(-1, affine_size),
-                                             dtype=None))
-
+                                             dtype=None),
+                                 input_to_bf_map={('0', '1', 'c'): 'f'})
         normal_distribution_init(rng,
                                  last_node.affine_node.linear_node.params,
                                  affine_init_stddev)
         # stddev_init(rng, last_node.bias_node.params, affine_init_stddev)
         affine_layers.append(last_node)
 
+
+    pdb.set_trace()
     return conv_layers, affine_layers, last_node
 
 

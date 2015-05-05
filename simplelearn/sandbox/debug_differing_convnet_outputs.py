@@ -27,8 +27,11 @@ import pdb
 def main():
     floatX = theano.config.floatX
 
-    num_rows = 3
-    num_cols = 4
+    # num_rows = 3
+    # num_cols = 4
+
+    num_rows = 28
+    num_cols = 28
 
     mnist_image_node = InputNode(DenseFormat(axes=('b', '0', '1'),
                                              shape=(-1, num_rows, num_cols),
@@ -57,7 +60,7 @@ def main():
     batch_size = 2
 
     def make_sl_model(sl_input_node):
-        '''
+        """
         Builds a convlayer-softmaxlayer network on top of mnist_image_node.
 
         Returns
@@ -65,7 +68,7 @@ def main():
         rval: list
           [Conv2DLayer, SoftmaxLayer]. This isn't all the nodes from
           input to output (it omits the scaling and formatting nodes).
-        '''
+        """
 
         assert_equal(str(sl_input_node.output_symbol.dtype), 'float32')
         assert_equal(sl_input_node.output_format.axes,
