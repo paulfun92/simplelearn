@@ -19,6 +19,7 @@ from simplelearn.data.mnist import load_mnist
 from simplelearn.data.dataset import Dataset
 from simplelearn.utils import safe_izip
 
+import pdb
 
 def split_dataset(dataset, first_size):
     first_tensors = [t[:first_size, ...] for t in dataset.tensors]
@@ -114,14 +115,40 @@ def main():
 
     seed = 1234
 
-    sl_model_layers = make_sl_model(mnist_image_node,
+    sl_layers = make_sl_model(mnist_image_node,
                                     numpy.random.RandomState(seed))
 
-    sl_model_function = theano.function([mnist_image_node.output_symbol],
-                                        sl_model_layers[-1].output_symbol)
+    pdb.set_trace()
 
-    # This should crash... it does!
-    sl_model_function(training_iterator.next()[0])
+    image_batch = training_iterator.next()[0]
+
+    layer_1_conv_function = theano.function([mnist_image_node.output_symbol],
+                                            sl_layers[1].conv2d_node.output_symbol)
+
+    layer_1_conv_output = layer_1_conv_function(image_batch)
+
+    layer_1_bias_function = theano.function([mnist_image_node.output_symbol],
+                                            sl_layers[1].bias_node.output_symbol)
+
+    pdb.set_trace()
+    # crashes here
+    layer_1_bias_output = layer_1_bias_function(image_batch)
+
+    layer_1_function = theano.function([mnist_image_node.output_symbol],
+                                       sl_layers[1].output_symbol)
+
+    layer_1_function(image_batch)
+
+
+    # layer_2_linear_function = theano.function([mnist_image_node.output_symbol],
+    #                                           sl_layers[2].affine_node.linear_node.output_symbol)
+
+    # layer_2_linear_function(image_batch)
+
+    # sl_model_function = theano.function([mnist_image_node.output_symbol],
+    #                                     sl_layers[-1].output_symbol)
+    # # This should crash... it does!
+    # sl_model_function(image_batch)
 
 if __name__ == '__main__':
     main()

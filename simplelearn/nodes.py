@@ -47,6 +47,8 @@ class Node(object):
     A model is a directed acyclic graph (DAG) of Nodes.
     """
 
+    DEBUG_check_output_shape = True
+
     def __init__(self, input_nodes, output_symbol, output_format):
         '''
         Parameters
@@ -75,6 +77,28 @@ class Node(object):
         self.inputs = input_nodes
         self.output_format = output_format
         self.output_symbol = output_symbol
+
+        if self.DEBUG_check_output_shape:
+            assert_op = theano.tensor.opt.Assert("Expected shape {}".format(str(self.output_format.shape)))
+            eq_op = theano.tensor.eq
+
+            self.output_symbol = assert_op(self.output_symbol,
+                                           eq_op(self.output_symbol.ndim,
+                                                 len(self.output_format.axes)))
+
+            for i in range(len(self.output_format.axes)):
+                if self.output_format.axes[i] != 'b' or \
+                   self.output_format.shape[i] != -1:
+
+                    self.output_symbol = \
+                        assert_op(self.output_symbol,
+                                  eq_op(self.output_symbol.shape[i],
+                                        self.output_format.shape[i]))
+
+            # for axis, axis_size in safe_izip(self.output_format.axes,
+            #                                  self.output_format.shape):
+            #     if axis != 'b':
+            #         self.output_symbol = assert_op(self.output_symbol.shape[i]
 
 
 class FormatNode(Node):
