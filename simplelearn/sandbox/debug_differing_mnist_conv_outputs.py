@@ -118,8 +118,6 @@ def main():
     sl_layers = make_sl_model(mnist_image_node,
                                     numpy.random.RandomState(seed))
 
-    pdb.set_trace()
-
     image_batch = training_iterator.next()[0]
 
     layer_1_conv_function = theano.function([mnist_image_node.output_symbol],
@@ -130,8 +128,6 @@ def main():
     layer_1_bias_function = theano.function([mnist_image_node.output_symbol],
                                             sl_layers[1].bias_node.output_symbol)
 
-    pdb.set_trace()
-    # crashes here
     layer_1_bias_output = layer_1_bias_function(image_batch)
 
     layer_1_function = theano.function([mnist_image_node.output_symbol],
@@ -140,15 +136,14 @@ def main():
     layer_1_function(image_batch)
 
 
-    # layer_2_linear_function = theano.function([mnist_image_node.output_symbol],
-    #                                           sl_layers[2].affine_node.linear_node.output_symbol)
+    layer_2_linear_function = theano.function([mnist_image_node.output_symbol],
+                                              sl_layers[2].affine_node.linear_node.output_symbol)
 
-    # layer_2_linear_function(image_batch)
+    layer_2_linear_function(image_batch)
 
-    # sl_model_function = theano.function([mnist_image_node.output_symbol],
-    #                                     sl_layers[-1].output_symbol)
-    # # This should crash... it does!
-    # sl_model_function(image_batch)
+    sl_model_function = theano.function([mnist_image_node.output_symbol],
+                                        sl_layers[-1].output_symbol)
+    sl_model_function(image_batch)
 
 if __name__ == '__main__':
     main()

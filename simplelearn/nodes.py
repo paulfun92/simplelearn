@@ -21,6 +21,7 @@ from nose.tools import (assert_true,
                         assert_is,
                         assert_in,
                         assert_not_in)
+from numpy.testing import assert_array_equal
 from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_floating,
@@ -913,15 +914,13 @@ class Pool2D(Node):
                                          output_format)
 
         else:
-            # pdb.set_trace()
             image_shape = numpy.asarray(input_format_node.output_format.shape[2:])
             window_shape = numpy.asarray(window_shape)
             strides = numpy.asarray(strides)
-            overflow = (image_shape - window_shape) % strides
+            overflow = ((image_shape - window_shape) + 1) % strides
             single_sided_pads = strides - overflow
             single_sided_pads[single_sided_pads == strides] = 0
 
-            # new_window_shape = window_shape + single_sided_pads
             bc01_symbol = input_format_node.output_symbol
             T = theano.tensor
             floatX = theano.config.floatX
@@ -950,16 +949,19 @@ class Pool2D(Node):
             bc01_shape = input_format_node.output_format.shape
             padded_image_shape = (numpy.asarray(bc01_shape[2:]) +
                                   single_sided_pads)
-            assert_equal(padded_image_shape[0] % strides[0], 0)
-            assert_equal(padded_image_shape[1] % strides[1], 0)
 
+            output_image_shape = (((padded_image_shape - window_shape) + 1) //
+                                  strides)
+
+            assert_array_equal(output_image_shape * strides - 1 + window_shape,
+                               padded_image_shape)
             output_format = DenseFormat(axes=('b', 'c', '0', '1'),
                                         shape=(bc01_shape[0],
                                                bc01_shape[1],
-                                               padded_image_shape[0] // strides[0],
-                                               padded_image_shape[1] // strides[1]),
+                                               output_image_shape[0],
+                                               output_image_shape[1]),
                                         dtype=floatX)
-            # pdb.set_trace()
+
             super(Pool2D, self).__init__([input_node],
                                          output_symbol,
                                          output_format)
