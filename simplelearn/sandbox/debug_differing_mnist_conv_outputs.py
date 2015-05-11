@@ -7,6 +7,8 @@ convnet in parallel.
 
 # pylint: disable=missing-docstring
 
+from __future__ import print_function
+
 import numpy
 from nose.tools import assert_equal
 import theano
@@ -120,6 +122,10 @@ def main():
 
     image_batch = training_iterator.next()[0]
 
+    layer_0_function = theano.function([mnist_image_node.output_symbol],
+                                       sl_layers[0].output_symbol)
+    layer_0_output = layer_0_function(image_batch)
+
     layer_1_conv_function = theano.function([mnist_image_node.output_symbol],
                                             sl_layers[1].conv2d_node.output_symbol)
 
@@ -133,17 +139,19 @@ def main():
     layer_1_function = theano.function([mnist_image_node.output_symbol],
                                        sl_layers[1].output_symbol)
 
-    layer_1_function(image_batch)
+    layer_1_output = layer_1_function(image_batch)
 
 
     layer_2_linear_function = theano.function([mnist_image_node.output_symbol],
                                               sl_layers[2].affine_node.linear_node.output_symbol)
 
-    layer_2_linear_function(image_batch)
+    layer_2_linear_output = layer_2_linear_function(image_batch)
 
     sl_model_function = theano.function([mnist_image_node.output_symbol],
                                         sl_layers[-1].output_symbol)
-    sl_model_function(image_batch)
+    sl_model_output = sl_model_function(image_batch)
+
+    print("Model function evalutated without crashing.")
 
 if __name__ == '__main__':
     main()

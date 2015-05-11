@@ -1223,8 +1223,10 @@ class Sgd(object):
                 def compare_weights(mnist_weights,
                                     mnist_biases,
                                     pylearn2_weights,
-                                    pylearn2_biases):
-                    atol = .00001
+                                    pylearn2_biases,
+                                    atol=.00001,
+                                    rtol=1e-7):
+                    # atol = .00001
                     for (layer_index,
                          (mnist_weight,
                           mnist_bias,
@@ -1235,22 +1237,31 @@ class Sgd(object):
                                                                  pylearn2_biases)):
                         assert_allclose(mnist_weight.get_value(),
                                         pylearn2_weight,
-                                        atol=atol)
+                                        atol=atol,
+                                        rtol=rtol)
                         assert_allclose(mnist_bias.get_value()[0, :],
                                         pylearn2_bias,
-                                        atol=atol)
+                                        atol=atol,
+                                        rtol=rtol)
 
+                # compare initial params
                 compare_weights(mnist_weights,
                                 mnist_biases,
                                 pylearn2_weights,
-                                pylearn2_biases)
+                                pylearn2_biases,
+                                atol=0.0,
+                                rtol=0.0)
 
 
                 def compare_grads(mnist_weights,
                                   mnist_biases,
                                   pylearn2_weights,
-                                  pylearn2_biases):
-                    atol = .00001
+                                  pylearn2_biases,
+                                  atol=0.0,
+                                  rtol=1e-7):
+                    # atol = .00001
+                    # atol = 0
+                    # rtol = 1e-3
                     for (layer_index,
                          (mnist_weight,
                           mnist_bias,
@@ -1259,22 +1270,16 @@ class Sgd(object):
                                                                  mnist_biases,
                                                                  pylearn2_weights,
                                                                  pylearn2_biases)):
-                        if layer_index == 2:
-                            pdb.set_trace()
-                            assert_allclose(mnist_weight,
-                                            pylearn2_weight,
-                                            atol=atol)
-                            assert_allclose(mnist_bias[0, :],
-                                            pylearn2_bias,
-                                            atol=atol)
-
-                # No such thing as 00000'th gradient (it starts at 00001).
-                # pylearn2_weight_grads, pylearn2_bias_grads = load_mnist_grads(
-                #     '/tmp/pylearn_grads_{:06d}_batches.h5'.format(batch_num))
-                # compare_weights(mnist_weight_grads,
-                #                 mnist_bias_grads,
-                #                 pylearn2_weight_grads,
-                #                 pylearn2_bias_grads)
+                        # if layer_index == 2:
+                        pdb.set_trace()
+                        assert_allclose(mnist_weight,
+                                        pylearn2_weight,
+                                        atol=atol,
+                                        rtol=rtol)
+                        assert_allclose(mnist_bias[0, :],
+                                        pylearn2_bias,
+                                        atol=atol,
+                                        rtol=rtol)
 
             while True:
 
@@ -1297,8 +1302,6 @@ class Sgd(object):
                 DEBUG_outputs = outputs[6:9]
                 outputs = outputs[9:]
 
-                batch_num += 1
-
                 print("batch_num: {}".format(batch_num))
                 if DEBUG_compare_to_pylearn2:
 
@@ -1306,11 +1309,11 @@ class Sgd(object):
                     pylearn2_outputs = load_mnist_outputs(
                         '/tmp/pylearn_mlpoutputs_{:06d}_batches.h5'.format(batch_num))
 
-                    pdb.set_trace()
                     for layer_index, (sl_output, pl_output) \
                         in enumerate(safe_izip(DEBUG_outputs,
                                                pylearn2_outputs)):
-                        assert_allclose(sl_output, pl_output)
+                        # pdb.set_trace()
+                        assert_allclose(sl_output, pl_output, atol=5e-7)
 
                     # compare gradients
                     mnist_weight_grads = DEBUG_grads[::2]
@@ -1321,6 +1324,8 @@ class Sgd(object):
                                   mnist_bias_grads,
                                   pylearn2_weight_grads,
                                   pylearn2_bias_grads)
+
+                    batch_num += 1
 
                     # Compare weights after update
                     pylearn2_weights, pylearn2_biases = load_mnist_params(
