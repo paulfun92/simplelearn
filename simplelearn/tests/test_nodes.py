@@ -196,8 +196,8 @@ class BiasTester(Function1dTo1dTester):
 
     def expected_function1dTo1d(self, rows):
         params = self.node.params.get_value()
-        assert_equal(params.shape[0], 1)
-        assert_equal(rows.shape[1], params.shape[1])
+        assert_equal(params.ndim, 1)
+        assert_equal(rows.shape[1], params.shape[0])
 
         return rows + self.node.params.get_value()
 

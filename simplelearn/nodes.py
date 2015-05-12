@@ -435,12 +435,13 @@ class Bias(Function1dTo1d):
         assert_is(self.params, None)
         assert_equal(input_bf_format.shape, output_bf_format.shape)
 
-        params = numpy.zeros((1, output_bf_format.shape[1]),
+        params = numpy.zeros(output_bf_format.shape[1],
                              dtype=input_bf_node.output_symbol.dtype)
 
-        self.params = theano.shared(params, broadcastable=[True, False])
+        self.params = theano.shared(params)
 
-        output_symbol = input_bf_node.output_symbol + self.params
+        output_symbol = (input_bf_node.output_symbol +
+                         self.params.dimshuffle('x', 0))  # reshapes N to 1xN
 
         if output_bf_format.dtype is None:
             output_dtype = input_bf_node.output_symbol.dtype
@@ -1187,7 +1188,7 @@ class Conv2DLayer(Node):
                                                channel_axis: 'f'},
                               bf_to_output_map={'b': non_channel_axes,
                                                 'f': channel_axis})
-        assert_equal(self.bias_node.params.get_value().shape, (1, num_filters))
+        assert_equal(self.bias_node.params.get_value().shape, (num_filters, ))
 
         self.relu_node = ReLU(self.bias_node)
         self.pool2d_node = Pool2D(input_node=self.relu_node,
@@ -1435,7 +1436,7 @@ class L2Loss(Node):
                                                 if axis != 'b'))
 
                 non_b_axes = tuple(axis for axis in fmt.axes if axis != 'b')
-                pdb.set_trace()
+
                 return (DenseFormat(shape=(batch_size, feature_size),
                                     axes=('b', 'f'),
                                     dtype=fmt.dtype),

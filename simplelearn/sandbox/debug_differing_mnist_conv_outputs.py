@@ -138,9 +138,9 @@ def get_sl_grads_function(image_node, label_node, sl_layers):
         is_bias = bool(pi % 2)
 
         if layer_index < 2:
-            assert_equal(param.ndim, 2 if is_bias else 4)
+            assert_equal(param.ndim, 1 if is_bias else 4)
         else:
-            assert_equal(param.ndim, 2)
+            assert_equal(param.ndim, 1 if is_bias else 2)
 
     grads = theano.gradient.grad(scalar_cost, params)
     return theano.function([image_node.output_symbol,
@@ -264,7 +264,6 @@ def main():
                                                            sl_model_output),
                                                           range(3)):
         assert_array_equal(pl_layer_output, sl_layer_output)
-        print("Verified layer {}".format(ii))
 
     sl_grads_function = get_sl_grads_function(mnist_image_node,
                                               mnist_label_node,
@@ -282,9 +281,9 @@ def main():
          grad_index) in safe_izip(sl_grads, pl_grads, range(6)):
         layer_index = grad_index // 2
 
-        # they won't be equal, since they use different implementations of
-        # cross-entropy
-        assert_allclose(sl_grad, pl_grad, rtol=1e-2)
+        # Can't use assert_array_equal here. They won't be equal, since they
+        # use different implementations of cross-entropy
+        assert_allclose(sl_grad, pl_grad, atol=1e-5)
 
 if __name__ == '__main__':
     main()
