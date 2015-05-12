@@ -9,17 +9,23 @@ convnet in parallel.
 
 from __future__ import print_function
 
+import os
 import numpy
-from nose.tools import assert_equal
+from nose.tools import assert_equal, assert_is_instance
+from numpy.testing import assert_array_equal, assert_allclose
 import theano
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import (Conv2DLayer,
                                SoftmaxLayer,
                                RescaleImage,
-                               FormatNode)
+                               FormatNode,
+                               CrossEntropy)
 from simplelearn.data.mnist import load_mnist
 from simplelearn.data.dataset import Dataset
 from simplelearn.utils import safe_izip
+
+import pylearn2
+from pylearn2.config import yaml_parse
 
 import pdb
 
@@ -103,6 +109,89 @@ def make_sl_model(mnist_image_node, rng):
 
     return layers
 
+def make_pl_model():
+
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(dir_path, 'mnist_conv_pylearn2_model.yaml')
+    with open(file_path) as yaml_file:
+        mlp = yaml_parse.load(yaml_file)
+
+    return mlp
+
+def get_sl_grads_function(image_node, label_node, sl_layers):
+    assert_equal(len(sl_layers), 3)
+
+    cost_node = CrossEntropy(sl_layers[-1], label_node)
+    scalar_cost = cost_node.output_symbol.mean()
+
+    params = []
+    for conv_layer in sl_layers[:2]:
+        params.append(conv_layer.conv2d_node.filters)
+        params.append(conv_layer.bias_node.params)
+
+    params.append(sl_layers[2].affine_node.linear_node.params)
+    params.append(sl_layers[2].affine_node.bias_node.params)
+    assert_equal(len(params), 6)
+
+    for pi, param in enumerate(params):
+        layer_index = pi // 2
+        is_bias = bool(pi % 2)
+
+        if layer_index < 2:
+            assert_equal(param.ndim, 2 if is_bias else 4)
+        else:
+            assert_equal(param.ndim, 2)
+
+    grads = theano.gradient.grad(scalar_cost, params)
+    return theano.function([image_node.output_symbol,
+                            label_node.output_symbol],
+                           grads)
+
+def get_onehot_labels_symbol(indices_symbol):
+    T = theano.tensor
+    batch_size = indices_symbol.shape[0]
+    result = T.zeros((batch_size, 10), dtype=indices_symbol.dtype)
+
+    one_hot = T.set_subtensor(result[T.arange(batch_size), indices_symbol],
+                              1)
+
+    return one_hot
+
+def get_pl_grads_function(mnist_image_node,
+                          label_node,
+                          mlp_output_symbol,
+                          mlp):
+    assert_is_instance(mlp, pylearn2.models.mlp.MLP)
+    assert_equal(len(mlp.layers), 3)
+
+    params = []
+    for conv_layer in mlp.layers[:2]:
+        params.extend(conv_layer.transformer.get_params())
+        params.append(conv_layer.b)
+
+    bias, weights = mlp.layers[2].get_params()
+    params.append(weights)
+    params.append(bias)
+
+    for pi, param in enumerate(params):
+        layer_index = pi // 2
+        is_bias = bool(pi % 2)
+
+        if layer_index < 2:
+            assert_equal(param.ndim, 1 if is_bias else 4)
+        else:
+            assert_equal(param.ndim, 1 if is_bias else 2)
+
+    onehot_labels_symbol = get_onehot_labels_symbol(label_node.output_symbol)
+
+    scalar_cost = mlp.cost(onehot_labels_symbol,
+                           mlp_output_symbol)
+
+    grads = theano.gradient.grad(scalar_cost, params)
+    return theano.function([mnist_image_node.output_symbol,
+                            label_node.output_symbol],
+                           grads)
+
 
 def main():
 
@@ -113,14 +202,13 @@ def main():
     batch_size = 100
 
     training_iterator = training_set.iterator('sequential', batch_size)
-    mnist_image_node = training_iterator.make_input_nodes()[0]
+    mnist_image_node, mnist_label_node = training_iterator.make_input_nodes()
 
     seed = 1234
 
-    sl_layers = make_sl_model(mnist_image_node,
-                                    numpy.random.RandomState(seed))
+    sl_layers = make_sl_model(mnist_image_node, numpy.random.RandomState(seed))
 
-    image_batch = training_iterator.next()[0]
+    image_batch, label_batch = training_iterator.next()
 
     layer_0_function = theano.function([mnist_image_node.output_symbol],
                                        sl_layers[0].output_symbol)
@@ -152,6 +240,51 @@ def main():
     sl_model_output = sl_model_function(image_batch)
 
     print("Model function evalutated without crashing.")
+
+    pl_model = make_pl_model()
+    float_image_node = RescaleImage(mnist_image_node)
+    num_rows = mnist_image_node.output_format.shape[1]
+    num_cols = mnist_image_node.output_format.shape[2]
+    pl_image_node = FormatNode(float_image_node,
+                               DenseFormat(axes=('b', '0', '1', 'c'),
+                                           shape=(-1, num_rows, num_cols, 1),
+                                           dtype=None),
+                               axis_map={'1': ('1', 'c')})
+
+    pl_layer_symbols = pl_model.fprop(state_below=pl_image_node.output_symbol,
+                                      return_all=True)
+    pl_layers_function = theano.function([mnist_image_node.output_symbol],
+                                         pl_layer_symbols)
+
+    pl_layer_outputs = pl_layers_function(image_batch)
+
+    for pl_layer_output, sl_layer_output, ii in safe_izip(pl_layer_outputs,
+                                                          (layer_0_output,
+                                                           layer_1_output,
+                                                           sl_model_output),
+                                                          range(3)):
+        assert_array_equal(pl_layer_output, sl_layer_output)
+        print("Verified layer {}".format(ii))
+
+    sl_grads_function = get_sl_grads_function(mnist_image_node,
+                                              mnist_label_node,
+                                              sl_layers)
+    pl_grads_function = get_pl_grads_function(mnist_image_node,
+                                              mnist_label_node,
+                                              pl_layer_symbols[-1],
+                                              pl_model)
+
+    sl_grads = sl_grads_function(image_batch, label_batch)
+    pl_grads = pl_grads_function(image_batch, label_batch)
+
+    for (sl_grad,
+         pl_grad,
+         grad_index) in safe_izip(sl_grads, pl_grads, range(6)):
+        layer_index = grad_index // 2
+
+        # they won't be equal, since they use different implementations of
+        # cross-entropy
+        assert_allclose(sl_grad, pl_grad, rtol=1e-2)
 
 if __name__ == '__main__':
     main()
