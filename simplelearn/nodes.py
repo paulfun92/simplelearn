@@ -48,6 +48,7 @@ class Node(object):
     A model is a directed acyclic graph (DAG) of Nodes.
     """
 
+    # TODO: make this some config variable
     # Set to True to check consistency between output_symbol.shape and
     # output_format.shape at runtime.
     DEBUG_check_output_shape = False
@@ -85,10 +86,19 @@ class Node(object):
             assert_op = theano.tensor.opt.Assert("Expected shape {}".format(str(self.output_format.shape)))
             eq_op = theano.tensor.eq
 
+            # Checks ndims
             self.output_symbol = assert_op(self.output_symbol,
                                            eq_op(self.output_symbol.ndim,
                                                  len(self.output_format.axes)))
 
+            if self.output_format.dtype is not None:
+                # Checks dtype
+                self.output_symbol = assert_op(
+                    self.output_symbol,
+                    eq_op(str(self.output_symbol.dtype),
+                          str(self.output_format.dtype)))
+
+            # Checks sizes of non-batch axes
             for i in range(len(self.output_format.axes)):
                 if self.output_format.axes[i] != 'b' or \
                    self.output_format.shape[i] != -1:

@@ -9,6 +9,7 @@ from __future__ import print_function
 
 import os
 import numpy
+import nose
 from nose.tools import assert_equal, assert_is_instance
 from numpy.testing import assert_array_equal, assert_allclose
 import theano
@@ -23,8 +24,13 @@ from simplelearn.data.dataset import Dataset
 from simplelearn.utils import safe_izip
 
 
-import pylearn2
-from pylearn2.config import yaml_parse
+pylearn2_installed = True
+
+try:
+    import pylearn2
+    from pylearn2.config import yaml_parse
+except ImportError:
+    pylearn2_installed = False
 
 import pdb
 
@@ -42,8 +48,11 @@ def split_dataset(dataset, first_size):
     return first_dataset, second_dataset
 
 
-def make_sl_model(mnist_image_node, rng):
+def make_sl_model(mnist_image_node):
     layers = []  # to return
+
+    # 1234: the same seed used in ./mnist_conv_pylearn2_model.yaml
+    rng = numpy.random.RandomState(1234)
 
     # CNN specs
     filter_counts = [64, 64]
@@ -167,8 +176,7 @@ def get_onehot_labels_symbol(indices_symbol):
     batch_size = indices_symbol.shape[0]
     result = T.zeros((batch_size, 10), dtype=indices_symbol.dtype)
 
-    one_hot = T.set_subtensor(result[T.arange(batch_size), indices_symbol],
-                              1)
+    one_hot = T.set_subtensor(result[T.arange(batch_size), indices_symbol], 1)
 
     return one_hot
 
@@ -213,7 +221,26 @@ def get_pl_grads_function(mnist_image_node,
                            grads)
 
 
+def init_biases(sl_layers, pl_model):
+    rng = numpy.random.RandomState(352358)
+    half_range = .05
+
+    for sl_layer, pl_layer in safe_izip(sl_layers, pl_model.layers):
+        sl_bias = sl_layer.bias_node.params
+        pl_bias = pl_layer.b
+
+        bias = sl_bias.get_value()
+        assert_true(numpy.all(bias == 0.0))
+        assert_true(numpy.all(pl_bias.get_value() == 0.0))
+
+        bias[...] = rng.uniform(-half_range, half_range, size=bias.shape)
+        sl_bias.set_value(bias)
+        pl_bias.set_value(bias)
+
+
 def test_convnet_against_pylearn2():
+    if not pylearn2_installed:
+        raise nose.SkipTest()
 
     training_set = load_mnist()[0]
     training_set, validating_set = split_dataset(training_set, 50000)
@@ -224,17 +251,15 @@ def test_convnet_against_pylearn2():
     training_iterator = training_set.iterator('sequential', batch_size)
     mnist_image_node, mnist_label_node = training_iterator.make_input_nodes()
 
-    seed = 1234  # the same one used in ./mnist_conv_pylearn2_model.yaml
-
-    sl_layers = make_sl_model(mnist_image_node, numpy.random.RandomState(seed))
-
-    image_batch, label_batch = training_iterator.next()
+    sl_layers = make_sl_model(mnist_image_node)
 
     sl_layers_function = theano.function([mnist_image_node.output_symbol],
                                          [x.output_symbol for x in sl_layers])
-    sl_layer_outputs = sl_layers_function(image_batch)
 
     pl_model = make_pl_model()
+
+    init_biases(sl_layers, pl_model)  # sets biases to something other than 0.0
+
     float_image_node = RescaleImage(mnist_image_node)
     num_rows = mnist_image_node.output_format.shape[1]
     num_cols = mnist_image_node.output_format.shape[2]
@@ -249,15 +274,6 @@ def test_convnet_against_pylearn2():
     pl_layers_function = theano.function([mnist_image_node.output_symbol],
                                          pl_layer_symbols)
 
-    pl_layer_outputs = pl_layers_function(image_batch)
-
-    for pl_layer_output, sl_layer_output in safe_izip(pl_layer_outputs,
-                                                      sl_layer_outputs):
-        # On some graphics cards (e.g. NVidia GTX 780), sl and pl outputs are
-        # equal.  On others (e.g. NVidia GT 650M), they're close but not equal.
-        assert_allclose(pl_layer_output, sl_layer_output, atol=1e-5)
-        # assert_array_equal(pl_layer_output, sl_layer_output)
-
     sl_grads_function = get_sl_grads_function(mnist_image_node,
                                               mnist_label_node,
                                               sl_layers)
@@ -266,11 +282,25 @@ def test_convnet_against_pylearn2():
                                               pl_layer_symbols[-1],
                                               pl_model)
 
-    sl_grads = sl_grads_function(image_batch, label_batch)
-    pl_grads = pl_grads_function(image_batch, label_batch)
+    for batch_num in range(3):
+        image_batch, label_batch = training_iterator.next()
 
-    for sl_grad, pl_grad in safe_izip(sl_grads, pl_grads):
+        sl_layer_outputs = sl_layers_function(image_batch)
+        pl_layer_outputs = pl_layers_function(image_batch)
 
-        # Can't use assert_array_equal here. They won't be equal, since they
-        # use different implementations of cross-entropy
-        assert_allclose(sl_grad, pl_grad, atol=1e-5)
+        for pl_layer_output, sl_layer_output in safe_izip(pl_layer_outputs,
+                                                          sl_layer_outputs):
+            # On some graphics cards (e.g. NVidia GTX 780), sl and pl outputs
+            # are equal.  On others (e.g. NVidia GT 650M), they're close but
+            # not equal.
+            assert_allclose(pl_layer_output, sl_layer_output, atol=1e-5)
+            # assert_array_equal(pl_layer_output, sl_layer_output)
+
+        sl_grads = sl_grads_function(image_batch, label_batch)
+        pl_grads = pl_grads_function(image_batch, label_batch)
+
+        for sl_grad, pl_grad in safe_izip(sl_grads, pl_grads):
+
+            # Can't use assert_array_equal here. They won't be equal, since they
+            # use different implementations of cross-entropy
+            assert_allclose(sl_grad, pl_grad, atol=1e-5)
