@@ -98,11 +98,6 @@ class Node(object):
                                   eq_op(self.output_symbol.shape[i],
                                         self.output_format.shape[i]))
 
-            # for axis, axis_size in safe_izip(self.output_format.axes,
-            #                                  self.output_format.shape):
-            #     if axis != 'b':
-            #         self.output_symbol = assert_op(self.output_symbol.shape[i]
-
 
 class FormatNode(Node):
     '''
@@ -367,12 +362,7 @@ class Linear(Function1dTo1d):
     def __init__(self, input_node, output_format, **kwargs):
         get_bf_shape = Function1dTo1d._get_bf_shape
 
-        # num_input_features = get_bf_shape(input_node.output_format, input_to_bf_map)[1]
-        # num_output_features = get_bf_shape(output_format)[1]
-
-        # params = numpy.zeros((num_input_features, num_output_features),
-        #                      dtype=input_node.output_symbol.dtype)
-        # self.params = theano.shared(params)
+        # set in _get_output_bf_node()
         self.params = None
 
         super(Linear, self).__init__(input_node, output_format, **kwargs)
@@ -406,18 +396,8 @@ class Bias(Function1dTo1d):
     '''
 
     def __init__(self, input_node, output_format, **kwargs):
-        # get_bf_shape = Function1dTo1d._get_bf_shape
 
-        # num_input_features = get_bf_shape(input_node.output_format)[1]
-        # num_output_features = get_bf_shape(output_format)[1]
-
-        # assert_equal(num_output_features, num_input_features)
-
-        # params = numpy.zeros((1, num_output_features),
-        #                      dtype=input_node.output_symbol.dtype)
-
-        # self.params = theano.shared(params, broadcastable=[True, False])
-
+		# set in _get_output_bf_node()
         self.params = None
         super(Bias, self).__init__(input_node, output_format, **kwargs)
 
@@ -425,13 +405,6 @@ class Bias(Function1dTo1d):
                             input_bf_node,
                             input_bf_format,
                             output_bf_format):
-        # get_bf_shape = Function1dTo1d._get_bf_shape
-
-        # num_input_features = get_bf_shape(input_node.output_format)[1]
-        # num_output_features = get_bf_shape(output_format)[1]
-
-        # assert_equal(num_output_features, num_input_features)
-
         assert_is(self.params, None)
         assert_equal(input_bf_format.shape, output_bf_format.shape)
 
@@ -771,10 +744,7 @@ class Conv2D(Node):
                                 kerns=filters,
                                 border_mode=pads,
                                 subsample=strides,
-                                # flip filters
-                                conv_mode='conv')  # TODO: change back to 'cross' after splitting Conv2D into
-                                # # don't flip filters
-                                # conv_mode='cross')
+								conv_mode=kwargs.get('conv_mode', 'conv'))
             else:
                 image_shape = list(copy.deepcopy(t_node.output_format.shape))
                 assert_equal(image_shape[0], -1)
@@ -790,19 +760,6 @@ class Conv2D(Node):
                               subsample=strides,
                               **kwargs)  # pylint: disable=star-args
 
-            # image_shape = list(copy.deepcopy(t_node.output_format.shape))
-            # assert_equal(image_shape[0], -1)
-            # image_shape[0] = None
-            # image_shape = tuple(image_shape)
-
-            # conv2d = theano.tensor.nnet.conv2d
-            # return conv2d(input=t_node.output_symbol,
-            #               filters=filters,
-            #               image_shape=image_shape,
-            #               filter_shape=filters.get_value().shape,  # sic
-            #               border_mode=pads,
-            #               subsample=strides,
-            #               **kwargs)  # pylint: disable=star-args
 
         if pads not in ('valid', 'full'):
             pads = _get_pads(pads,
@@ -827,6 +784,7 @@ class Conv2D(Node):
 #       1) cuDNN pads with -inf when max-pooling, and 0 when mean-pooling?
 #       2) The 'min' padding mode works as expected
 #       3) the 'pylearn2' padding mode works as expected.
+#       4) all cases work fine even when (strides > window_shape).any()
 # 2) and 3) can be tested with 7x7 input, 4x4 pool window, and 2x2 pool stride.
 # Both 'min' and 'pylearn2' should produce a 3x3 output, wheras pad='valid'
 # would produce a 2x2 output.
@@ -896,7 +854,6 @@ class Pool2D(Node):
                 window_shape=window_shape,
                 num_filters=input_format_node.output_format.shape[1],
                 pad=pad)
-            #(0, 0))  # dnn_pool always uses zero padding
 
             pads = _get_pads(pad,
                              image_shape=input_format_node.output_format.shape[2:],

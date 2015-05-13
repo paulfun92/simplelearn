@@ -48,9 +48,6 @@ from simplelearn.training import (Monitor,
                                   PicklesOnEpoch,
                                   ValidationCallback,
                                   StopsOnStagnation)
-
-from simplelearn import debug_mnist
-
 import pdb
 
 
@@ -133,12 +130,11 @@ def parse_args():
 
     parser.add_argument("--initial-momentum",
                         type=non_negative_0_to_1,
-                        default=0.0,  # changed
-                        #default=0.5, # original
+						default=0.5, # 0.5 used in original
                         help=("Initial momentum."))
 
     parser.add_argument("--no-nesterov",
-                        default=True,
+                        default=True,  # original didn't use nesterov
                         action="store_true",
                         help=("Don't use Nesterov accelerated gradients "
                               "(default: False)."))
@@ -150,13 +146,12 @@ def parse_args():
 
     parser.add_argument("--dropout",
                         action='store_true',
-                        default=False,
+                        default=False,  # original didn't use dropout
                         help="Use dropout.")
 
     parser.add_argument("--final-momentum",
                         type=non_negative_0_to_1,
-                        default=0.0,  # changed
-                        # default=.99,  # original
+                        default=.99,  # original used .99
                         help="Value for momentum to linearly scale up to.")
 
     parser.add_argument("--epochs-to-momentum-saturation",
@@ -165,8 +160,7 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    default_max_norm = numpy.inf  # changed
-    # default_max_norm = 1.9365  # original
+    default_max_norm = 1.9365  # value used in original
 
     parser.add_argument("--max-filter-norm",
                         type=max_norm_arg,
@@ -317,9 +311,6 @@ def build_conv_classifier(input_node,
                                                  pool_strides,
                                                  conv_dropout_include_rates):
         if conv_dropout_include_rate != 1.0:
-            assert_true(False,
-                        "should never see this code if we're trying to "
-                        "replicate pylearn2's MNIST demo")
             last_node = Dropout(last_node,
                                 conv_dropout_include_rate,
                                 theano_rng)
@@ -395,11 +386,6 @@ def print_mcr(values, _):
 
 def print_loss(values, _):  # 2nd argument: formats
     print("Average loss: %s" % str(values))
-
-# class OutputMonitor(Monitor):
-#     def __init__(self, outputs, shapes):
-#         formats = []
-
 
 class GradMonitor(Monitor):
     def __init__(self, grads, shapes):
@@ -528,7 +514,6 @@ def main():
     #
 
     parameters = []
-    DEBUG_grads = []
     parameter_updaters = []
     momentum_updaters = []
 
@@ -541,7 +526,6 @@ def main():
         LinearlyInterpolatesOverEpochs to momentum_updaters.
         '''
         gradient = theano.gradient.grad(scalar_loss, parameter)
-        DEBUG_grads.append(gradient)
         parameter_updaters.append(SgdParameterUpdater(parameter,
                                                       gradient,
                                                       args.learning_rate,
@@ -594,15 +578,6 @@ def main():
                      momentum_updaters)
 
 
-    # updates = [updater.updates.values()[0] - updater.updates.keys()[0]
-    #            for updater in parameter_updaters]
-    # update_norm_monitors = [UpdateNormMonitor("layer %d %s" %
-    #                                           (i // 2,
-    #                                            "weights" if i % 2 == 0 else
-    #                                            "bias"),
-    #                                           update)
-    #                         for i, update in enumerate(updates)]
-
     #
     # Makes batch and epoch callbacks
     #
@@ -629,23 +604,6 @@ def main():
                                            loss_node.output_format,
                                            callbacks=[print_loss,
                                                       training_loss_logger])
-    gradients_monitor = GradMonitor(DEBUG_grads,
-                                    [p.get_value().shape for p in parameters])
-
-    def get_outputs_monitor():
-        outputs = []
-        formats = []
-        for conv_layer in conv_layers:
-            outputs.append(conv_layer.output_symbol)
-            formats.append(conv_layer.output_format)
-
-        for affine_layer in affine_layers:
-            outputs.append(affine_layer.output_symbol)
-            formats.append(affine_layer.output_format)
-
-        return OutputMonitor(outputs, formats)
-
-    outputs_monitor = get_outputs_monitor()
 
     # print out 10-D feature vector
     # feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
@@ -700,9 +658,7 @@ def main():
                                           batch_size=args.batch_size),
                   parameters,
                   parameter_updaters,
-                  monitors=[gradients_monitor,
-                            outputs_monitor,
-                            training_loss_monitor],
+                  monitors=[training_loss_monitor],
                   epoch_callbacks=[])
 
     stuff_to_pickle = OrderedDict(
@@ -722,59 +678,6 @@ def main():
                                                overwrite=False),
                                 validation_callback,
                                 LimitsNumEpochs(max_epochs)])
-
-    # start debugging code
-    debug_mnist.mnist_weights = (
-        [c.conv2d_node.filters for c in conv_layers] +
-        [a.affine_node.linear_node.params for a in affine_layers])
-
-    debug_mnist.mnist_biases = (
-        [c.bias_node.params for c in conv_layers] +
-        [a.affine_node.bias_node.params for a in affine_layers])
-
-    def debug_formats():
-        conv_output_syms = [c.conv2d_node.output_symbol for c in conv_layers]
-        conv_formats = [c.conv2d_node.output_format for c in conv_layers]
-
-        pool_output_syms = [c.pool2d_node.output_symbol for c in conv_layers]
-        pool_formats = [c.pool2d_node.output_format for c in conv_layers]
-
-        affine_output_syms = [a.affine_node.output_symbol for a in affine_layers]
-        affine_formats = [a.affine_node.output_format for a in affine_layers]
-
-        func = theano.function([image_uint8_node.output_symbol],
-                               conv_output_syms +
-                               pool_output_syms +
-                               affine_output_syms)
-
-        iterator = mnist_training.iterator(iterator_type='sequential',
-                                           batch_size=10)
-        image_batch = iterator.next()[0]
-        outputs = func(image_batch)
-        last_index = 0
-
-        conv_outputs = outputs[last_index:len(conv_output_syms)]
-        last_index += len(conv_outputs)
-
-        pool_outputs = outputs[last_index:last_index + len(pool_output_syms)]
-        last_index += len(pool_outputs)
-
-        affine_outputs = outputs[last_index:last_index + len(affine_output_syms)]
-        last_index += len(affine_outputs)
-
-        def check_formats(outputs, formats):
-            for output, fmt in safe_izip(outputs, formats):
-                fmt.check(output)
-
-
-        check_formats(conv_outputs, conv_formats)
-        check_formats(pool_outputs, pool_formats)
-        check_formats(affine_outputs, affine_formats)
-        pdb.set_trace()
-
-    # debug_formats()
-
-    # end debugging code
 
     trainer.train()
 

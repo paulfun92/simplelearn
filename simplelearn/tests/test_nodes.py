@@ -656,7 +656,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                         pdb.set_trace()
 
 
-def ntest_pool2d():
+def test_pool2d():
     def average_pool(subwindow):
         assert_equal(subwindow.ndim, 4)
 
@@ -852,7 +852,6 @@ def ntest_conv2d():
 
 def test_make_2d_gaussian_filter():
     dtype = theano.config.floatX  # pylint: disable=no-member
-    # standard_deviation = 2.0
 
     # Test a range of filter shapes: square, non-square, even dims, odd dims
     for filter_shape in itertools.product(range(3, 7), repeat=2):
