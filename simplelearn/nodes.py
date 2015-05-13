@@ -711,10 +711,12 @@ class Conv2D(Node):
             # axis_map = get_full_axis_map(axis_map)
 
         if dnn_available():
-            assert_equal(len(kwargs), 0,
-                         "cuDNN implementation does not accept kwargs. Switch "
-                         "to default Theano implementation using Theano "
-                         "config option 'optimizer_excluding=conv_dnn'")
+            dnn_kwargs = {'conv_mode'}
+            assert_equal(len(set(kwargs.keys()) - dnn_kwargs), 0,
+                         "cuDNN implementation does not accept kwargs other "
+                         "than {}. Switch to default Theano implementation "
+                         "using Theano config option "
+                         "'optimizer_excluding=conv_dnn'".format(dnn_kwargs))
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
@@ -744,7 +746,7 @@ class Conv2D(Node):
                                 kerns=filters,
                                 border_mode=pads,
                                 subsample=strides,
-								conv_mode=kwargs.get('conv_mode', 'conv'))
+                                conv_mode=kwargs.get('conv_mode', 'conv'))
             else:
                 image_shape = list(copy.deepcopy(t_node.output_format.shape))
                 assert_equal(image_shape[0], -1)

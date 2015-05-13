@@ -79,7 +79,8 @@ def make_sl_model(mnist_image_node, rng):
                                 conv_pads='valid',
                                 pool_window_shape=pool_shape,
                                 pool_strides=pool_stride,
-                                pool_pads='pylearn2')
+                                pool_pads='pylearn2',
+                                conv_mode='conv')
 
         weights = last_node.conv2d_node.filters
         weight_values = weights.get_value()
@@ -239,8 +240,6 @@ def main():
                                         sl_layers[-1].output_symbol)
     sl_model_output = sl_model_function(image_batch)
 
-    print("Model function evalutated without crashing.")
-
     pl_model = make_pl_model()
     float_image_node = RescaleImage(mnist_image_node)
     num_rows = mnist_image_node.output_format.shape[1]
@@ -263,7 +262,10 @@ def main():
                                                            layer_1_output,
                                                            sl_model_output),
                                                           range(3)):
-        assert_array_equal(pl_layer_output, sl_layer_output)
+        # On some graphics cards (e.g. NVidia GTX 780), sl and pl outputs are
+        # equal.  On others (e.g. NVidia GT 650M), they're close but not equal.
+        assert_allclose(pl_layer_output, sl_layer_output, atol=1e-5)
+        # assert_array_equal(pl_layer_output, sl_layer_output)
 
     sl_grads_function = get_sl_grads_function(mnist_image_node,
                                               mnist_label_node,

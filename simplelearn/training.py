@@ -156,7 +156,7 @@ class PicklesOnEpoch(EpochCallback):
             filepath = self._filepath
         else:
             path, filename = os.path.split(self._filepath)
-            basename, extension = os.path.splitext(filename)
+            extension = os.path.splitext(filename)[1]
             filename = '%s_%05d%s' % (filename,
                                       self._num_epochs_seen,
                                       extension)
@@ -168,10 +168,6 @@ class PicklesOnEpoch(EpochCallback):
             cPickle.dump(self._objects_to_pickle,
                          pickle_file,
                          protocol=cPickle.HIGHEST_PROTOCOL)
-
-            # dill.dump(self._objects_to_pickle,
-            #           pickle_file,
-            #           protocol=cPickle.HIGHEST_PROTOCOL)
 
         self._num_epochs_seen += 1
 
@@ -625,6 +621,9 @@ class SumMonitor(ReduceMonitor):
         # that they don't raise a stink about batch/tally dtypes being
         # different from the format's expected dtype.
         def remove_small_int_dtype(fmt):
+            '''
+            Return a copy of fmt, with dtype=None if orig. dtype was small int.
+            '''
             if fmt.dtype is not None and numpy.issubdtype(fmt.dtype,
                                                           numpy.integer):
                 result = copy.deepcopy(fmt)
@@ -642,8 +641,12 @@ class SumMonitor(ReduceMonitor):
 
     def _reduce_batch(self, input_batch, batch_axis):
 
-        # Lower risk of integer over/underflow (esp. if dtype is uint8)
         def upcast_if_integer(input_batch):
+            '''
+            Cast to int64 iff input_batch.dtype is an integral dtype.
+
+            Lowers the risk of integer over/underflow (esp. if dtype is uint8).
+            '''
             if numpy.issubdtype(input_batch.dtype, numpy.integer):
                 return numpy.cast['int64'](input_batch)
             else:
@@ -702,11 +705,15 @@ class SavesAtMinimum(object):
     '''
 
     def __init__(self, object_to_save, output_filepath):
-        def check_path(path):
-            abspath = os.path.abspath(path)
+        '''
+        Parameters
+        ----------
+        object_to_save: A picklable object
 
-        check_path(output_filepath)
-
+        output_filepath: string
+          The file path to save object_to_save to.
+        '''
+        assert_true(os.path.isdir(os.path.dirname(path)))
 
         self._object_to_save = object_to_save
         self._output_filepath = output_filepath
@@ -1057,8 +1064,9 @@ class Sgd(object):
         assert_is_instance(input_iterator, DataIterator)
         assert_true(input_iterator.next_is_new_epoch())
 
-        for input, iterator_input in safe_izip(inputs,
-                                               input_iterator.make_input_nodes()):
+        for (input,
+             iterator_input) in safe_izip(inputs,
+                                          input_iterator.make_input_nodes()):
             assert_equal(input.output_format, iterator_input.output_format)
 
         assert_is_instance(parameters, Sequence)
@@ -1095,11 +1103,11 @@ class Sgd(object):
         self._monitors = tuple(monitors)
 
         input_symbols = [i.output_symbol for i in inputs]
-        self._compile_update_function_args={
-            'input_symbols': input_symbols,
-            'monitors': self._monitors,
-            'parameter_updaters': self._parameter_updaters,
-            'theano_function_mode': theano_function_mode}
+        self._compile_update_function_args = \
+            {'input_symbols': input_symbols,
+             'monitors': self._monitors,
+             'parameter_updaters': self._parameter_updaters,
+             'theano_function_mode': theano_function_mode}
 
         self._update_function = self._compile_update_function(
             **self._compile_update_function_args)

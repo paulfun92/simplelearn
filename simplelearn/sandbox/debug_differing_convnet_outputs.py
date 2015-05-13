@@ -220,15 +220,15 @@ def main():
         sl_weights = sl_layers[0].conv2d_node.filters
         assert_array_equal(weights.get_value(), sl_weights.get_value())
         sl_biases = sl_layers[0].bias_node.params
-        assert_equal(sl_biases.get_value().shape, (1, 2))
-        assert_array_equal(biases.get_value(), sl_biases.get_value()[0])
+        assert_equal(sl_biases.get_value().shape, (2, ))
+        assert_array_equal(biases.get_value(), sl_biases.get_value())
 
         biases, weights = layers[1].get_params()
         sl_weights = sl_layers[1].affine_node.linear_node.params
         assert_array_equal(weights.get_value(), sl_weights.get_value())
         sl_biases = sl_layers[1].affine_node.bias_node.params
-        assert_equal(sl_biases.get_value().shape, (1, num_classes))
-        assert_array_equal(biases.get_value(), sl_biases.get_value()[0])
+        assert_equal(sl_biases.get_value().shape, (num_classes, ))
+        assert_array_equal(biases.get_value(), sl_biases.get_value())
 
         return result
 

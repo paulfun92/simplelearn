@@ -35,8 +35,7 @@ from simplelearn.io import SerializableModel
 from simplelearn.data.dataset import Dataset
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
-from simplelearn.training import (Monitor,
-                                  SgdParameterUpdater,
+from simplelearn.training import (SgdParameterUpdater,
                                   limit_param_norms,
                                   Sgd,
                                   LogsToLists,
@@ -48,7 +47,6 @@ from simplelearn.training import (Monitor,
                                   PicklesOnEpoch,
                                   ValidationCallback,
                                   StopsOnStagnation)
-import pdb
 
 
 def parse_args():
@@ -89,12 +87,6 @@ def parse_args():
         assert_equal(os.path.splitext(abs_path)[1], "")
         return arg
 
-    def positive_0_to_1(arg):
-        result = float(arg)
-        assert_greater(result, 0.0)
-        assert_less_equal(result, 1.0)
-        return result
-
     def non_negative_0_to_1(arg):
         result = float(arg)
         assert_greater_equal(result, 0.0)
@@ -115,8 +107,8 @@ def parse_args():
                         help=("Directory and optional prefix of filename to "
                               "save the log to."))
 
-    # The default hyperparameter values below are taken from
-    # Pylearn2's mlp tutorial, in pylearn2/scripts/tutorials/multilayer_perceptron/:
+    # The default hyperparameter values below are taken from Pylearn2's mlp
+    # tutorial, in pylearn2/scripts/tutorials/multilayer_perceptron/:
     #   multilayer_perceptron.ipynb
     #   mlp_tutorial_part_3.yaml
     #
@@ -130,7 +122,7 @@ def parse_args():
 
     parser.add_argument("--initial-momentum",
                         type=non_negative_0_to_1,
-						default=0.5, # 0.5 used in original
+                        default=0.5, # 0.5 used in original
                         help=("Initial momentum."))
 
     parser.add_argument("--no-nesterov",
@@ -196,6 +188,13 @@ def parse_args():
 
 
 class EpochTimer(EpochCallback):
+    '''
+    Prints the epoch number and duration after each epoch.
+    '''
+
+    def __init__(self):
+        self.start_time = None
+        self.epoch_number = None
 
     def on_start_training(self):
         self.start_time = timeit.default_timer()
@@ -380,57 +379,18 @@ def build_conv_classifier(input_node,
     return conv_layers, affine_layers, last_node
 
 
-def print_mcr(values, _):
+def print_misclassification_rate(values, _):  # ignores 2nd argument (formats)
+    '''
+    Prints the misclassification rate.
+    '''
     print("Misclassification rate: %s" % str(values))
 
 
-def print_loss(values, _):  # 2nd argument: formats
+def print_loss(values, _):  # ignores 2nd argument (formats)
+    '''
+    Prints the average loss.
+    '''
     print("Average loss: %s" % str(values))
-
-class GradMonitor(Monitor):
-    def __init__(self, grads, shapes):
-
-        assert_equal(len(grads), len(shapes))
-        assert_equal(len(grads), 3*2)
-
-        formats = []
-
-        for layer in range(2):
-            formats.append(DenseFormat(axes=('oc', 'ic', '0', '1'),
-                                       shape=shapes[layer * 2],
-                                       dtype='floatX'))
-
-            formats.append(DenseFormat(axes=('bias_singleton', 'bd'),
-                                       shape=shapes[layer * 2 + 1],
-                                       dtype='floatX'))
-
-
-        formats.append(DenseFormat(axes=('if', 'of'),
-                                   shape=shapes[-2],
-                                   dtype='floatX'))
-
-        formats.append(DenseFormat(axes=('bias_singleton', 'bd'),
-                                   shape=shapes[-1],
-                                   dtype='floatX'))
-
-        super(GradMonitor, self).__init__(grads, formats, [])
-
-    def _on_epoch(self):
-        pass
-
-    def _on_batch(self):
-        pass
-
-
-class OutputMonitor(Monitor):
-    def __init__(self, outputs, formats):
-        super(OutputMonitor, self).__init__(outputs, formats, [])
-
-    def _on_epoch(self):
-        pass
-
-    def _on_batch(self):
-        pass
 
 
 def main():
@@ -592,7 +552,7 @@ def main():
                                              min_proportional_decrease=0.0)
         return AverageMonitor(misclassification_node.output_symbol,
                               misclassification_node.output_format,
-                              callbacks=[print_mcr,
+                              callbacks=[print_misclassification_rate,
                                          mcr_logger,
                                          training_stopper])
 
