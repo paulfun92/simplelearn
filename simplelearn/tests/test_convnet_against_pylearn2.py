@@ -1,8 +1,6 @@
-#! /usr/bin/env python
-
 '''
-Script for running Simplelearn and Pylearn2 versions of the MNIST demo
-convnet in parallel.
+Runs Simplelearn and Pylearn2 versions of the MNIST demo convnet in
+parallel.
 '''
 
 # pylint: disable=missing-docstring
@@ -23,6 +21,7 @@ from simplelearn.nodes import (Conv2DLayer,
 from simplelearn.data.mnist import load_mnist
 from simplelearn.data.dataset import Dataset
 from simplelearn.utils import safe_izip
+
 
 import pylearn2
 from pylearn2.config import yaml_parse
@@ -120,6 +119,16 @@ def make_pl_model():
     return mlp
 
 def get_sl_grads_function(image_node, label_node, sl_layers):
+    '''
+    Compiles a theano function that returns all gradients.
+
+    Returns a function that takes MNIST images and labels,
+    and outputs the loss w.r.t. the simplelearn layers' params.
+
+    The function returns a tuple of 6 elements: [dW_0, db_0, dW_1, db_1, dW_2,
+    db_2], where dW_i is the gradient wrt the i'th layer's weights or filters,
+    and db_i is the gradient wrt the i'th layer's biases.
+    '''
     assert_equal(len(sl_layers), 3)
 
     cost_node = CrossEntropy(sl_layers[-1], label_node)
@@ -149,6 +158,11 @@ def get_sl_grads_function(image_node, label_node, sl_layers):
                            grads)
 
 def get_onehot_labels_symbol(indices_symbol):
+    '''
+    Converts a vector of label indices to a matrix of one-hot rows.
+
+    (This operates on Theano variables, not numpy arrays.)
+    '''
     T = theano.tensor
     batch_size = indices_symbol.shape[0]
     result = T.zeros((batch_size, 10), dtype=indices_symbol.dtype)
@@ -162,6 +176,11 @@ def get_pl_grads_function(mnist_image_node,
                           label_node,
                           mlp_output_symbol,
                           mlp):
+    '''
+    Does the same as get_sl_grads_function, but for the Pylearn2 model.
+
+    See docstring for get_sl_grads_function.
+    '''
     assert_is_instance(mlp, pylearn2.models.mlp.MLP)
     assert_equal(len(mlp.layers), 3)
 
@@ -194,7 +213,7 @@ def get_pl_grads_function(mnist_image_node,
                            grads)
 
 
-def main():
+def test_convnet_against_pylearn2():
 
     training_set = load_mnist()[0]
     training_set, validating_set = split_dataset(training_set, 50000)
@@ -211,34 +230,9 @@ def main():
 
     image_batch, label_batch = training_iterator.next()
 
-    layer_0_function = theano.function([mnist_image_node.output_symbol],
-                                       sl_layers[0].output_symbol)
-    layer_0_output = layer_0_function(image_batch)
-
-    layer_1_conv_function = theano.function([mnist_image_node.output_symbol],
-                                            sl_layers[1].conv2d_node.output_symbol)
-
-    layer_1_conv_output = layer_1_conv_function(image_batch)
-
-    layer_1_bias_function = theano.function([mnist_image_node.output_symbol],
-                                            sl_layers[1].bias_node.output_symbol)
-
-    layer_1_bias_output = layer_1_bias_function(image_batch)
-
-    layer_1_function = theano.function([mnist_image_node.output_symbol],
-                                       sl_layers[1].output_symbol)
-
-    layer_1_output = layer_1_function(image_batch)
-
-
-    layer_2_linear_function = theano.function([mnist_image_node.output_symbol],
-                                              sl_layers[2].affine_node.linear_node.output_symbol)
-
-    layer_2_linear_output = layer_2_linear_function(image_batch)
-
-    sl_model_function = theano.function([mnist_image_node.output_symbol],
-                                        sl_layers[-1].output_symbol)
-    sl_model_output = sl_model_function(image_batch)
+    sl_layers_function = theano.function([mnist_image_node.output_symbol],
+                                         [x.output_symbol for x in sl_layers])
+    sl_layer_outputs = sl_layers_function(image_batch)
 
     pl_model = make_pl_model()
     float_image_node = RescaleImage(mnist_image_node)
@@ -257,11 +251,8 @@ def main():
 
     pl_layer_outputs = pl_layers_function(image_batch)
 
-    for pl_layer_output, sl_layer_output, ii in safe_izip(pl_layer_outputs,
-                                                          (layer_0_output,
-                                                           layer_1_output,
-                                                           sl_model_output),
-                                                          range(3)):
+    for pl_layer_output, sl_layer_output in safe_izip(pl_layer_outputs,
+                                                      sl_layer_outputs):
         # On some graphics cards (e.g. NVidia GTX 780), sl and pl outputs are
         # equal.  On others (e.g. NVidia GT 650M), they're close but not equal.
         assert_allclose(pl_layer_output, sl_layer_output, atol=1e-5)
@@ -278,14 +269,8 @@ def main():
     sl_grads = sl_grads_function(image_batch, label_batch)
     pl_grads = pl_grads_function(image_batch, label_batch)
 
-    for (sl_grad,
-         pl_grad,
-         grad_index) in safe_izip(sl_grads, pl_grads, range(6)):
-        layer_index = grad_index // 2
+    for sl_grad, pl_grad in safe_izip(sl_grads, pl_grads):
 
         # Can't use assert_array_equal here. They won't be equal, since they
         # use different implementations of cross-entropy
         assert_allclose(sl_grad, pl_grad, atol=1e-5)
-
-if __name__ == '__main__':
-    main()
