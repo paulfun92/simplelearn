@@ -48,7 +48,7 @@ class Node(object):
     A model is a directed acyclic graph (DAG) of Nodes.
     """
 
-    # TODO: make this some config variable
+    # TODO: make this some config/environment variable, e.g. SL_DEBUG_CHECKS
     # Set to True to check consistency between output_symbol.shape and
     # output_format.shape at runtime.
     DEBUG_check_output_shape = False
@@ -83,7 +83,8 @@ class Node(object):
         self.output_symbol = output_symbol
 
         if self.DEBUG_check_output_shape:
-            assert_op = theano.tensor.opt.Assert("Expected shape {}".format(str(self.output_format.shape)))
+            assert_op = theano.tensor.opt.Assert(
+                "Expected shape " + str(self.output_format.shape))
             eq_op = theano.tensor.eq
 
             # Checks ndims

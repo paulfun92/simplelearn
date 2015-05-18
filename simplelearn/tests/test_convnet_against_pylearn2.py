@@ -10,7 +10,7 @@ from __future__ import print_function
 import os
 import numpy
 import nose
-from nose.tools import assert_equal, assert_is_instance
+from nose.tools import assert_true, assert_equal, assert_is_instance
 from numpy.testing import assert_array_equal, assert_allclose
 import theano
 from simplelearn.formats import DenseFormat
@@ -19,20 +19,20 @@ from simplelearn.nodes import (Conv2DLayer,
                                RescaleImage,
                                FormatNode,
                                CrossEntropy)
-from simplelearn.data.mnist import load_mnist
 from simplelearn.data.dataset import Dataset
 from simplelearn.utils import safe_izip
 
 
-pylearn2_installed = True
+PYLEARN2_INSTALLED = True
 
 try:
     import pylearn2
     from pylearn2.config import yaml_parse
 except ImportError:
-    pylearn2_installed = False
+    PYLEARN2_INSTALLED = False
 
 import pdb
+
 
 def split_dataset(dataset, first_size):
     first_tensors = [t[:first_size, ...] for t in dataset.tensors]
@@ -118,6 +118,7 @@ def make_sl_model(mnist_image_node):
 
     return layers
 
+
 def make_pl_model():
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -126,6 +127,7 @@ def make_pl_model():
         mlp = yaml_parse.load(yaml_file)
 
     return mlp
+
 
 def get_sl_grads_function(image_node, label_node, sl_layers):
     '''
@@ -152,9 +154,9 @@ def get_sl_grads_function(image_node, label_node, sl_layers):
     params.append(sl_layers[2].affine_node.bias_node.params)
     assert_equal(len(params), 6)
 
-    for pi, param in enumerate(params):
-        layer_index = pi // 2
-        is_bias = bool(pi % 2)
+    for param_index, param in enumerate(params):
+        layer_index = param_index // 2
+        is_bias = bool(param_index % 2)
 
         if layer_index < 2:
             assert_equal(param.ndim, 1 if is_bias else 4)
@@ -166,19 +168,21 @@ def get_sl_grads_function(image_node, label_node, sl_layers):
                             label_node.output_symbol],
                            grads)
 
+
 def get_onehot_labels_symbol(indices_symbol):
     '''
     Converts a vector of label indices to a matrix of one-hot rows.
 
     (This operates on Theano variables, not numpy arrays.)
     '''
-    T = theano.tensor
+    T = theano.tensor  # pylint: disable=invalid-name
     batch_size = indices_symbol.shape[0]
     result = T.zeros((batch_size, 10), dtype=indices_symbol.dtype)
 
     one_hot = T.set_subtensor(result[T.arange(batch_size), indices_symbol], 1)
 
     return one_hot
+
 
 def get_pl_grads_function(mnist_image_node,
                           label_node,
@@ -201,9 +205,9 @@ def get_pl_grads_function(mnist_image_node,
     params.append(weights)
     params.append(bias)
 
-    for pi, param in enumerate(params):
-        layer_index = pi // 2
-        is_bias = bool(pi % 2)
+    for param_index, param in enumerate(params):
+        layer_index = param_index // 2
+        is_bias = bool(param_index % 2)
 
         if layer_index < 2:
             assert_equal(param.ndim, 1 if is_bias else 4)
@@ -226,7 +230,9 @@ def init_biases(sl_layers, pl_model):
     half_range = .05
 
     for sl_layer, pl_layer in safe_izip(sl_layers, pl_model.layers):
-        sl_bias = sl_layer.bias_node.params
+        sl_bias = (sl_layer.bias_node.params
+                   if isinstance(sl_layer, Conv2DLayer)
+                   else sl_layer.affine_node.bias_node.params)
         pl_bias = pl_layer.b
 
         bias = sl_bias.get_value()
@@ -238,13 +244,36 @@ def init_biases(sl_layers, pl_model):
         pl_bias.set_value(bias)
 
 
+def make_dummy_mnist():
+    image_format = DenseFormat(axes=('b', '0', '1'),
+                               shape=(-1, 28, 28),
+                               dtype='uint8')
+    label_format = DenseFormat(axes=('b', ),
+                               shape=(-1, ),
+                               dtype='uint8')
+
+    num_samples = 1000
+    images = image_format.make_batch(is_symbolic=False, batch_size=num_samples)
+    labels = label_format.make_batch(is_symbolic=False, batch_size=num_samples)
+
+    rng = numpy.random.RandomState(9873)
+    images[...] = rng.random_integers(0, 255, size=images.shape)
+    labels[...] = rng.random_integers(0, 9, size=labels.shape)
+
+    return Dataset(tensors=[images, labels],
+                   formats=[image_format, label_format],
+                   names=['images', 'labels'])
+
+
 def test_convnet_against_pylearn2():
-    if not pylearn2_installed:
+    if not PYLEARN2_INSTALLED:
         raise nose.SkipTest()
 
-    training_set = load_mnist()[0]
-    training_set, validating_set = split_dataset(training_set, 50000)
-    assert_equal(validating_set.tensors[0].shape[0], 10000)
+    # training_set = load_mnist()[0]
+    # training_set, validating_set = split_dataset(training_set, 50000)
+    # assert_equal(validating_set.tensors[0].shape[0], 10000)
+
+    training_set = make_dummy_mnist()
 
     batch_size = 100
 
@@ -282,7 +311,7 @@ def test_convnet_against_pylearn2():
                                               pl_layer_symbols[-1],
                                               pl_model)
 
-    for batch_num in range(3):
+    for _ in range(3):
         image_batch, label_batch = training_iterator.next()
 
         sl_layer_outputs = sl_layers_function(image_batch)
@@ -301,6 +330,6 @@ def test_convnet_against_pylearn2():
 
         for sl_grad, pl_grad in safe_izip(sl_grads, pl_grads):
 
-            # Can't use assert_array_equal here. They won't be equal, since they
-            # use different implementations of cross-entropy
+            # Can't use assert_array_equal here. They won't be equal, since
+            # they use different implementations of cross-entropy
             assert_allclose(sl_grad, pl_grad, atol=1e-5)

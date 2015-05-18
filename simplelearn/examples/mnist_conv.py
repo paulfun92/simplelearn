@@ -122,7 +122,7 @@ def parse_args():
 
     parser.add_argument("--initial-momentum",
                         type=non_negative_0_to_1,
-                        default=0.5, # 0.5 used in original
+                        default=0.5,  # 0.5 used in original
                         help=("Initial momentum."))
 
     parser.add_argument("--no-nesterov",
@@ -256,7 +256,6 @@ def build_conv_classifier(input_node,
 
     assert_equal(input_node.output_format.axes, ('b', '0', '1'))
 
-
     #
     # Done sanity-checking args.
     #
@@ -276,7 +275,6 @@ def build_conv_classifier(input_node,
 
     conv_dropout_include_rates = \
         dropout_include_rates[:len(filter_shapes)]
-
 
     # Adds a dropout-conv-bias-relu-maxpool stack for each element in
     # filter_XXXX
@@ -536,7 +534,6 @@ def main():
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
-
 
     #
     # Makes batch and epoch callbacks
