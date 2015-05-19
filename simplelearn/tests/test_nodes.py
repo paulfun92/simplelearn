@@ -631,7 +631,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                     node = make_node_func(input_node,
                                           window_shape=window_shape,
                                           strides=strides,
-                                          pads=pad_arg,  # pads,
+                                          pads=pad_arg,
                                           axis_map=axis_map)
 
                     node_func = theano.function([input_node.output_symbol],
@@ -678,28 +678,31 @@ def test_pool2d():
     def make_average_pool_node(input_node,
                                window_shape,
                                strides,
-                               _,  # ignore 'pads' arg
+                               pads,
                                axis_map):
         return Pool2D(input_node=input_node,
                       window_shape=window_shape,
                       strides=strides,
                       mode='average',
+                      pad=pads,
                       axis_map=axis_map)
 
     def make_max_pool_node(input_node,
                            window_shape,
                            strides,
-                           _,  # ignore 'pads' arg
+                           pads,
                            axis_map):
         return Pool2D(input_node=input_node,
                       window_shape=window_shape,
                       strides=strides,
                       mode='max',
+                      pad=pads,
                       axis_map=axis_map)
 
     _sliding_window_2d_testimpl([average_pool, max_pool],
                                 [make_average_pool_node, make_max_pool_node],
                                 supports_padding=False)
+
 
 def test_pool2d_pylearn2():
     '''
@@ -742,6 +745,7 @@ def test_pool2d_pylearn2():
 
     pl_pooled_batch = pl_pool_func(input_batch)
     sl_pooled_batch = sl_pool_func(input_batch)
+
 
 def test_pool2d_quick():
     '''
@@ -794,7 +798,7 @@ def test_pool2d_quick():
 
     avg_pooled_pylearn2_padding = \
         make_pool_func(mode='average', pad='pylearn2')(input_image)
-    assert_array_equal(avg_pooled_pylearn2_padding, [-2.5, -2, -9/4.])
+    assert_array_equal(avg_pooled_pylearn2_padding, [-2.5, -2, -9 / 4.])
 
     avg_pooled_min_padding = \
         make_pool_func(mode='average', pad='min')(input_image)
@@ -806,9 +810,10 @@ def test_pool2d_quick():
 
     avg_pooled_full_padding = \
         make_pool_func(mode='average', pad='full')(input_image)
-    assert_allclose(avg_pooled_full_padding, [-1, -9/4., -2, -2.5, -7/4.])
+    assert_allclose(avg_pooled_full_padding, [-1, -9 / 4., -2, -2.5, -7 / 4.])
 
-def ntest_conv2d():
+
+def test_conv2d():
     def rand_floats(shape):
         rng = numpy.random.RandomState(382342)
         return rng.uniform(low=-10, high=10, size=shape)
@@ -850,6 +855,7 @@ def ntest_conv2d():
                                 supports_padding=True,
                                 rtol=1e-3)
 
+
 def test_make_2d_gaussian_filter():
     dtype = theano.config.floatX  # pylint: disable=no-member
 
@@ -860,7 +866,7 @@ def test_make_2d_gaussian_filter():
         def make_expected_filter(filter_shape):
             standard_deviations = filter_shape / 4.0
 
-            covariance = numpy.diag(standard_deviations**2)
+            covariance = numpy.diag(standard_deviations ** 2)
             inv_covariance = numpy.diag(1.0 / standard_deviations ** 2)
 
             mean = filter_shape // 2
@@ -880,6 +886,7 @@ def test_make_2d_gaussian_filter():
         actual_filter = _make_2d_gaussian_filter(filter_shape, dtype=dtype)
 
         assert_allclose(actual_filter, expected_filter)
+
 
 def test_lcn():
     '''
@@ -927,9 +934,9 @@ def test_lcn():
                                     mono_lcn.output_symbol)
     mono_lcn_batch = mono_function(mono_image_batch)
 
-
     assert_allclose(rgb_lcn_batch.reshape((-1, 1, num_rows, num_columns)),
                     mono_lcn_batch)
+
 
 def test_conv_layer():
     '''
@@ -1017,7 +1024,6 @@ def test_conv_layer():
     conv_sequence_function = theano.function(
         [image_node.output_symbol],
         conv_sequence_output_node.output_symbol)
-
 
     batch_size = 3
     image = image_node.output_format.make_batch(is_symbolic=False,
