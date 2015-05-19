@@ -781,7 +781,9 @@ class Conv2D(Node):
                              strides=strides)
 
             assert_true((numpy.asarray(pads) <
-                         numpy.asarray(filter_shape)).all())
+                         numpy.asarray(filter_shape)).all(),
+                        ("Not all pads {} were smaller than the "
+                         "filter_shape {}").filter(pads, filter_shape))
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
