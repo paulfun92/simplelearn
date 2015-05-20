@@ -16,7 +16,12 @@ __license__ = "Apache 2.0"
 
 
 import numpy
-from nose.tools import assert_equal, assert_greater_equal, assert_is_instance
+from nose.tools import (assert_is,
+                        assert_equal,
+                        assert_greater_equal,
+                        assert_is_instance,
+                        assert_in,
+                        assert_not_in)
 import theano
 from theano.gof.op import get_debug_values
 from theano.tensor import TensorType
@@ -322,7 +327,8 @@ class Format(object):
 
 
 class DenseFormat(Format):
-    '''Format for fixed-sized dense data.
+    '''
+    Format for fixed-sized dense data.
 
     Example::
 
@@ -389,12 +395,12 @@ class DenseFormat(Format):
                 (str(self.shape), str(self.axes), self.dtype))
 
     def _make_batch(self, is_symbolic, batch_size, dtype, name):
-        assert_equal(batch_size is None, is_symbolic or ('b' not in self.axes))
 
         # if 'b' not in self.axes:
         #     raise ValueError("This format has no batch ('b') axis.")
 
         if is_symbolic:
+            assert_is(batch_size, None)
             # shape = list(self.shape)
 
             # # ok if batch_size is None
@@ -463,7 +469,16 @@ class DenseFormat(Format):
             #     return theano.tensor.row(name=name, dtype=dtype)
             # else:
             #     return theano.tensor.matrix(name=name, dtype=dtype)
-        else:
+        else:  # i.e. is_symbolic == False
+            if batch_size is None:
+                assert_not_in('b', self.axes)
+            else:
+                assert_in('b',
+                          self.axes,
+                          ("batch_size argument provided ({}), but "
+                           "this format has no batch "
+                           "('b') axis.").format(batch_size))
+
             shape = list(self.shape)
             shape[self.axes.index('b')] = batch_size
 

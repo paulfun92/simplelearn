@@ -783,7 +783,7 @@ class Conv2D(Node):
             assert_true((numpy.asarray(pads) <
                          numpy.asarray(filter_shape)).all(),
                         ("Not all pads {} were smaller than the "
-                         "filter_shape {}").filter(pads, filter_shape))
+                         "filter_shape {}").format(pads, filter_shape))
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
@@ -859,7 +859,6 @@ class Pool2D(Node):
         _assert_is_shape2d(strides)
         assert_in(mode, ('max', 'average'))
 
-
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
         if pad != 'pylearn2':
@@ -870,12 +869,19 @@ class Pool2D(Node):
                 num_filters=input_format_node.output_format.shape[1],
                 pad=pad)
 
+            image_shape = input_format_node.output_format.shape[2:]
+
             pads = _get_pads(pad,
-                             image_shape=input_format_node.output_format.shape[2:],
+                             image_shape=image_shape,
                              window_shape=window_shape,
                              strides=strides)
 
-            assert_true((numpy.asarray(pads) < numpy.asarray(window_shape)).all())
+            # Make sure pads are smaller than the corresponding window_shape
+            # dimension.
+            assert_true((numpy.asarray(pads) <
+                         numpy.asarray(window_shape)).all(),
+                        ("Not all pads {} were smaller than the "
+                         "window_shape {}").format(pads, window_shape))
 
             output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
                 img=input_format_node.output_symbol,
@@ -895,6 +901,14 @@ class Pool2D(Node):
             overflow = ((image_shape - window_shape) + 1 - 1) % strides
             single_sided_pads = strides - overflow
             single_sided_pads[single_sided_pads == strides] = 0
+
+            # Make sure pads are smaller than the corresponding window_shape
+            # dimension.
+            assert_true((numpy.asarray(single_sided_pads) <
+                         numpy.asarray(window_shape)).all(),
+                        ("Not all pads {} were smaller than the "
+                         "window_shape {}").format(single_sided_pads,
+                                                   window_shape))
 
             bc01_symbol = input_format_node.output_symbol
             T = theano.tensor

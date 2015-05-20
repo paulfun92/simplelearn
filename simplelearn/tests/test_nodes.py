@@ -608,7 +608,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
         max_padded_images[...] = pad_value
 
         images = get_padded_image(max_padded_images, (0, 0))
-        images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
+        # images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
+        images[...] = numpy.arange(images.size).reshape(images.shape)
         assert_all_greater(images.shape, 0)
 
         if max_pad == 0:
@@ -621,7 +622,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
         # Make input_nodes with weird axis names and axis order
         axis_map = {'b': 'b', 'see': 'c', 'zero': '0', 'one': '1'}
-        input_node_axes = ('b', 'zero', 'see', 'one')
+        input_node_axes = ('b', 'see', 'zero', 'one')
+        # input_node_axes = ('b', 'zero', 'see', 'one')
         transpose_indices = [('b', 'see', 'zero', 'one').index(a)
                              for a in input_node_axes]
         input_node_shape = [images.shape[t] for t in transpose_indices]
@@ -655,8 +657,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
                     # If pads are bigger than window_size, expect an exception
                     # when creating the node.
-                    if (not isinstance(pads, basestring) and
-                        numpy.any(pads > window_shape)):
+                    if not isinstance(pads, basestring) and \
+                       numpy.any(pads >= window_shape):
                         assert_raises_regexp(AssertionError,
                                              "Not all pads",
                                              make_node_func,
@@ -672,26 +674,26 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                               pads=pad_arg,
                                               axis_map=axis_map)
 
-                    node_func = theano.function([input_node.output_symbol],
-                                                node.output_symbol)
-                    transposed_images = images.transpose(transpose_indices)
-                    actual_images = node_func(transposed_images)
-                    try:
-                        node.output_format.check(actual_images)
-                    except AssertionError:
-                        pdb.set_trace()
+                        node_func = theano.function([input_node.output_symbol],
+                                                    node.output_symbol)
+                        transposed_images = images.transpose(transpose_indices)
+                        actual_images = node_func(transposed_images)
+                        try:
+                            node.output_format.check(actual_images)
+                        except AssertionError:
+                            pdb.set_trace()
 
-                    kwargs = {}
-                    if rtol is not None:
-                        kwargs['rtol'] = rtol
+                        kwargs = {}
+                        if rtol is not None:
+                            kwargs['rtol'] = rtol
 
-                    try:
-                        # pylint: disable=star-args
-                        assert_allclose(actual_images,
-                                        expected_images,
-                                        **kwargs)
-                    except AssertionError:
-                        pdb.set_trace()
+                        try:
+                            # pylint: disable=star-args
+                            assert_allclose(actual_images,
+                                            expected_images,
+                                            **kwargs)
+                        except AssertionError:
+                            pdb.set_trace()
 
 
 def test_pool2d():
