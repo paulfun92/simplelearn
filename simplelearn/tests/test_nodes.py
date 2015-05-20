@@ -884,7 +884,8 @@ def test_conv2d():
                         num_filters,
                         pads,
                         strides,
-                        axis_map)
+                        axis_map,
+                        conv_mode='cross')
 
         filters = result.filters.get_value()
         filters[...] = rand_floats(filters.shape)
