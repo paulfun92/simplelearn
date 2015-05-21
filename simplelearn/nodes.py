@@ -18,7 +18,10 @@ from nose.tools import (assert_true,
                         assert_greater,
                         assert_greater_equal,
                         assert_is_instance,
-                        assert_in)
+                        assert_is,
+                        assert_in,
+                        assert_not_in)
+from numpy.testing import assert_array_equal
 from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_floating,
@@ -44,6 +47,11 @@ class Node(object):
 
     A model is a directed acyclic graph (DAG) of Nodes.
     """
+
+    # TODO: make this some config/environment variable, e.g. SL_DEBUG_CHECKS
+    # Set to True to check consistency between output_symbol.shape and
+    # output_format.shape at runtime.
+    DEBUG_check_output_shape = False
 
     def __init__(self, input_nodes, output_symbol, output_format):
         '''
@@ -74,10 +82,37 @@ class Node(object):
         self.output_format = output_format
         self.output_symbol = output_symbol
 
+        if self.DEBUG_check_output_shape:
+            assert_op = theano.tensor.opt.Assert(
+                "Expected shape " + str(self.output_format.shape))
+            eq_op = theano.tensor.eq
+
+            # Checks ndims
+            self.output_symbol = assert_op(self.output_symbol,
+                                           eq_op(self.output_symbol.ndim,
+                                                 len(self.output_format.axes)))
+
+            if self.output_format.dtype is not None:
+                # Checks dtype
+                self.output_symbol = assert_op(
+                    self.output_symbol,
+                    eq_op(str(self.output_symbol.dtype),
+                          str(self.output_format.dtype)))
+
+            # Checks sizes of non-batch axes
+            for i in range(len(self.output_format.axes)):
+                if self.output_format.axes[i] != 'b' or \
+                   self.output_format.shape[i] != -1:
+
+                    self.output_symbol = \
+                        assert_op(self.output_symbol,
+                                  eq_op(self.output_symbol.shape[i],
+                                        self.output_format.shape[i]))
+
 
 class FormatNode(Node):
     '''
-    A node that just performs a format conversion.
+    A node that converts from one DenseFormat to another.
     '''
     def __init__(self, input_node, output_format, axis_map):
         input_symbol = input_node.output_symbol
@@ -90,6 +125,25 @@ class FormatNode(Node):
                                          output_symbol,
                                          output_format)
 
+
+class CastNode(Node):
+    '''
+    A node that casts the input dtype to another.
+    '''
+    def __init__(self, input_node, output_dtype):
+        # if output_dtype == 'floatX':
+        #     output_dtype = theano.config.floatX
+
+        # output_dtype = numpy.dtype(output_dtype)
+        output_symbol = theano.tensor.cast(input_node.output_symbol,
+                                           str(output_dtype))
+
+        output_format = copy.deepcopy(input_node.output_format)
+        output_format.dtype = output_dtype
+
+        super(CastNode, self).__init__(input_node,
+                                       output_symbol,
+                                       output_format)
 
 class InputNode(Node):
     """
@@ -111,7 +165,7 @@ class InputNode(Node):
                                         output_format=fmt)
 
 
-class RescaleImage(Node):
+class RescaleImage(Node):  # TODO: rename to be a noun
     '''
     Converts a int image to a floating-point image.
     Remaps pixel value range from [0, 255] to [0.0, 1.0].
@@ -168,18 +222,43 @@ class Function1dTo1d(Node):
     """
 
     @staticmethod
-    def _get_bf_shape(fmt):
+    def _get_bf_shape(input_format, input_to_bf_map):
         """
         Returns the shape of an equivalent format with ('b', 'f') axes.
 
-        Does this by collapsing all axes other than 'b' into a single axis 'f'.
+        The shape is (-1, N), where N is the product of all input axes that
+        input_to_bf_map maps to 'f'. If input_to_bf_map is omitted, N is
+        the product of all input axes other than 'b'.
         """
+        assert_is_instance(input_to_bf_map, dict)  # no Nones allowed
 
-        non_b_sizes = [fmt.shape[fmt.axes.index(a)]
-                       for a in fmt.axes if a != 'b']
-        f_size = 1 if len(non_b_sizes) == 0 else numpy.prod(non_b_sizes)
-        b_size = fmt.shape[fmt.axes.index('b')]
-        return (b_size, f_size)
+        # No duplicate values
+        assert_equal(len(frozenset(input_to_bf_map.itervalues())),
+                     len(input_to_bf_map))
+
+        bf_to_input_map = dict()
+        for key, value in input_to_bf_map.iteritems():
+            bf_to_input_map[value] = key
+
+        if 'f' not in bf_to_input_map:
+            # Return input 'f' axis' size unchanged.
+            f_index = input_format.axes.index('f')
+            return (-1, input_format.shape[f_index])
+        else:
+            # Return the product of sizes of axes mapped to 'f'.
+            axes_mapped_to_f = bf_to_input_map['f']
+            if isinstance(axes_mapped_to_f, basestring):
+                axes_mapped_to_f = (axes_mapped_to_f, )
+
+            # This would be complicated to code around, and is probably
+            # user error anyway.
+            assert_not_in('b', axes_mapped_to_f)
+
+            dims_mapped_to_f = \
+                [input_format.shape[input_format.axes.index(a)]
+                 for a in axes_mapped_to_f]
+
+            return (-1, numpy.prod(dims_mapped_to_f))
 
     def __init__(self,
                  input_node,
@@ -231,17 +310,7 @@ class Function1dTo1d(Node):
         assert_in('b', output_axes)
 
         #
-        # Creates equivalent bf format to input format.
-        #
-
-        get_bf_shape = Function1dTo1d._get_bf_shape
-
-        input_bf_format = DenseFormat(axes=('b', 'f'),
-                                      shape=get_bf_shape(input_format),
-                                      dtype=input_format.dtype)
-
-        #
-        # Creates axis mappings to and from input_bf_format
+        # Creates axis mappings to and from ('b', 'f') format
         #
 
         if input_to_bf_map is None:
@@ -249,8 +318,8 @@ class Function1dTo1d(Node):
             if len(input_non_b_axes) == 0:
                 input_to_bf_map = {'b': ('b', 'f')}
             else:
-                input_to_bf_map = {input_non_b_axes: 'f',
-                                   'b': 'b'}
+                input_to_bf_map = {'b': 'b',
+                                   input_non_b_axes: 'f'}
 
         if bf_to_output_map is None:
             output_non_b_axes = tuple(a for a in output_format.axes
@@ -258,20 +327,39 @@ class Function1dTo1d(Node):
             if len(output_non_b_axes) == 0:
                 bf_to_output_map = {('b', 'f'): 'b'}
             else:
-                bf_to_output_map = {'f': output_non_b_axes,
-                                    'b': 'b'}
+                bf_to_output_map = {'b': 'b',
+                                    'f': output_non_b_axes}
 
-        input_to_bf_node = FormatNode(input_node,
-                                      input_bf_format,
-                                      input_to_bf_map)
+        #
+        # Creates equivalent bf format to input format.
+        #
+
+        get_bf_shape = Function1dTo1d._get_bf_shape
+
+        input_bf_format = DenseFormat(axes=('b', 'f'),
+                                      shape=get_bf_shape(input_format,
+                                                         input_to_bf_map),
+                                      dtype=input_format.dtype)
+
+        input_bf_node = FormatNode(input_node,
+                                   input_bf_format,
+                                   input_to_bf_map)
 
         # format to output format
+        output_to_bf_map = None
+        if bf_to_output_map is not None:
+            output_to_bf_map = dict()
+            for key, value in bf_to_output_map.iteritems():
+                output_to_bf_map[value] = key
+
         output_bf_format = DenseFormat(axes=('b', 'f'),
-                                       shape=get_bf_shape(output_format),
+                                       shape=get_bf_shape(output_format,
+                                                          output_to_bf_map),
                                        dtype=output_format.dtype)
 
         # compute function of feature vectors
-        output_bf_node = self._get_output_bf_node(input_to_bf_node,
+        output_bf_node = self._get_output_bf_node(input_bf_node,
+                                                  input_bf_format,
                                                   output_bf_format)
 
         assert_is_instance(output_bf_node, Node)
@@ -286,6 +374,7 @@ class Function1dTo1d(Node):
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
         '''
         Returns a Node that takes input with axes=('b', 'f'), and
@@ -300,23 +389,34 @@ class Linear(Function1dTo1d):
     Applies a linear transformation to the input.
     '''
 
-    def __init__(self, input_node, output_format):
+    def __init__(self, input_node, output_format, **kwargs):
         get_bf_shape = Function1dTo1d._get_bf_shape
 
-        num_input_features = get_bf_shape(input_node.output_format)[1]
-        num_output_features = get_bf_shape(output_format)[1]
+        # set in _get_output_bf_node()
+        self.params = None
 
-        params = numpy.zeros((num_input_features, num_output_features),
-                             dtype=input_node.output_symbol.dtype)
-        self.params = theano.shared(params)
-
-        super(Linear, self).__init__(input_node, output_format)
+        super(Linear, self).__init__(input_node, output_format, **kwargs)
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
+        assert_is(self.params, None)
+
+        params = numpy.zeros((input_bf_format.shape[1],
+                              output_bf_format.shape[1]),
+                             dtype=input_bf_node.output_symbol.dtype)
+        self.params = theano.shared(params)
         output_symbol = theano.tensor.dot(input_bf_node.output_symbol,
                                           self.params)
+
+        if output_bf_format.dtype is None:
+            output_dtype = input_bf_node.output_symbol.dtype
+        else:
+            output_dtype = output_bf_format.dtype
+
+        output_symbol = theano.tensor.cast(output_symbol, str(output_dtype))
+
         return Node(input_bf_node, output_symbol, output_bf_format)
 
 
@@ -325,24 +425,34 @@ class Bias(Function1dTo1d):
     Adds a bias to the input.
     '''
 
-    def __init__(self, input_node, output_format):
-        get_bf_shape = Function1dTo1d._get_bf_shape
+    def __init__(self, input_node, output_format, **kwargs):
 
-        num_input_features = get_bf_shape(input_node.output_format)[1]
-        num_output_features = get_bf_shape(output_format)[1]
-
-        assert_equal(num_output_features, num_input_features)
-
-        params = numpy.zeros((1, num_output_features),
-                             dtype=input_node.output_symbol.dtype)
-
-        self.params = theano.shared(params, broadcastable=[True, False])
-        super(Bias, self).__init__(input_node, output_format)
+		# set in _get_output_bf_node()
+        self.params = None
+        super(Bias, self).__init__(input_node, output_format, **kwargs)
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
-        output_symbol = input_bf_node.output_symbol + self.params
+        assert_is(self.params, None)
+        assert_equal(input_bf_format.shape, output_bf_format.shape)
+
+        params = numpy.zeros(output_bf_format.shape[1],
+                             dtype=input_bf_node.output_symbol.dtype)
+
+        self.params = theano.shared(params)
+
+        output_symbol = (input_bf_node.output_symbol +
+                         self.params.dimshuffle('x', 0))  # reshapes N to 1xN
+
+        if output_bf_format.dtype is None:
+            output_dtype = input_bf_node.output_symbol.dtype
+        else:
+            output_dtype = output_bf_format.dtype
+
+        output_symbol = theano.tensor.cast(output_symbol, str(output_dtype))
+
         return Node(input_bf_node, output_symbol, output_bf_format)
 
 
@@ -351,24 +461,19 @@ class AffineTransform(Function1dTo1d):
     Implements dot(X, M) + B (multiplying by a matrix, then adding a bias)
     '''
 
-    def __init__(self,
-                 input_node,
-                 output_format,
-                 input_to_bf_map=None,
-                 bf_to_output_map=None):
+    def __init__(self, input_node, output_format, **kwargs):
         super(AffineTransform, self).__init__(input_node,
                                               output_format,
-                                              input_to_bf_map,
-                                              bf_to_output_map)
+                                              **kwargs)
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
         self.linear_node = Linear(input_bf_node, output_bf_format)
 
         # bias node's output format is the same as its input format
-        self.bias_node = Bias(self.linear_node,
-                              output_format=output_bf_format)
+        self.bias_node = Bias(self.linear_node, output_bf_format)
 
         return self.bias_node
 
@@ -406,8 +511,6 @@ def _make_bc01_format_node(i_node, i_to_bc01_axis_map):
     else:
         # keys are all strings (as opposed to tuples of strings)
         assert_all_is_instance(i_to_bc01_axis_map.iterkeys(), basestring)
-        # for key in i_to_bc01_axis_map.iterkeys():
-        #     assert_is_instance(key, basestring)
 
         # values are some permutation of bc01_axes
         assert_equal(set(i_to_bc01_axis_map.itervalues()),
@@ -433,12 +536,47 @@ def _make_bc01_format_node(i_node, i_to_bc01_axis_map):
     return FormatNode(i_node, bc01_format, i_to_bc01_axis_map)
 
 
+def _get_pads(pad_arg, image_shape, window_shape, strides):
+    '''
+    Converts pad argument to an ndarray of two ints.
+    '''
+    _assert_is_shape2d(image_shape)
+    _assert_is_shape2d(window_shape)
+    _assert_is_shape2d(strides)
+
+    image_shape = numpy.asarray(image_shape)
+    window_shape = numpy.asarray(window_shape)
+    strides = numpy.asarray(strides)
+
+    if pad_arg == 'valid':
+        pads = [0, 0]
+    elif pad_arg == 'full':
+        pads = window_shape - 1
+    elif pad_arg == 'same_shape':
+        for window_size in window_shape:
+            assert_equal(window_size % 2,
+                         1,
+                         "when pad_arg = 'same_shape', window_shape must have "
+                         "only odd numbers. Instead, got %s." %
+                         str(window_shape))
+        pads = window_shape // 2
+    elif pad_arg == 'min':
+        pads = numpy.ceil((image_shape - window_shape) % strides / 2.0)
+        pads = numpy.cast[int](pads)
+    elif isinstance(pad_arg, basestring):
+        raise ValueError("Unrecognized pad_arg value '%s'" % pad_arg)
+    else:
+        _assert_is_shape2d(pad_arg)
+        pads = pad_arg
+
+    return tuple(pads)
+
 def _make_bc01_output_format(bc01_input_format,
                              strides,
                              window_shape,
                              num_filters,
                              pad):
-    '''
+    """
     Constructs an appropriately-sized output format for a convolution-like
     operator.
 
@@ -454,9 +592,16 @@ def _make_bc01_output_format(bc01_input_format,
 
     Returns
     -------
-    rval: DenseFormat
-      Output format of this Conv2D node.
-    '''
+    rval: tuple
+      (fmt, pads), where
+        fmt: a DenseFormat
+          Output format of this Conv2D node.
+        pads: str, or tuple
+          A suitable padding argument to pass to Theano's dnn_conv or dnn_pool.
+          If pad was 'valid' or 'full', it's returned as-is to take advantage
+          of Theano's efficient special-casing of those values. Otherwise
+          this will be two ints, the row and column pad amounts.
+    """
 
     assert_equal(bc01_input_format.axes, ('b', 'c', '0', '1'))
     assert_equal(bc01_input_format.shape[0], -1)
@@ -469,33 +614,12 @@ def _make_bc01_output_format(bc01_input_format,
                                    strides,
                                    window_shape))
 
-    def get_pads(pad):
-        '''
-        Converts pad argument to an ndarray of two ints.
-        '''
-        if pad == 'valid':
-            pads = [0, 0]
-        elif pad == 'full':
-            pads = window_shape - 1
-        elif pad == 'same_shape':
-            for window_size in window_shape:
-                assert_equal(window_size % 2,
-                             1,
-                             "when pad = 'same_shape', window_shape must have "
-                             "only odd numbers. Instead, got %s." %
-                             str(window_shape))
-            pads = window_shape // 2
-        elif isinstance(pad, basestring):
-            raise ValueError("Unrecognized pad value '%s'" % pad)
-        else:
-            _assert_is_shape2d(pad)
-            pads = pad
+    pad_pair = _get_pads(pad_arg=pad,
+                         image_shape=i_img_shape,
+                         window_shape=window_shape,
+                         strides=strides)
 
-        return numpy.asarray(pads)
-
-    pads = get_pads(pad)
-
-    padded_input_shape = i_img_shape + pads * 2
+    padded_input_shape = i_img_shape + numpy.asarray(pad_pair) * 2
     o_img_shape = (padded_input_shape - window_shape + 1 - 1) // strides + 1
 
     # Confirm that output sizes work out to be the predicted sizes from
@@ -512,19 +636,21 @@ def _make_bc01_output_format(bc01_input_format,
             elif pad == 'same_shape':
                 assert_equal(o_img_size, i_img_size)
 
-    return DenseFormat(axes=('b', 'c', '0', '1'),
-                       shape=(-1,
-                              num_filters,
-                              o_img_shape[0],
-                              o_img_shape[1]),
-                       dtype=theano.config.floatX)
+    output_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                                shape=(-1,
+                                       num_filters,
+                                       o_img_shape[0],
+                                       o_img_shape[1]),
+                                dtype=theano.config.floatX)
+
+    return output_format
 
 class Conv2D(Node):
     '''
     Returns a convolution over 2D space.
 
-    The output axis format is ('b', 'c', '0', '1'), or batch, channel, row,
-    column. Output dtype is theano.config.floatX.
+    The output axis order is batch-channel-row-column ('b', 'c', '0', '1').
+    Output dtype is theano.config.floatX.
 
     The input may be in any 4D DenseFormat. This will internally be converted
     to the above axis ordering and dtype.
@@ -555,6 +681,9 @@ class Conv2D(Node):
                    output_shape: input_shape - filter_shape + 1
           'full': maximal zero-padding.
                   output_shape: input_shape + filter_shape + 1
+          'min': minimal zero-padding.
+                 Just enough padding to ensure that all input pixels get used
+                 in the output.
           'same_shape': (cuDNN only) Enough padding to preserve image shape.
                        output_shape = input_shape.
           (R, C): (cuDNN only) Pad rows and columns by this many zeros on each
@@ -611,11 +740,13 @@ class Conv2D(Node):
             assert_is_instance(axis_map, dict)
             # axis_map = get_full_axis_map(axis_map)
 
-        if not dnn_available():
-            assert_equal(len(kwargs), 0,
-                         "cuDNN implementation does not accept kwargs. Switch "
-                         "to default Theano implementation using Theano "
-                         "config option 'optimizer_excluding=conv_dnn'")
+        if dnn_available():
+            dnn_kwargs = {'conv_mode'}
+            assert_equal(len(set(kwargs.keys()) - dnn_kwargs), 0,
+                         "cuDNN implementation does not accept kwargs other "
+                         "than {}. Switch to default Theano implementation "
+                         "using Theano config option "
+                         "'optimizer_excluding=conv_dnn'".format(dnn_kwargs))
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
@@ -635,8 +766,7 @@ class Conv2D(Node):
 
 
         def make_output_symbol(t_node, filters, pads, strides):
-            if not isinstance(pads, basestring):
-                pads = tuple(pads)
+            assert_is_instance(pads, (basestring, tuple))
 
             strides = tuple(strides)
 
@@ -646,8 +776,7 @@ class Conv2D(Node):
                                 kerns=filters,
                                 border_mode=pads,
                                 subsample=strides,
-                                # don't flip filters
-                                conv_mode='cross')
+                                conv_mode=kwargs.get('conv_mode', 'conv'))
             else:
                 image_shape = list(copy.deepcopy(t_node.output_format.shape))
                 assert_equal(image_shape[0], -1)
@@ -658,11 +787,22 @@ class Conv2D(Node):
                 return conv2d(input=t_node.output_symbol,
                               filters=filters,
                               image_shape=image_shape,
-                              filter_shape=filters.get_value().shape,
+                              filter_shape=filters.get_value().shape,  # sic
                               border_mode=pads,
                               subsample=strides,
                               **kwargs)  # pylint: disable=star-args
 
+
+        if pads not in ('valid', 'full'):
+            pads = _get_pads(pads,
+                             image_shape=output_format.shape[2:],
+                             window_shape=filter_shape,
+                             strides=strides)
+
+            assert_true((numpy.asarray(pads) <
+                         numpy.asarray(filter_shape)).all(),
+                        ("Not all pads {} were smaller than the "
+                         "filter_shape {}").format(pads, filter_shape))
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
@@ -672,13 +812,27 @@ class Conv2D(Node):
         super(Conv2D, self).__init__([input_node], output, output_format)
 
 
+# TODO: Add unit tests to make sure that the pad is being handled correctly.
+#       Confirm that:
+#
+#       1) DONE:cuDNN pads with -inf when max-pooling, and 0 when mean-pooling?
+#       2) The 'min' padding mode works as expected
+#       3) the 'pylearn2' padding mode works as expected.
+#       4) all cases work fine even when (strides > window_shape).any()
+# 2) and 3) can be tested with 7x7 input, 4x4 pool window, and 2x2 pool stride.
+# Both 'min' and 'pylearn2' should produce a 3x3 output, wheras pad='valid'
+# would produce a 2x2 output.
+#
+# Fill the first row of input with -5, the last with -6, and the middle with
+# -10. When using 'min', the output pool should be
 class Pool2D(Node):
 
     def __init__(self,
                  input_node,
                  window_shape,
                  strides,
-                 mode=None,
+                 mode,
+                 pad,
                  axis_map=None):
         '''
         cuDNN spatial pooling over image maps.
@@ -697,6 +851,22 @@ class Pool2D(Node):
         mode: str
           'max' or 'average' (default: 'max')
 
+        pad: string or Sequence
+          Either a pair of ints, or one of the following strings:
+            'valid': zero padding
+            'full': maximal padding
+            'min': minimal padding needed to ensure that all input pixels find
+                   themselves in some pooling window.
+            'same_size': Enough padding to preserve size.
+                         Requires odd-numbered rows and cols in window_shape.
+            'pylearn2': Similar in intent to 'min', except this is how
+                        pylearn2.mlp.ConvElemwise does it. It adds padding to
+                        the far end of the input (maximal rows and columns), as
+                        much as is needed to ensure that all input pixels
+                        affect the pool output. This is different from 'min',
+                        which adds this padding to both sides of the input
+                        image.
+
         axis_map: dict
           Maps the axis names in input_node.output_format.axes to
           'b', 'c', '0', and '1' (batch, channel, row, column).
@@ -708,26 +878,101 @@ class Pool2D(Node):
         _assert_is_shape2d(strides)
         assert_in(mode, ('max', 'average'))
 
-
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
-        output_format = _make_bc01_output_format(
-            input_format_node.output_format,
-            strides,
-            window_shape,
-            input_format_node.output_format.shape[1],  # num channels unchanged
-            (0, 0))  # dnn_pool always uses zero padding
+        if pad != 'pylearn2':
+            output_format = _make_bc01_output_format(
+                bc01_input_format=input_format_node.output_format,
+                strides=strides,
+                window_shape=window_shape,
+                num_filters=input_format_node.output_format.shape[1],
+                pad=pad)
 
-        output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
-            img=input_format_node.output_symbol,
-            ws=tuple(window_shape),
-            stride=tuple(strides),
-            mode=mode)
+            image_shape = input_format_node.output_format.shape[2:]
 
-        super(Pool2D, self).__init__([input_node],
-                                     output_symbol,
-                                     output_format)
+            pads = _get_pads(pad,
+                             image_shape=image_shape,
+                             window_shape=window_shape,
+                             strides=strides)
 
+            # Make sure pads are smaller than the corresponding window_shape
+            # dimension.
+            assert_true((numpy.asarray(pads) <
+                         numpy.asarray(window_shape)).all(),
+                        ("Not all pads {} were smaller than the "
+                         "window_shape {}").format(pads, window_shape))
+
+            output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
+                img=input_format_node.output_symbol,
+                ws=tuple(window_shape),
+                stride=tuple(strides),
+                mode=mode,
+                pad=pads)
+
+            super(Pool2D, self).__init__([input_node],
+                                         output_symbol,
+                                         output_format)
+
+        else:
+            input_format_shape = input_format_node.output_format.shape
+            image_shape = numpy.asarray(input_format_shape[2:])
+            window_shape = numpy.asarray(window_shape)
+            strides = numpy.asarray(strides)
+            overflow = ((image_shape - window_shape) + 1 - 1) % strides
+            single_sided_pads = strides - overflow
+            single_sided_pads[single_sided_pads == strides] = 0
+
+            # Make sure pads are smaller than the corresponding window_shape
+            # dimension.
+            assert_true((numpy.asarray(single_sided_pads) <
+                         numpy.asarray(window_shape)).all(),
+                        ("Not all pads {} were smaller than the "
+                         "window_shape {}").format(single_sided_pads,
+                                                   window_shape))
+
+            bc01_symbol = input_format_node.output_symbol
+            T = theano.tensor
+            floatX = theano.config.floatX
+            padded_image = T.alloc(T.constant(-numpy.inf
+                                              if mode == 'max'
+                                              else 0,
+                                              dtype=floatX),
+                                   bc01_symbol.shape[0],
+                                   bc01_symbol.shape[1],
+                                   bc01_symbol.shape[2] + single_sided_pads[0],
+                                   bc01_symbol.shape[3] + single_sided_pads[1])
+
+            padded_image = T.set_subtensor(padded_image[:,
+                                                        :,
+                                                        :bc01_symbol.shape[2],
+                                                        :bc01_symbol.shape[3]],
+                                           bc01_symbol)
+
+            self.DEBUG_padded_image_symbol = padded_image
+
+            output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
+                img=padded_image,
+                ws=tuple(window_shape),
+                stride=tuple(strides),
+                mode=mode,
+                pad=(0, 0))
+
+            bc01_shape = input_format_node.output_format.shape
+            padded_image_shape = (numpy.asarray(bc01_shape[2:]) +
+                                  single_sided_pads)
+
+            output_image_shape = ((padded_image_shape - window_shape) //
+                                  strides) + 1
+            output_format = DenseFormat(axes=('b', 'c', '0', '1'),
+                                        shape=(bc01_shape[0],
+                                               bc01_shape[1],
+                                               output_image_shape[0],
+                                               output_image_shape[1]),
+                                        dtype=floatX)
+
+            super(Pool2D, self).__init__([input_node],
+                                         output_symbol,
+                                         output_format)
 
 class Softmax(Function1dTo1d):
     '''
@@ -748,7 +993,10 @@ class Softmax(Function1dTo1d):
                                       input_to_bf_map,
                                       bf_to_output_map)
 
-    def _get_output_bf_node(self, input_bf_node, output_bf_format):
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            input_bf_format,
+                            output_bf_format):
         softmaxes = theano.tensor.nnet.softmax(input_bf_node.output_symbol)
         return Node(input_bf_node, softmaxes, output_bf_format)
 
@@ -761,9 +1009,15 @@ class ReLU(Node):
     '''
     def __init__(self, input_node):
         input_symbol = input_node.output_symbol
-        output_symbol = theano.tensor.switch(input_symbol > 0.0,
-                                             input_symbol,
-                                             0.0)
+        # As in pylearn2/models/mlp.py, which uses:
+        # "linear_response * (linear_response > 0.) + self.left_slope * \
+        #  linear_response * (linear_response < 0.)"
+        output_symbol = input_symbol * (input_symbol > 0.0)
+
+        assert_equal(output_symbol.dtype, input_symbol.dtype)
+        # output_symbol = theano.tensor.switch(input_symbol > 0.0,
+        #                                      input_symbol,
+        #                                      0.0)
         super(ReLU, self).__init__([input_node],
                                    output_symbol,
                                    input_node.output_format)
@@ -829,6 +1083,129 @@ class Dropout(Node):
         super(Dropout, self).__init__([input_node],
                                       output_symbol,
                                       input_node.output_format)
+
+
+class AffineLayer(Function1dTo1d):
+    '''
+    A sequence of affine -> ReLU.
+    '''
+
+    def __init__(self,
+                 input_node,
+                 output_format,
+                 input_to_bf_map=None,
+                 bf_to_output_map=None):
+        '''
+        Parameters
+        ----------
+        See docs for simplelearn.nodes.AffineTransform constructor.
+        '''
+        super(AffineLayer, self).__init__(input_node,
+                                          output_format,
+                                          input_to_bf_map,
+                                          bf_to_output_map)
+
+
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            input_bf_format,
+                            output_bf_format):
+        self.affine_node = AffineTransform(input_bf_node, output_bf_format)
+        self.relu_node = ReLU(self.affine_node)
+        return self.relu_node
+
+
+class SoftmaxLayer(Function1dTo1d):
+    '''
+    A sequence of affine -> softmax
+    '''
+
+    def __init__(self,
+                 input_node,
+                 output_format,
+                 input_to_bf_map=None,
+                 bf_to_output_map=None):
+        super(SoftmaxLayer, self).__init__(input_node,
+                                           output_format,
+                                           input_to_bf_map,
+                                           bf_to_output_map)
+
+    def _get_output_bf_node(self,
+                            input_bf_node,
+                            input_bf_format,
+                            output_bf_format):
+        self.affine_node = AffineTransform(input_bf_node, output_bf_format)
+        self.softmax_node = Softmax(self.affine_node)
+        return self.softmax_node
+
+
+class Conv2DLayer(Node):
+    '''
+    A sequence of conv2d -> channel-wise bias -> ReLU -> pool2d
+    '''
+    def __init__(self,
+                 input_node,
+                 filter_shape,
+                 num_filters,
+                 conv_pads,
+                 pool_window_shape,
+                 pool_strides,
+                 pool_mode='max',
+                 pool_pads='min',
+                 filter_strides=(1, 1),
+                 channel_axis='c',
+                 axis_map=None,
+                 **kwargs):
+        '''
+        Parameters
+        ----------
+        input_node, filter_shape, num_filters, filter_strides, conv_pads,
+        axis_map, kwargs:
+          See equivalent arguments of simplelearn.nodes.Conv2D constructor.
+
+        pool_window_shape, pool_strides, pool_mode:
+          See equivalent arguments of simplelearn.nodes.Pool2D constructor.
+        '''
+        assert_in(channel_axis, input_node.output_format.axes)
+
+        self.conv2d_node = Conv2D(input_node,
+                                  filter_shape,
+                                  num_filters,
+                                  conv_pads,
+                                  strides=filter_strides,
+                                  axis_map=axis_map,
+                                  **kwargs)
+
+        # Implements channel-wise bias by collapsing non-channel axes into
+        # batch axes in the bias node. Bias node then adds a bias per
+        # channel, then reshapes output to original shape.
+
+        # TODO: replace this with a solution that doesn't involve a potentially
+        # expensive transpose? We just need to take a <num_channels>-sized
+        # bias vector, dimshuffle it to add singleton axes along other axes,
+        # then add it. No need to transpose an entire feature map.
+        non_channel_axes = tuple(axis for axis
+                                 in self.conv2d_node.output_format.axes
+                                 if axis != channel_axis)
+        self.bias_node = Bias(self.conv2d_node,
+                              output_format=self.conv2d_node.output_format,
+                              input_to_bf_map={non_channel_axes: 'b',
+                                               channel_axis: 'f'},
+                              bf_to_output_map={'b': non_channel_axes,
+                                                'f': channel_axis})
+        assert_equal(self.bias_node.params.get_value().shape, (num_filters, ))
+
+        self.relu_node = ReLU(self.bias_node)
+        self.pool2d_node = Pool2D(input_node=self.relu_node,
+                                  window_shape=pool_window_shape,
+                                  strides=pool_strides,
+                                  mode=pool_mode,
+                                  pad=pool_pads)
+
+        super(Conv2DLayer, self).__init__([input_node],
+                                          self.pool2d_node.output_symbol,
+                                          self.pool2d_node.output_format)
+
 
 def _normal_distribution_pdf(inputs, mean, covariance):
     '''
@@ -963,7 +1340,6 @@ class Lcn(Node):
             assert_equal(node.output_format.axes, bc01)
 
             shape = node.output_format.shape
-            bc_size = numpy.prod(shape[:2])
             fmt = DenseFormat(axes=bc01,
                               shape=(-1, 1, shape[2], shape[3]),
                               dtype=node.output_format.dtype)
@@ -1065,9 +1441,11 @@ class L2Loss(Node):
                                                 if axis != 'b'))
 
                 non_b_axes = tuple(axis for axis in fmt.axes if axis != 'b')
-                return DenseFormat(shape=(batch_size, feature_size),
-                                   axes=('b', 'f'),
-                                   dtype=fmt.dtype), non_b_axes
+
+                return (DenseFormat(shape=(batch_size, feature_size),
+                                    axes=('b', 'f'),
+                                    dtype=fmt.dtype),
+                        non_b_axes)
 
             bf_format, non_b_axes = make_bf_format(node.output_format)
             axis_map = {'b': 'b',
@@ -1127,7 +1505,7 @@ class Misclassification(Node):
         assert_equal(softmax_node.output_format.axes, ('b', 'f'))
         assert_in(target_node.output_format.axes, (('b', 'f'), ('b', )))
         assert_integer(target_node.output_symbol)
-        assert_is_instance(softmax_node, Softmax)
+        assert_is_instance(softmax_node, (Softmax, SoftmaxLayer))
 
         # If targets are one-hot vectors, convert them to target indices
         if len(target_node.output_format.axes) == 2:

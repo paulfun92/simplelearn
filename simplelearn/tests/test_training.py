@@ -224,7 +224,7 @@ def test_limit_param_norms():
                                               #            print_cost])
         # weight_monitor = WeightMonitor(weights, [print_weight_norm])
 
-        sgd = Sgd(inputs=[node.output_symbol for node in input_nodes],
+        sgd = Sgd(inputs=input_nodes,
                   input_iterator=training_iterator,
                   parameters=[weights],
                   parameter_updaters=[param_updater],

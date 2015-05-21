@@ -20,7 +20,7 @@ def _get_data_path():
         raise RuntimeError("Environment variable %s not "
                            "defined." % env_variable)
 
-    result = os.environ[env_variable]
+    result = os.path.abspath(os.environ[env_variable])
 
     if not os.path.isdir(result):
         raise RuntimeError("Couldn't find %s directory "
@@ -148,6 +148,8 @@ class DummyIterator(DataIterator):
     def _next(self):
         return ()
 
+    def make_input_nodes(self):
+        return ()
 
 class ConvertingIterator(DataIterator):
     '''

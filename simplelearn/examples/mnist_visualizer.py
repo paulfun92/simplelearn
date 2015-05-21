@@ -1,4 +1,13 @@
 #! /usr/bin/env python
+'''
+A script that takes a model trained by mnist_fully_connected.py and
+optimizes the output label with respect to the input image.
+
+Interestingly, this only works well if we normalize the input image's
+pixel range from [0, 255] to [0, 1], even though we didn't do that
+during training.
+'''
+
 
 import sys
 import argparse
@@ -14,7 +23,11 @@ from nose.tools import (assert_greater,
 from simplelearn.io import SerializableModel
 from simplelearn.data import DummyIterator
 from simplelearn.data.mnist import load_mnist
-from simplelearn.nodes import Softmax, RescaleImage, InputNode, CrossEntropy
+from simplelearn.nodes import (Softmax,
+                               CastNode,
+                               RescaleImage,
+                               InputNode,
+                               CrossEntropy)
 from simplelearn.training import Sgd, SgdParameterUpdater, LimitsNumEpochs
 from simplelearn.utils import safe_izip
 
@@ -99,21 +112,20 @@ def main():
         the RescaleImage node if found.
         '''
         assert_equal(len(output_node.inputs), 1)
-        while not isinstance(output_node, RescaleImage):
+        while not isinstance(output_node, (CastNode, RescaleImage)):
             if isinstance(output_node, InputNode):
-                raise RuntimeError("Expected model to contain a RescaleImage "
-                                   "node, but didn't find one.")
+                raise RuntimeError("Expected model to contain a CastNode or "
+                                   "RescaleImage node, but didn't find one.")
             output_node = output_node.inputs[0]
 
         return output_node
 
     input_float_node = get_input_float_node(output_node)
 
-    # mnist_train = load_mnist()['test']
-    mnist_train = load_mnist()[1]
-    mnist_train_iterator = mnist_train.iterator(iterator_type='sequential',
-                                                batch_size=1)
-    label_node = mnist_train_iterator.make_input_nodes()[1]
+    mnist_test = load_mnist()[1]
+    mnist_test_iterator = mnist_test.iterator(iterator_type='sequential',
+                                              batch_size=1)
+    label_node = mnist_test_iterator.make_input_nodes()[1]
 
     cross_entropy = CrossEntropy(output_node, label_node)
 
@@ -186,6 +198,13 @@ def main():
 
     def update_display(uint8_image, target_label):
         float_image = get_float_image(uint8_image)
+
+        # Normalize the input range from [0, 255] to [0.0, 1.0], even
+        # though we didn't during training. If we don't do this here,
+        # the gradient descent is overpowered by the strength of the
+        # original signal, and doesn't make progress (comment out to see).
+        float_image /= 255.0
+
         normalize_images = False
         norm = (None if normalize_images
                 else matplotlib.colors.NoNorm())
@@ -200,13 +219,13 @@ def main():
 
     def on_key_press(event):
         if event.key == ' ':
-            update_display(*mnist_train_iterator.next())
+            update_display(*mnist_test_iterator.next())
         elif event.key == 'q':
             sys.exit(0)
 
     figure.canvas.mpl_connect('key_press_event', on_key_press)
 
-    update_display(*mnist_train_iterator.next())
+    update_display(*mnist_test_iterator.next())
     pyplot.show()
 
 

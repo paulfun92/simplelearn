@@ -33,6 +33,7 @@ from simplelearn.utils import (assert_integer,
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip, check_is_subdtype
 from simplelearn.formats import Format
+from simplelearn.nodes import Node
 import pdb
 
 # pylint: disable=too-few-public-methods
@@ -138,14 +139,9 @@ class PicklesOnEpoch(EpochCallback):
         else:
             path, filename = os.path.split(filepath)
 
-        assert_true(os.path.isdir(path))
+        assert_true(os.path.isdir(path), "{} isn't a directory".format(path))
         assert_equal(os.path.splitext(filename)[1], '.pkl')
 
-        # if isinstance(objects, Sequence) and \
-        #    not isinstance(objects, basestring):
-        #     self.objects = objects
-        # else:
-        #     self.objects = [objects]
 
         self._objects_to_pickle = objects
         self._filepath = filepath
@@ -160,7 +156,7 @@ class PicklesOnEpoch(EpochCallback):
             filepath = self._filepath
         else:
             path, filename = os.path.split(self._filepath)
-            basename, extension = os.path.splitext(filename)
+            extension = os.path.splitext(filename)[1]
             filename = '%s_%05d%s' % (filename,
                                       self._num_epochs_seen,
                                       extension)
@@ -172,10 +168,6 @@ class PicklesOnEpoch(EpochCallback):
             cPickle.dump(self._objects_to_pickle,
                          pickle_file,
                          protocol=cPickle.HIGHEST_PROTOCOL)
-
-            # dill.dump(self._objects_to_pickle,
-            #           pickle_file,
-            #           protocol=cPickle.HIGHEST_PROTOCOL)
 
         self._num_epochs_seen += 1
 
@@ -193,7 +185,7 @@ class ValidationCallback(EpochCallback):
           Symbols for the outputs of the input_iterator.
 
         input_iterator: simplelearn.data.DataIterator
-          Yields tuples of training set batches, such as (values, labels).
+          Yields tuples of validation set batches, such as (values, labels).
 
         monitors: sequence of Monitors.
           These are also used as epoch callbacks.
@@ -629,6 +621,9 @@ class SumMonitor(ReduceMonitor):
         # that they don't raise a stink about batch/tally dtypes being
         # different from the format's expected dtype.
         def remove_small_int_dtype(fmt):
+            '''
+            Return a copy of fmt, with dtype=None if orig. dtype was small int.
+            '''
             if fmt.dtype is not None and numpy.issubdtype(fmt.dtype,
                                                           numpy.integer):
                 result = copy.deepcopy(fmt)
@@ -646,8 +641,12 @@ class SumMonitor(ReduceMonitor):
 
     def _reduce_batch(self, input_batch, batch_axis):
 
-        # Lower risk of integer over/underflow (esp. if dtype is uint8)
         def upcast_if_integer(input_batch):
+            '''
+            Cast to int64 iff input_batch.dtype is an integral dtype.
+
+            Lowers the risk of integer over/underflow (esp. if dtype is uint8).
+            '''
             if numpy.issubdtype(input_batch.dtype, numpy.integer):
                 return numpy.cast['int64'](input_batch)
             else:
@@ -706,11 +705,15 @@ class SavesAtMinimum(object):
     '''
 
     def __init__(self, object_to_save, output_filepath):
-        def check_path(path):
-            abspath = os.path.abspath(path)
+        '''
+        Parameters
+        ----------
+        object_to_save: A picklable object
 
-        check_path(output_filepath)
-
+        output_filepath: string
+          The file path to save object_to_save to.
+        '''
+        assert_true(os.path.isdir(os.path.dirname(output_filepath)))
 
         self._object_to_save = object_to_save
         self._output_filepath = output_filepath
@@ -1022,8 +1025,9 @@ class Sgd(object):
         Parameters
         ----------
 
-        inputs: sequence of theano.gof.Variables
+        inputs: sequence of Nodes.
           Symbols for the outputs of the input_iterator.
+          These should come from input_iterator.make_input_nodes()
 
         input_iterator: simplelearn.data.DataIterator
           Yields tuples of training set batches, such as (values, labels).
@@ -1054,11 +1058,16 @@ class Sgd(object):
         #
 
         assert_is_instance(inputs, Sequence)
-        for input_symbol in inputs:
-            assert_is_instance(input_symbol, theano.gof.Variable)
+        for input in inputs:
+            assert_is_instance(input, Node)
 
         assert_is_instance(input_iterator, DataIterator)
         assert_true(input_iterator.next_is_new_epoch())
+
+        for (input,
+             iterator_input) in safe_izip(inputs,
+                                          input_iterator.make_input_nodes()):
+            assert_equal(input.output_format, iterator_input.output_format)
 
         assert_is_instance(parameters, Sequence)
         assert_is_instance(parameter_updaters, Sequence)
@@ -1093,11 +1102,12 @@ class Sgd(object):
         self._parameter_updaters = tuple(parameter_updaters)
         self._monitors = tuple(monitors)
 
-        self._compile_update_function_args={
-            'inputs': inputs,
-            'monitors': self._monitors,
-            'parameter_updaters': self._parameter_updaters,
-            'theano_function_mode': theano_function_mode}
+        input_symbols = [i.output_symbol for i in inputs]
+        self._compile_update_function_args = \
+            {'input_symbols': input_symbols,
+             'monitors': self._monitors,
+             'parameter_updaters': self._parameter_updaters,
+             'theano_function_mode': theano_function_mode}
 
         self._update_function = self._compile_update_function(
             **self._compile_update_function_args)
@@ -1116,7 +1126,7 @@ class Sgd(object):
         self._train_called = False
 
     @staticmethod
-    def _compile_update_function(inputs,
+    def _compile_update_function(input_symbols,
                                  monitors,
                                  parameter_updaters,
                                  theano_function_mode):
@@ -1124,17 +1134,17 @@ class Sgd(object):
         Compiles the function that computes the monitored values.
         '''
 
-        outputs = []
+        output_symbols = []
         for monitor in monitors:
-            outputs.extend(monitor.monitored_values)
+            output_symbols.extend(monitor.monitored_values)
 
         updates = OrderedDict()
         for updater in parameter_updaters:
             assert_is_instance(updater.updates, OrderedDict)
             updates.update(updater.updates)
 
-        return theano.function(inputs,
-                               outputs,
+        return theano.function(input_symbols,
+                               output_symbols,
                                updates=updates,
                                mode=theano_function_mode)
 
@@ -1167,6 +1177,11 @@ class Sgd(object):
                                "Please add an EpochCallback or "
                                "Monitor that will throw a "
                                "StopTraining exception at some point.")
+
+        #
+        # End sanity checks
+        #
+
         try:
             all_callbacks = self._monitors + tuple(self.epoch_callbacks)
             for callback in all_callbacks:

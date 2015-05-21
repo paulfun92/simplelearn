@@ -16,10 +16,12 @@ from simplelearn.data.h5_dataset import (make_h5_file,
 
 import pdb
 
+
 def _get_norb_dir(which_norb):
     assert_in(which_norb, ('small', 'big'))
     return os.path.join(simplelearn.data.data_path,
                         '{}_norb'.format(which_norb))
+
 
 def _get_partition_sizes(which_norb):
     assert_in(which_norb, ('small', 'big'))
@@ -35,6 +37,7 @@ def _get_partition_sizes(which_norb):
 
     return (num_train_files * examples_per_file,
             num_test_files * examples_per_file)
+
 
 def _get_tensor_formats(which_norb):
     assert_in(which_norb, ('small', 'big'))
@@ -276,9 +279,9 @@ def _get_official_norb_cache_path(which_norb):
                 url = url_root + 'norb-v1.0{}/{}'.format(
                     '' if which_norb == 'big' else '-small',
                     gz_filename)
-                # url = 'http://www.cs.nyu.edu/~ylclab/data/norb-v1.0{}/{}'.format(
-                #        + gz_filename)
+
                 gz_path = os.path.join(originals_dir, gz_filename)
+
                 try:
                     download_url(url,
                                  local_filepath=gz_path,
@@ -300,7 +303,6 @@ def _get_official_norb_cache_path(which_norb):
             for gz_filename in gz_filenames:
                 actual_paths.append(os.path.join(originals_dir,
                                                  get_actual_path(gz_filename)))
-
 
         return actual_path_lists
 
@@ -339,7 +341,6 @@ def _get_official_norb_cache_path(which_norb):
                                                                dat_files,
                                                                info_files):
 
-
                     print("Caching {}".format(dat_file))
                     dat = _read_norb_file(dat_file)
                     index_range = slice(index, index + dat.shape[0])
@@ -365,13 +366,13 @@ def _get_official_norb_cache_path(which_norb):
     return h5_path
 
 
-def load_norb(norb_spec, partition=None):
+def load_norb(which_norb, partition=None):
     '''
     Returns one or all partitions in a NORB dataset.
 
     Parameters
     ----------
-    norb_spec: string
+    which_norb: string
       'big' for Big NORB, 'small' for Small NORB, or the path to a .h5 file
       for custom NORBs.
 
@@ -379,9 +380,9 @@ def load_norb(norb_spec, partition=None):
       Optional. If omitted, this returns all partitions in a tuple. If
       supplied, this returns just the named partition.
     '''
-    if norb_spec in ('big', 'small'):
-        h5_path = _get_official_norb_cache_path(norb_spec)
+    if which_norb in ('big', 'small'):
+        h5_path = _get_official_norb_cache_path(which_norb)
     else:
-        h5_path = norb_spec
+        h5_path = which_norb
 
     return load_h5_dataset(h5_path, partition)

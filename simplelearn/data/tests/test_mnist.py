@@ -5,6 +5,7 @@ nosetests for ../mnist.py
 import theano
 import numpy
 from numpy.testing import assert_allclose, assert_array_equal
+import nose
 from nose.tools import assert_equal, assert_true
 from simplelearn.formats import DenseFormat
 from simplelearn.data.mnist import load_mnist
@@ -13,6 +14,7 @@ from simplelearn.nodes import RescaleImage
 
 try:
     from pylearn2.datasets.mnist import MNIST as Pylearn2Mnist
+    from pylearn2.space import Conv2DSpace, IndexSpace, CompositeSpace
     PYLEARN2_IS_INSTALLED = True
 except ImportError:
     PYLEARN2_IS_INSTALLED = False
@@ -24,9 +26,7 @@ def test_mnist():
 
     Checks test & train sets' formats and sizes, but not content.
     '''
-    mnist_hdf = load_mnist()
-    train_set = mnist_hdf['train']
-    test_set = mnist_hdf['test']
+    train_set, test_set = load_mnist()
 
     for mnist, expected_size in safe_izip((train_set, test_set),
                                           (60000, 10000)):
@@ -63,11 +63,9 @@ def test_mnist_against_pylearn2():
     installed.
     '''
     if not PYLEARN2_IS_INSTALLED:
-        return
+        raise nose.SkipTest()
 
-    mnist_hdf = load_mnist()
-    train_set = mnist_hdf['train']
-    test_set = mnist_hdf['test']
+    train_set, test_set = load_mnist()
 
     simplelearn_datasets = (train_set, test_set)
     pylearn2_datasets = [Pylearn2Mnist(which_set=w) for w in ('train', 'test')]
@@ -96,13 +94,24 @@ def test_mnist_against_pylearn2():
                                   iterator_type='sequential',
                                   loop_style='divisible')
 
-        p_iter = p_mnist.iterator(batch_size=batch_size,
-                                  mode='sequential',
-                                  topo=True,
-                                  targets=True)
+        def get_pylearn2_iterator():
+            image_space = Conv2DSpace(shape=[28, 28],
+                                      num_channels=1,
+                                      axes=('b', 0, 1, 'c'),
+                                      # pylearn2.MNIST forces this dtype
+                                      dtype='float32')
+            # label_space = VectorSpace(dim=10, dtype='uint8')
+            label_space = IndexSpace(max_labels=10, dim=1, dtype='uint8')
+            space = CompositeSpace([image_space, label_space])
+            source = ('features', 'targets')
+            specs = (space, source)
 
+            return p_mnist.iterator(batch_size=batch_size,
+                                    mode='sequential',
+                                    data_specs=specs)
+
+        p_iter = get_pylearn2_iterator()
         keep_going = True
-
         count = 0
 
         while keep_going:
