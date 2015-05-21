@@ -148,6 +148,8 @@ class DummyIterator(DataIterator):
     def _next(self):
         return ()
 
+    def make_input_nodes(self):
+        return ()
 
 class ConvertingIterator(DataIterator):
     '''

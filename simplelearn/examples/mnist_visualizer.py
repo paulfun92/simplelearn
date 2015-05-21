@@ -109,10 +109,10 @@ def main():
 
     input_float_node = get_input_float_node(output_node)
 
-    mnist_train = load_mnist()['test']
-    mnist_train_iterator = mnist_train.iterator(iterator_type='sequential',
-                                                batch_size=1)
-    label_node = mnist_train_iterator.make_input_nodes()[1]
+    mnist_test = load_mnist()[1]
+    mnist_test_iterator = mnist_test.iterator(iterator_type='sequential',
+                                               batch_size=1)
+    label_node = mnist_test_iterator.make_input_nodes()[1]
 
     cross_entropy = CrossEntropy(output_node, label_node)
 
@@ -199,13 +199,13 @@ def main():
 
     def on_key_press(event):
         if event.key == ' ':
-            update_display(*mnist_train_iterator.next())
+            update_display(*mnist_test_iterator.next())
         elif event.key == 'q':
             sys.exit(0)
 
     figure.canvas.mpl_connect('key_press_event', on_key_press)
 
-    update_display(*mnist_train_iterator.next())
+    update_display(*mnist_test_iterator.next())
     pyplot.show()
 
 
