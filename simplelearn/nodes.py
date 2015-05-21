@@ -112,7 +112,7 @@ class Node(object):
 
 class FormatNode(Node):
     '''
-    A node that just performs a format conversion.
+    A node that converts from one DenseFormat to another.
     '''
     def __init__(self, input_node, output_format, axis_map):
         input_symbol = input_node.output_symbol
@@ -125,6 +125,25 @@ class FormatNode(Node):
                                          output_symbol,
                                          output_format)
 
+
+class CastNode(Node):
+    '''
+    A node that casts the input dtype to another.
+    '''
+    def __init__(self, input_node, output_dtype):
+        # if output_dtype == 'floatX':
+        #     output_dtype = theano.config.floatX
+
+        # output_dtype = numpy.dtype(output_dtype)
+        output_symbol = theano.tensor.cast(input_node.output_symbol,
+                                           str(output_dtype))
+
+        output_format = copy.deepcopy(input_node.output_format)
+        output_format.dtype = output_dtype
+
+        super(CastNode, self).__init__(input_node,
+                                       output_symbol,
+                                       output_format)
 
 class InputNode(Node):
     """
