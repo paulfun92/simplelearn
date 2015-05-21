@@ -815,7 +815,7 @@ class Conv2D(Node):
 # TODO: Add unit tests to make sure that the pad is being handled correctly.
 #       Confirm that:
 #
-#       1) cuDNN pads with -inf when max-pooling, and 0 when mean-pooling?
+#       1) DONE:cuDNN pads with -inf when max-pooling, and 0 when mean-pooling?
 #       2) The 'min' padding mode works as expected
 #       3) the 'pylearn2' padding mode works as expected.
 #       4) all cases work fine even when (strides > window_shape).any()
@@ -914,7 +914,8 @@ class Pool2D(Node):
                                          output_format)
 
         else:
-            image_shape = numpy.asarray(input_format_node.output_format.shape[2:])
+            input_format_shape = input_format_node.output_format.shape
+            image_shape = numpy.asarray(input_format_shape[2:])
             window_shape = numpy.asarray(window_shape)
             strides = numpy.asarray(strides)
             overflow = ((image_shape - window_shape) + 1 - 1) % strides
@@ -932,7 +933,9 @@ class Pool2D(Node):
             bc01_symbol = input_format_node.output_symbol
             T = theano.tensor
             floatX = theano.config.floatX
-            padded_image = T.alloc(T.constant(-numpy.inf if mode == 'max' else 0,
+            padded_image = T.alloc(T.constant(-numpy.inf
+                                              if mode == 'max'
+                                              else 0,
                                               dtype=floatX),
                                    bc01_symbol.shape[0],
                                    bc01_symbol.shape[1],
@@ -958,11 +961,8 @@ class Pool2D(Node):
             padded_image_shape = (numpy.asarray(bc01_shape[2:]) +
                                   single_sided_pads)
 
-            output_image_shape = (((padded_image_shape - window_shape) + 1 - 1) //
+            output_image_shape = ((padded_image_shape - window_shape) //
                                   strides) + 1
-            # pdb.set_trace()
-            # assert_array_equal(output_image_shape * strides - 1 + window_shape,
-            #                    padded_image_shape)
             output_format = DenseFormat(axes=('b', 'c', '0', '1'),
                                         shape=(bc01_shape[0],
                                                bc01_shape[1],
