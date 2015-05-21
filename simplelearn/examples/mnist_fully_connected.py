@@ -453,6 +453,9 @@ def main():
 
     def make_output_filename(args, best=False):
         assert_equal(os.path.splitext(args.output_prefix)[1], "")
+        if os.path.isdir(args.output_prefix) and \
+           not args.output_prefix.endswith('/'):
+            args.output_prefix += '/'
 
         output_dir, output_prefix = os.path.split(args.output_prefix)
         if output_prefix != "":

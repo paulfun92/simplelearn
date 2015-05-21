@@ -185,7 +185,7 @@ class ValidationCallback(EpochCallback):
           Symbols for the outputs of the input_iterator.
 
         input_iterator: simplelearn.data.DataIterator
-          Yields tuples of training set batches, such as (values, labels).
+          Yields tuples of validation set batches, such as (values, labels).
 
         monitors: sequence of Monitors.
           These are also used as epoch callbacks.
@@ -713,7 +713,7 @@ class SavesAtMinimum(object):
         output_filepath: string
           The file path to save object_to_save to.
         '''
-        assert_true(os.path.isdir(os.path.dirname(path)))
+        assert_true(os.path.isdir(os.path.dirname(output_filepath)))
 
         self._object_to_save = object_to_save
         self._output_filepath = output_filepath
