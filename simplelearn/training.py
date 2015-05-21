@@ -1064,10 +1064,11 @@ class Sgd(object):
         assert_is_instance(input_iterator, DataIterator)
         assert_true(input_iterator.next_is_new_epoch())
 
-        for (input,
-             iterator_input) in safe_izip(inputs,
-                                          input_iterator.make_input_nodes()):
-            assert_equal(input.output_format, iterator_input.output_format)
+        # DEBUG: uncomment this
+        # for (input,
+        #      iterator_input) in safe_izip(inputs,
+        #                                   input_iterator.make_input_nodes()):
+        #     assert_equal(input.output_format, iterator_input.output_format)
 
         assert_is_instance(parameters, Sequence)
         assert_is_instance(parameter_updaters, Sequence)
