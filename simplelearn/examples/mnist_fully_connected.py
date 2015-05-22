@@ -13,14 +13,14 @@ from nose.tools import (assert_true,
                         assert_less_equal,
                         assert_equal)
 from simplelearn.nodes import (Node,
-                               AffineTransform,
+                               AffineLayer,
                                CastNode,
                                # FormatNode,
                                ReLU,
                                Dropout,
                                CrossEntropy,
                                Misclassification,
-                               Softmax,
+                               SoftmaxLayer,
                                RescaleImage)
 from simplelearn.utils import (safe_izip,
                                assert_all_greater,
@@ -117,7 +117,7 @@ def parse_args():
                         help="batch size")
 
     parser.add_argument("--dropout-include-rates",
-                        default=(1.0, 1.0),  # i.e. no dropout
+                        default=(1.0, 1.0, 1.0),  # i.e. no dropout
                         type=positive_0_to_1,
                         nargs=2,
                         help=("The dropout include rates for the outputs of "
@@ -228,7 +228,7 @@ def build_fc_classifier(input_node,
 
     assert_equal(len(dropout_include_probabilities), len(sizes))
 
-    affine_layers = []
+    affine_nodes = []
 
     last_node = input_node
 
@@ -244,11 +244,10 @@ def build_fc_classifier(input_node,
 
         if layer_index < (len(sizes) - 1):
             last_node = AffineLayer(last_node, output_format)
-            affine_layers.append(last_node)
         else:
             last_node = SoftmaxLayer(last_node, output_format)
 
-    return last_node
+        affine_nodes.append(last_node.affine_node)
 
     # for layer_index, size in enumerate(sizes):
     #     last_node = AffineTransform(last_node,
@@ -325,8 +324,8 @@ def build_fc_classifier(input_node,
 
     # Initialize the affine layer weights (not the biases, and not the softmax
     # weights)
-    for sparse_init_count, affine_layer in safe_izip(sparse_init_counts,
-                                                     affine_layers[:-1]):
+    for sparse_init_count, affine_node in safe_izip(sparse_init_counts,
+                                                     affine_nodes[:-1]):
         # pylearn2 doesn't sparse_init the biases. I also found that
         # doing so slightly increases the final misclassification rate:
         #
@@ -339,11 +338,11 @@ def build_fc_classifier(input_node,
         #                  sparse_init_count,
         #                  rng)
 
-        init_sparse_linear(affine_layer.affine_node.linear_node.params,
+        init_sparse_linear(affine_node.linear_node.params,
                            sparse_init_count,
                            rng)
 
-    return affine_nodes, output_node
+    return affine_nodes, last_node
 
 
 def print_loss(values, _):  # 2nd argument: formats
@@ -405,12 +404,13 @@ def main():
     rng = numpy.random.RandomState(34523)
     theano_rng = RandomStreams(23845)
 
-    affine_nodes, output_node = build_fc_classifier(image_node,
-                                                    sizes,
-                                                    sparse_init_counts,
-                                                    args.dropout_include_rates,
-                                                    rng,
-                                                    theano_rng)
+    (affine_nodes,
+     output_node) = build_fc_classifier(image_node,
+                                        sizes,
+                                        sparse_init_counts,
+                                        args.dropout_include_rates,
+                                        rng,
+                                        theano_rng)
 
     loss_node = CrossEntropy(output_node, label_node)
     loss_sum = loss_node.output_symbol.mean()
