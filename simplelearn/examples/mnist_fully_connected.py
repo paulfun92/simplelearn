@@ -15,7 +15,6 @@ from nose.tools import (assert_true,
 from simplelearn.nodes import (Node,
                                AffineLayer,
                                CastNode,
-                               # FormatNode,
                                ReLU,
                                Dropout,
                                CrossEntropy,
@@ -94,7 +93,10 @@ def parse_args():
     #
     # The one exception is final-momentum, which was changed from .99 to
     # .5. (.99 led to divergence, which is weird).
-
+    #
+    # non-default arguments that work for me:
+    #
+    # --dropout-include-rates 1 1 .5 --learning-rate .001
     parser.add_argument("--learning-rate",
                         type=positive_float,
                         default=0.01,
@@ -119,7 +121,7 @@ def parse_args():
     parser.add_argument("--dropout-include-rates",
                         default=(1.0, 1.0, 1.0),  # i.e. no dropout
                         type=positive_0_to_1,
-                        nargs=2,
+                        nargs=3,
                         help=("The dropout include rates for the outputs of "
                               "the first two layers. Must be in the range "
                               "(0.0, 1.0]. If 1.0, the Dropout node will "
@@ -146,13 +148,6 @@ def parse_args():
                         help=("Use convolutional classifier."))
 
     return parser.parse_args()
-
-
-# def add_dropout_node(input_node, include_rate, theano_rng):
-#     if include_rate == 1.0:
-#         return input_node
-#     else:
-#         return Dropout(input_node, include_rate, theano_rng)
 
 
 def build_fc_classifier(input_node,
@@ -249,24 +244,6 @@ def build_fc_classifier(input_node,
 
         affine_nodes.append(last_node.affine_node)
 
-    # for layer_index, size in enumerate(sizes):
-    #     last_node = AffineTransform(last_node,
-    #                                   DenseFormat(axes=('b', 'f'),
-    #                                               shape=(-1, size),
-    #                                               dtype=None))
-    #     affine_nodes.append(last_node)
-    #     if layer_index != (len(sizes) - 1):
-    #         last_node = ReLU(last_node)
-    #         include_probability = dropout_include_probabilities[layer_index]
-    #         if include_probability != 1.0:
-    #             last_node = Dropout(last_node,
-    #                                   include_probability,
-    #                                   theano_rng)
-
-    # output_node = Softmax(last_node, DenseFormat(axes=('b', 'f'),
-    #                                              shape=(-1, sizes[-1]),
-    #                                              dtype=None))
-
     def init_sparse_bias(shared_variable, num_nonzeros, rng):
         '''
         Mimics the sparse initialization in
@@ -327,17 +304,7 @@ def build_fc_classifier(input_node,
     for sparse_init_count, affine_node in safe_izip(sparse_init_counts,
                                                      affine_nodes[:-1]):
         # pylearn2 doesn't sparse_init the biases. I also found that
-        # doing so slightly increases the final misclassification rate:
-        #
-        #   Bias initialization      Misclassification rate
-        #   -----------------------------------------------
-        #   No                       .0137
-        #   Yes                      .0139
-        #
-        # init_sparse_bias(affine_node.bias_node.params,
-        #                  sparse_init_count,
-        #                  rng)
-
+        # doing so slightly increases the final misclassification rate.
         init_sparse_linear(affine_node.linear_node.params,
                            sparse_init_count,
                            rng)
@@ -507,15 +474,11 @@ def main():
         callbacks=[validation_loss_logger, saves_best])
 
     validation_callback = ValidationCallback(
-        # DEBUG
         inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
-        #inputs=[image_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_testing_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
-    # DEBUG
     trainer = Sgd([image_uint8_node, label_node],
-    #trainer = Sgd([image_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
                                           batch_size=args.batch_size),
                   parameters,
