@@ -577,8 +577,8 @@ def _make_bc01_output_format(bc01_input_format,
                              num_filters,
                              pad):
     """
-    Constructs an appropriately-sized output format for a convolution-like
-    operator.
+    Constructs an appropriately-sized output format for a sliding-window
+    operator (e.g. Conv2d, Pool2d).
 
     Parameters
     ----------
@@ -595,7 +595,7 @@ def _make_bc01_output_format(bc01_input_format,
     rval: tuple
       (fmt, pads), where
         fmt: a DenseFormat
-          Output format of this Conv2D node.
+          Output format of this sliding-window node.
         pads: str, or tuple
           A suitable padding argument to pass to Theano's dnn_conv or dnn_pool.
           If pad was 'valid' or 'full', it's returned as-is to take advantage
@@ -645,7 +645,138 @@ def _make_bc01_output_format(bc01_input_format,
 
     return output_format
 
-class Conv2D(Node):
+class CuDnnConv2d(Node):
+    '''
+    Convolves over 2D space, using cuDNN.
+
+    The output axis order is batch-channel-row-column ('b', 'c', '0', '1').
+    Output dtype is theano.config.floatX.
+
+    The input may be in any 4D DenseFormat. This will internally be converted
+    to the above axis ordering and dtype.
+    '''
+
+    def __init__(self,
+                 input_node,
+                 filter_shape,
+                 num_filters,
+                 pads,
+                 strides=(1, 1),
+                 axis_map=None,
+                 **kwargs):
+        '''
+        Parameters
+        ----------
+
+        input_node: Node
+          A node with 4D output format.
+
+        filter_shape: Sequence
+          [NUM_ROWS, NUM_COLUMNS]
+
+        num_filters: int
+
+        pads: str or tuple
+          'valid': no zero-padding.
+                   output_shape: input_shape - filter_shape + 1
+          'full': maximal zero-padding.
+                  output_shape: input_shape + filter_shape + 1
+          'min': minimal zero-padding.
+                 Just enough padding to ensure that all input pixels get used
+                 in the output.
+          'same_shape': (cuDNN only) Enough padding to preserve image shape.
+                       output_shape = input_shape.
+          (R, C): (cuDNN only) Pad rows and columns by this many zeros on each
+                  side.
+                  output_shape = (input_shape[0] + 2R, input_shape[1] + 2C)
+
+        strides: Sequence
+          [R, C], default: (1, 1).
+          A stride of (R, C) means we apply the filters once every R rows
+          and every C columns.
+
+        axis_map: dict, or None.
+          Maps axis names from those used by input_node.output_format.axes
+          to ('b', 'c', '0', '1'), i.e. batch, channel, row, column.
+          Default: None, meaning the input node's axes are already some
+                   permutation of ('b', 'c', '0', '1').
+
+        kwargs: dict
+          Keyword args passed directly to theano.sandbox.cuda.dnn.dnn_conv().
+          Particularly important is conv_mode. Choose from 'conv' (flips
+          kernels) or 'cross' (doesn't). Default: conv.
+        '''
+
+        assert_true(theano.sandbox.cuda.dnn.dnn_available)
+
+        # Sanity-check args
+
+        assert_is_instance(input_node, Node)
+        _assert_is_shape2d(filter_shape)
+        assert_integer(num_filters)
+        assert_greater(num_filters, 0)
+
+        if isinstance(pads, basestring):
+            assert_in(pads, ('valid', 'full', 'same_shape'))
+            if pads == 'same_shape':
+                assert_true((filter_shape % 2 == 1).all(),
+                            "If pads == 'same_shape', then filter_shape "
+                            "must be odd in both dimensions, but got %s." %
+                            str(filter_shape))
+                pads = tuple(numpy.asarray(filter_shape) // 2)
+        else:
+            _assert_is_shape2d(pads)
+            pads = tuple(pads)
+
+        _assert_is_shape2d(strides)
+
+        if axis_map is not None:
+            assert_is_instance(axis_map, dict)
+
+            for key in axis_map.iterkeys():
+                assert_in(key, input_node.output_format.axes)
+
+        # end sanity-checking args
+
+        input_format_node = _make_bc01_format_node(input_node, axis_map)
+
+        output_format = _make_bc01_output_format(
+            input_format_node.output_format,
+            strides,
+            filter_shape,
+            num_filters,
+            pads)
+
+        self.filters = theano.shared(
+            # num filters, num input channels, filter rows, filter columns
+            numpy.zeros((num_filters,
+                         input_format_node.output_format.shape[1],
+                         filter_shape[0],
+                         filter_shape[1]),
+                        dtype=theano.config.floatX))
+
+        if pads not in ('valid', 'full'):
+            pads = _get_pads(pads,
+                             image_shape=output_format.shape[2:],
+                             window_shape=filter_shape,
+                             strides=strides)
+
+            assert_true((numpy.asarray(pads) <
+                         numpy.asarray(filter_shape)).all(),
+                        ("Not all pads {} were smaller than the "
+                         "filter_shape {}").format(pads, filter_shape))
+
+        dnn_conv = theano.sandbox.cuda.dnn.dnn_conv
+        output = dnn_conv(img=input_format_node.output_symbol,
+                          kerns=self.filters,
+                          border_mode=pads,
+                          subsample=strides,
+                          **kwargs)
+
+        super(CuDnnConv2d, self).__init__([input_node], output, output_format)
+
+
+class Conv2d(Node):
     '''
     Returns a convolution over 2D space.
 
@@ -809,7 +940,7 @@ class Conv2D(Node):
                                     pads,
                                     strides)
 
-        super(Conv2D, self).__init__([input_node], output, output_format)
+        super(Conv2d, self).__init__([input_node], output, output_format)
 
 
 # TODO: Add unit tests to make sure that the pad is being handled correctly.
@@ -1139,7 +1270,7 @@ class SoftmaxLayer(Function1dTo1d):
         return self.softmax_node
 
 
-class Conv2DLayer(Node):
+class Conv2dLayer(Node):
     '''
     A sequence of conv2d -> channel-wise bias -> ReLU -> pool2d
     '''
@@ -1161,20 +1292,23 @@ class Conv2DLayer(Node):
         ----------
         input_node, filter_shape, num_filters, filter_strides, conv_pads,
         axis_map, kwargs:
-          See equivalent arguments of simplelearn.nodes.Conv2D constructor.
+          See equivalent arguments of simplelearn.nodes.Conv2d constructor.
 
         pool_window_shape, pool_strides, pool_mode:
           See equivalent arguments of simplelearn.nodes.Pool2D constructor.
         '''
         assert_in(channel_axis, input_node.output_format.axes)
 
-        self.conv2d_node = Conv2D(input_node,
-                                  filter_shape,
-                                  num_filters,
-                                  conv_pads,
-                                  strides=filter_strides,
-                                  axis_map=axis_map,
-                                  **kwargs)
+        ConvClass = (CuDnnConv2d if theano.sandbox.cuda.dnn.dnn_available
+                     else Conv2d)
+
+        self.conv2d_node = ConvClass(input_node,
+                                     filter_shape,
+                                     num_filters,
+                                     conv_pads,
+                                     strides=filter_strides,
+                                     axis_map=axis_map,
+                                     **kwargs)
 
         # Implements channel-wise bias by collapsing non-channel axes into
         # batch axes in the bias node. Bias node then adds a bias per
@@ -1202,7 +1336,7 @@ class Conv2DLayer(Node):
                                   mode=pool_mode,
                                   pad=pool_pads)
 
-        super(Conv2DLayer, self).__init__([input_node],
+        super(Conv2dLayer, self).__init__([input_node],
                                           self.pool2d_node.output_symbol,
                                           self.pool2d_node.output_format)
 
@@ -1301,7 +1435,7 @@ class Lcn(Node):
     '''
     LeCun-style local contrast normalization.
 
-    Internally uses Conv2D, so the output axis order is 'bc01'.
+    Internally uses DnnConv2d / Conv2d, so the output axis order is 'bc01'.
 
     Requires floating-point input.
 
@@ -1356,11 +1490,14 @@ class Lcn(Node):
 
         filters /= filters.sum()
 
+        ConvNodeClass = (DnnConv2d if theano.sandbox.cuda.dnn.dnn_available
+                         else Conv2d)
+
         # 1-channel to 1-channel convolution with a gaussian filter
-        blur_node = Conv2D(input_node=separated_channels_node,
-                           filter_shape=filter_shape,
-                           num_filters=1,
-                           pads='same_shape')
+        blur_node = ConvNodeClass(input_node=separated_channels_node,
+                                  filter_shape=filter_shape,
+                                  num_filters=1,
+                                  pads='same_shape')
         blur_node.filters.set_value(filters)
 
         high_pass = separated_channels - blur_node.output_symbol
@@ -1370,10 +1507,10 @@ class Lcn(Node):
                             separated_channels_node.output_format)
 
         # Same convolution as above, but applied on squares_node
-        blur_squares_node = Conv2D(input_node=squares_node,
-                                   filter_shape=filter_shape,
-                                   num_filters=1,
-                                   pads='same_shape')
+        blur_squares_node = ConvNodeClass(input_node=squares_node,
+                                          filter_shape=filter_shape,
+                                          num_filters=1,
+                                          pads='same_shape')
         blur_squares_node.filters.set_value(filters)
         local_norms = theano.tensor.sqrt(blur_squares_node.output_symbol)
 
