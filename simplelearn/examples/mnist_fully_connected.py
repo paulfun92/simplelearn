@@ -226,28 +226,47 @@ def build_fc_classifier(input_node,
     assert_all_greater(sparse_init_counts, 0)
     assert_all_less_equal(sparse_init_counts, sizes[:-1])
 
-    assert_equal(len(dropout_include_probabilities), len(sizes) - 1)
+    assert_equal(len(dropout_include_probabilities), len(sizes))
 
-    affine_nodes = []
+    affine_layers = []
 
-    hidden_node = input_node
-    for layer_index, size in enumerate(sizes):
-        hidden_node = AffineTransform(hidden_node,
-                                      DenseFormat(axes=('b', 'f'),
-                                                  shape=(-1, size),
-                                                  dtype=None))
-        affine_nodes.append(hidden_node)
-        if layer_index != (len(sizes) - 1):
-            hidden_node = ReLU(hidden_node)
-            include_probability = dropout_include_probabilities[layer_index]
-            if include_probability != 1.0:
-                hidden_node = Dropout(hidden_node,
-                                      include_probability,
-                                      theano_rng)
+    last_node = input_node
 
-    output_node = Softmax(hidden_node, DenseFormat(axes=('b', 'f'),
-                                                   shape=(-1, sizes[-1]),
-                                                   dtype=None))
+    for layer_index, layer_output_size in enumerate(sizes):
+        # Add dropout, if asked for
+        include_probability = dropout_include_probabilities[layer_index]
+        if include_probability != 1.0:
+            last_node = Dropout(last_node, include_probability, theano_rng)
+
+        output_format = DenseFormat(axes=('b', 'f'),
+                                    shape=(-1, layer_output_size),
+                                    dtype=None)
+
+        if layer_index < (len(sizes) - 1):
+            last_node = AffineLayer(last_node, output_format)
+            affine_layers.append(last_node)
+        else:
+            last_node = SoftmaxLayer(last_node, output_format)
+
+    return last_node
+
+    # for layer_index, size in enumerate(sizes):
+    #     last_node = AffineTransform(last_node,
+    #                                   DenseFormat(axes=('b', 'f'),
+    #                                               shape=(-1, size),
+    #                                               dtype=None))
+    #     affine_nodes.append(last_node)
+    #     if layer_index != (len(sizes) - 1):
+    #         last_node = ReLU(last_node)
+    #         include_probability = dropout_include_probabilities[layer_index]
+    #         if include_probability != 1.0:
+    #             last_node = Dropout(last_node,
+    #                                   include_probability,
+    #                                   theano_rng)
+
+    # output_node = Softmax(last_node, DenseFormat(axes=('b', 'f'),
+    #                                              shape=(-1, sizes[-1]),
+    #                                              dtype=None))
 
     def init_sparse_bias(shared_variable, num_nonzeros, rng):
         '''
@@ -304,17 +323,23 @@ def build_fc_classifier(input_node,
 
         shared_variable.set_value(params)
 
-    # Initialize the first N-1 affine layer weights (not biases)
-    for sparse_init_count, affine_node in safe_izip(sparse_init_counts,
-                                                    affine_nodes[:-1]):
+    # Initialize the affine layer weights (not the biases, and not the softmax
+    # weights)
+    for sparse_init_count, affine_layer in safe_izip(sparse_init_counts,
+                                                     affine_layers[:-1]):
         # pylearn2 doesn't sparse_init the biases. I also found that
-        # doing so slightly increases the final misclassification rate
-        # .0137 without initing bias, .0139 with.
+        # doing so slightly increases the final misclassification rate:
+        #
+        #   Bias initialization      Misclassification rate
+        #   -----------------------------------------------
+        #   No                       .0137
+        #   Yes                      .0139
+        #
         # init_sparse_bias(affine_node.bias_node.params,
         #                  sparse_init_count,
         #                  rng)
 
-        init_sparse_linear(affine_node.linear_node.params,
+        init_sparse_linear(affine_layer.affine_node.linear_node.params,
                            sparse_init_count,
                            rng)
 
