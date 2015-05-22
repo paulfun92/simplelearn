@@ -30,14 +30,15 @@ from simplelearn.nodes import (Node,
                                AffineTransform,
                                Function1dTo1d,
                                Pool2D,
-                               Conv2D,
+                               CuDnnConv2d,
+                               Conv2d,
                                ReLU,
                                Dropout,
                                Softmax,
                                L2Loss,
                                CrossEntropy,
                                Lcn,
-                               Conv2DLayer,
+                               Conv2dLayer,
                                _assert_is_shape2d,
                                _make_2d_gaussian_filter)
 
@@ -395,7 +396,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                 supports_padding,
                                 rtol=None):
     '''
-    Implementation of tests for 2D sliding-window nodes like Pool2D and Conv2D.
+    Implementation of tests for 2D sliding-window nodes like Pool2D and Conv2d.
 
     Parameters
     ----------
@@ -855,7 +856,7 @@ def test_pool2d_quick():
     assert_allclose(avg_pooled_full_padding, [-1, -9 / 4., -2, -2.5, -7 / 4.])
 
 
-def test_conv2d():
+def test_dnn_conv2d():
     def rand_floats(shape):
         rng = numpy.random.RandomState(382342)
         return rng.uniform(low=-10, high=10, size=shape)
@@ -879,13 +880,13 @@ def test_conv2d():
                        strides,
                        pads,
                        axis_map):
-        result = Conv2D(input_node,
-                        window_shape,
-                        num_filters,
-                        pads,
-                        strides,
-                        axis_map,
-                        conv_mode='cross')
+        result = CuDnnConv2d(input_node,
+                             window_shape,
+                             num_filters,
+                             pads,
+                             strides,
+                             axis_map,
+                             conv_mode='cross')
 
         filters = result.filters.get_value()
         filters[...] = rand_floats(filters.shape)
@@ -984,7 +985,7 @@ def test_lcn():
 
 def test_conv_layer():
     '''
-    Sees if the Conv2DLayer properly implements
+    Sees if the Conv2dLayer properly implements
     conv -> channel-wise bias -> relu -> max pool
     '''
 
@@ -1011,7 +1012,7 @@ def test_conv_layer():
 
     def make_conv_layer():
 
-        conv_layer_node = Conv2DLayer(image_node,
+        conv_layer_node = Conv2dLayer(image_node,
                                       filter_shape=filter_shape,
                                       num_filters=num_filters,
                                       conv_pads=conv_pads,
@@ -1038,10 +1039,13 @@ def test_conv_layer():
     #
 
     def make_conv_sequence():
-        conv2d_node = Conv2D(image_node,
-                             filter_shape=filter_shape,
-                             num_filters=num_filters,
-                             pads=conv_pads)
+        Conv2dNodeClass = (CuDnnConv2d if theano.sandbox.cuda.dnn.dnn_available
+                           else Conv2d)
+
+        conv2d_node = Conv2dNodeClass(image_node,
+                                      filter_shape=filter_shape,
+                                      num_filters=num_filters,
+                                      pads=conv_pads)
 
         biases = theano.shared(numpy.zeros((1, num_filters, 1, 1),
                                            dtype=theano.config.floatX),

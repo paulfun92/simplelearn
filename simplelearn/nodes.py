@@ -10,6 +10,7 @@ __license__ = "Apache 2.0"
 
 import copy
 import collections
+import warnings
 import numpy
 import theano
 from theano.tensor import Rebroadcast
@@ -716,6 +717,8 @@ class CuDnnConv2d(Node):
         assert_integer(num_filters)
         assert_greater(num_filters, 0)
 
+        filter_shape = numpy.asarray(filter_shape)
+
         if isinstance(pads, basestring):
             assert_in(pads, ('valid', 'full', 'same_shape'))
             if pads == 'same_shape':
@@ -785,6 +788,10 @@ class Conv2d(Node):
 
     The input may be in any 4D DenseFormat. This will internally be converted
     to the above axis ordering and dtype.
+
+    If cuDNN is installed, this will use it. Users who are planning on using
+    cuDNN are encouraged to use CuDnnConv2d instead, as it allows cuDNN-only
+    features such as custom pad shapes and optional kernel flipping.
     '''
 
     def __init__(self,
@@ -812,14 +819,6 @@ class Conv2d(Node):
                    output_shape: input_shape - filter_shape + 1
           'full': maximal zero-padding.
                   output_shape: input_shape + filter_shape + 1
-          'min': minimal zero-padding.
-                 Just enough padding to ensure that all input pixels get used
-                 in the output.
-          'same_shape': (cuDNN only) Enough padding to preserve image shape.
-                       output_shape = input_shape.
-          (R, C): (cuDNN only) Pad rows and columns by this many zeros on each
-                  side.
-                  output_shape = (input_shape[0] + 2R, input_shape[1] + 2C)
 
         strides: Sequence
           [R, C], default: (1, 1).
@@ -831,7 +830,15 @@ class Conv2d(Node):
           to ('b', 'c', '0', '1'), i.e. batch, channel, row, column.
           Default: None, meaning the input node's axes are already some
                    permutation of ('b', 'c', '0', '1').
+
+        kwargs: dict
+          Keyword args fed directly to theano.tensor.nnet.conv2d
         '''
+
+        if theano.sandbox.cuda.dnn.dnn_available:
+            warnings.warn("Using Conv2d, even though cuDNN is installed. "
+                          "Are you sure you wouldn't rather use "
+                          "CuDnnConv2d?")
 
         #
         # Sanity-checks args
@@ -843,41 +850,14 @@ class Conv2d(Node):
         assert_greater(num_filters, 0)
 
         filter_shape = numpy.asarray(filter_shape)
-        dnn_available = theano.sandbox.cuda.dnn.dnn_available
 
-        if dnn_available():
-            if isinstance(pads, basestring):
-                assert_in(pads, ('valid', 'full', 'same_shape'))
-                if pads == 'same_shape':
-                    assert_true((filter_shape % 2 == 1).all(),
-                                "If pads == 'same_shape', then filter_shape "
-                                "must be odd in both dimensions, but got %s." %
-                                str(filter_shape))
-                    pads = tuple(numpy.asarray(filter_shape) // 2)
-            else:
-                _assert_is_shape2d(pads)
-                pads = tuple(pads)
-        else:
-            assert_in(pads, ('valid', 'full'),
-                      "cuDNN not found, so falling back to "
-                      "theano.tensor.nnet.conv2d(), which only supports "
-                      "pads argument values of 'valid' and 'full', "
-                      "not %s." % str(pads))
+        assert_in(pads, ('valid', 'full'))
 
         if strides is not None:
             _assert_is_shape2d(strides)
 
         if axis_map is not None:
             assert_is_instance(axis_map, dict)
-            # axis_map = get_full_axis_map(axis_map)
-
-        if dnn_available():
-            dnn_kwargs = {'conv_mode'}
-            assert_equal(len(set(kwargs.keys()) - dnn_kwargs), 0,
-                         "cuDNN implementation does not accept kwargs other "
-                         "than {}. Switch to default Theano implementation "
-                         "using Theano config option "
-                         "'optimizer_excluding=conv_dnn'".format(dnn_kwargs))
 
         input_format_node = _make_bc01_format_node(input_node, axis_map)
 
@@ -889,51 +869,31 @@ class Conv2d(Node):
             pads)
 
         self.filters = theano.shared(
-            # n_filters, n_input_channels, filter_shape[0], filter_shape[1]
-            numpy.zeros(([num_filters,
-                          input_format_node.output_format.shape[1]] +
-                         list(filter_shape)),
+            # num filters, num input channels, filter rows, filter columns
+            numpy.zeros((num_filters,
+                         input_format_node.output_format.shape[1],
+                         filter_shape[0],
+                         filter_shape[1]),
                         dtype=theano.config.floatX))
 
-
         def make_output_symbol(t_node, filters, pads, strides):
-            assert_is_instance(pads, (basestring, tuple))
+            assert_is_instance(pads, basestring)
 
             strides = tuple(strides)
 
-            if dnn_available():
-                dnn_conv = theano.sandbox.cuda.dnn.dnn_conv
-                return dnn_conv(img=t_node.output_symbol,
-                                kerns=filters,
-                                border_mode=pads,
-                                subsample=strides,
-                                conv_mode=kwargs.get('conv_mode', 'conv'))
-            else:
-                image_shape = list(copy.deepcopy(t_node.output_format.shape))
-                assert_equal(image_shape[0], -1)
-                image_shape[0] = None
-                image_shape = tuple(image_shape)
+            image_shape = list(copy.deepcopy(t_node.output_format.shape))
+            assert_equal(image_shape[0], -1)
+            image_shape[0] = None
+            image_shape = tuple(image_shape)
 
-                conv2d = theano.tensor.nnet.conv2d
-                return conv2d(input=t_node.output_symbol,
-                              filters=filters,
-                              image_shape=image_shape,
-                              filter_shape=filters.get_value().shape,  # sic
-                              border_mode=pads,
-                              subsample=strides,
-                              **kwargs)  # pylint: disable=star-args
-
-
-        if pads not in ('valid', 'full'):
-            pads = _get_pads(pads,
-                             image_shape=output_format.shape[2:],
-                             window_shape=filter_shape,
-                             strides=strides)
-
-            assert_true((numpy.asarray(pads) <
-                         numpy.asarray(filter_shape)).all(),
-                        ("Not all pads {} were smaller than the "
-                         "filter_shape {}").format(pads, filter_shape))
+            conv2d = theano.tensor.nnet.conv2d
+            return conv2d(input=t_node.output_symbol,
+                          filters=filters,
+                          image_shape=image_shape,
+                          filter_shape=filters.get_value().shape,  # sic
+                          border_mode=pads,
+                          subsample=strides,
+                          **kwargs)  # pylint: disable=star-args
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
@@ -1435,7 +1395,7 @@ class Lcn(Node):
     '''
     LeCun-style local contrast normalization.
 
-    Internally uses DnnConv2d / Conv2d, so the output axis order is 'bc01'.
+    Internally uses CuDnnConv2d / Conv2d, so the output axis order is 'bc01'.
 
     Requires floating-point input.
 
@@ -1490,7 +1450,7 @@ class Lcn(Node):
 
         filters /= filters.sum()
 
-        ConvNodeClass = (DnnConv2d if theano.sandbox.cuda.dnn.dnn_available
+        ConvNodeClass = (CuDnnConv2d if theano.sandbox.cuda.dnn.dnn_available
                          else Conv2d)
 
         # 1-channel to 1-channel convolution with a gaussian filter
