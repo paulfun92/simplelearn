@@ -14,11 +14,11 @@ rm -f $CUDA_FILE
 apt-get -y update
 # Install the minimal CUDA subpackages required to test Caffe build.
 # For a full CUDA installation, add 'cuda' to the list of packages.
-apt-get -y install cuda-core-6-5 cuda-cublas-6-5 cuda-cublas-dev-6-5 cuda-cudart-6-5 cuda-cudart-dev-6-5 cuda-curand-6-5 cuda-curand-dev-6-5
+apt-get -y install cuda-core-7-0 cuda-cublas-7-0 cuda-cublas-dev-7-0 cuda-cudart-7-0 cuda-cudart-dev-7-0 cuda-curand-7-0 cuda-curand-dev-7-0
 # Create CUDA symlink at /usr/local/cuda
 # (This would normally be created by the CUDA installer, but we create it
 # manually since we did a partial installation.)
-ln -s /usr/local/cuda-6.5 /usr/local/cuda
+ln -s /usr/local/cuda-7.0 /usr/local/cuda
 
 # install cuDNN, once I figure out how to do so on Travis
 
