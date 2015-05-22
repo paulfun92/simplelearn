@@ -14,7 +14,8 @@ from nose.tools import (assert_true,
                         assert_equal)
 from simplelearn.nodes import (Node,
                                AffineTransform,
-                               FormatNode,
+                               CastNode,
+                               # FormatNode,
                                ReLU,
                                Dropout,
                                CrossEntropy,
@@ -373,7 +374,8 @@ def main():
     mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
                                                     batch_size=args.batch_size)
     image_uint8_node, label_node = mnist_testing_iterator.make_input_nodes()
-    image_node = RescaleImage(image_uint8_node)
+    image_node = CastNode(image_uint8_node, 'floatX')
+    # image_node = RescaleImage(image_uint8_node)
 
     rng = numpy.random.RandomState(34523)
     theano_rng = RandomStreams(23845)
@@ -453,6 +455,9 @@ def main():
 
     def make_output_filename(args, best=False):
         assert_equal(os.path.splitext(args.output_prefix)[1], "")
+        if os.path.isdir(args.output_prefix) and \
+           not args.output_prefix.endswith('/'):
+            args.output_prefix += '/'
 
         output_dir, output_prefix = os.path.split(args.output_prefix)
         if output_prefix != "":
@@ -477,11 +482,15 @@ def main():
         callbacks=[validation_loss_logger, saves_best])
 
     validation_callback = ValidationCallback(
-        inputs=[image_node.output_symbol, label_node.output_symbol],
+        # DEBUG
+        inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
+        #inputs=[image_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_testing_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
-    trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
+    # DEBUG
+    trainer = Sgd([image_uint8_node, label_node],
+    #trainer = Sgd([image_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
                                           batch_size=args.batch_size),
                   parameters,

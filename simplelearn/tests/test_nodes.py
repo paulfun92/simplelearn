@@ -8,6 +8,7 @@ __copyright__ = "Copyright 2015"
 __license__ = "Apache 2.0"
 
 
+from collections import Sequence
 import itertools
 import numpy
 import theano
@@ -17,10 +18,10 @@ from nose.tools import (assert_is_instance,
                         assert_equal,
                         assert_greater,
                         assert_greater_equal,
-                        assert_true)
+                        assert_true,
+                        assert_raises_regexp)
 from simplelearn.formats import DenseFormat
-from simplelearn.utils import (safe_izip,
-                               assert_all_greater)
+from simplelearn.utils import safe_izip, assert_all_greater
 from simplelearn.nodes import (Node,
                                FormatNode,
                                InputNode,
@@ -36,10 +37,17 @@ from simplelearn.nodes import (Node,
                                L2Loss,
                                CrossEntropy,
                                Lcn,
+                               Conv2DLayer,
                                _assert_is_shape2d,
                                _make_2d_gaussian_filter)
 
 from unittest import TestCase
+
+pylearn2_installed = True
+try:
+    from pylearn2.models import mlp
+except ImportError:
+    pylearn2_installed = False
 
 import pdb
 
@@ -56,6 +64,7 @@ class DummyFunction1dTo1d(Function1dTo1d):
 
     def _get_output_bf_node(self,
                             input_bf_node,
+                            input_bf_format,
                             output_bf_format):
         input_format = input_bf_node.output_format
         assert not input_format.requires_conversion(output_bf_format)
@@ -189,8 +198,8 @@ class BiasTester(Function1dTo1dTester):
 
     def expected_function1dTo1d(self, rows):
         params = self.node.params.get_value()
-        assert_equal(params.shape[0], 1)
-        assert_equal(rows.shape[1], params.shape[1])
+        assert_equal(params.ndim, 1)
+        assert_equal(rows.shape[1], params.shape[0])
 
         return rows + self.node.params.get_value()
 
@@ -310,7 +319,7 @@ def test_l2loss():
                                      input_node_b.output_symbol],
                                     loss_node.output_symbol)
 
-    for batch_size in xrange(4):
+    for batch_size in xrange(1, 4):
         batch_a = _make_random_batch(rng, input_format, batch_size)
         batch_b = _make_random_batch(rng, input_format, batch_size)
 
@@ -377,10 +386,11 @@ def test_crossentropy():
 
                 actual_losses = loss_function(softmaxes, targets)
                 expected_losses = expected_loss_function(softmaxes, targets)
-                assert_allclose(actual_losses, expected_losses)
+                assert_allclose(actual_losses, expected_losses, atol=1e-6)
 
 
 def _sliding_window_2d_testimpl(expected_subwindow_funcs,
+                                pad_values,
                                 make_node_funcs,
                                 supports_padding,
                                 rtol=None):
@@ -394,6 +404,11 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
       These take a subwindow and return a scalar.
       Input: tensor with shape [BATCH_SIZE, NUM_CHANNELS, ROWS, COLS]
       Output: tensor with shape [BATCH_SIZE, NUM_CHANNELS]
+
+    pad_values: Sequence
+      A sequence of pad filler values to use for eah of the
+      expected_subwindow_funcs. For example, if expected_subwindow_funcs
+      is [average_pool, max_pool], use [0.0, -numpy.inf].
 
     make_node_funcs: Sequence
       A Sequence of functions that create sliding-window Nodes to be tested
@@ -421,6 +436,10 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     supports_padding: bool
       True if the nodes being tested support zero-padding; otherwise False.
     '''
+
+    assert_is_instance(expected_subwindow_funcs, Sequence)
+    assert_is_instance(pad_values, Sequence)
+    assert_is_instance(make_node_funcs, Sequence)
 
     # TODO: change this to construct a Toeplitz matrix out of padded_images,
     # so we get a giant stack of C X WR X WC matrices, which can then be fed
@@ -461,14 +480,20 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
         assert_all_greater(numpy.asarray(padded_images.shape[2:]), 2 * pads)
 
-        # Check that pad region is full of zeros
+        # Check that pad region is full of the same value
         if pads[0] > 0:
-            assert_true(numpy.all(padded_images[:, :, :pads[0], :] == 0.0))
-            assert_true(numpy.all(padded_images[:, :, -pads[0]:, :] == 0.0))
+            pad_value = padded_images[0, 0, 0, 0]
+            assert_true(numpy.all(padded_images[:, :, :pads[0], :] ==
+                                  pad_value))
+            assert_true(numpy.all(padded_images[:, :, -pads[0]:, :] ==
+                                  pad_value))
 
         if pads[1] > 0:
-            assert_true(numpy.all(padded_images[:, :, :, :pads[1]] == 0.0))
-            assert_true(numpy.all(padded_images[:, :, :, -pads[1]:] == 0.0))
+            pad_value = padded_images[0, 0, 0, 0]
+            assert_true(numpy.all(padded_images[:, :, :, :pads[1]] ==
+                                  pad_value))
+            assert_true(numpy.all(padded_images[:, :, :, -pads[1]:] ==
+                                  pad_value))
 
         rows, cols = (range(0,
                             padded_images.shape[i + 2] - window_shape[i] + 1,
@@ -516,12 +541,6 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
     rng = numpy.random.RandomState(352)
 
-    max_padded_images = numpy.zeros((batch_size,
-                                     num_channels,
-                                     max_pad * 2 + max_window_size + 1,
-                                     max_pad * 2 + max_window_size + 4),
-                                    dtype=input_dtype)
-
     def get_padded_image(max_padded_images, pads):
         def margin_to_slice(margin):
             assert_greater_equal(margin, 0)
@@ -535,31 +554,6 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                  margin_to_slice(max_pad - pads[0]),
                                  margin_to_slice(max_pad - pads[1])]
 
-    images = get_padded_image(max_padded_images, (0, 0))
-    images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
-    assert_all_greater(images.shape, 0)
-
-    if max_pad == 0:
-        assert_array_equal(images, max_padded_images)
-    else:
-        assert_array_equal(images, max_padded_images[:,
-                                                     :,
-                                                     max_pad:-max_pad,
-                                                     max_pad:-max_pad])
-
-    # Make input_nodes with weird axis names and axis order
-    axis_map = {'b': 'b', 'see': 'c', 'zero': '0', 'one': '1'}
-    input_node_axes = ('b', 'zero', 'see', 'one')
-    transpose_indices = [('b', 'see', 'zero', 'one').index(a)
-                         for a in input_node_axes]
-    input_node_shape = [images.shape[t] for t in transpose_indices]
-    input_node_shape[input_node_axes.index('b')] = -1
-    input_node = InputNode(DenseFormat(axes=input_node_axes,
-                                       shape=input_node_shape,
-                                       dtype=input_dtype))
-
-    prod = itertools.product
-    chain = itertools.chain
 
     def get_pads_from_pad_arg(pad_arg, window_shape):
         '''
@@ -583,6 +577,9 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
             _assert_is_shape2d(pad_arg)
             return numpy.asarray(pad_arg)
 
+
+    prod = itertools.product
+
     def get_pad_args(window_shape, supports_padding):
         '''
         Returns all possible pad_args to try.
@@ -590,13 +587,50 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
         if not supports_padding:
             return [(0, 0)]
         else:
-            return chain(
-                ('same_shape', 'full', 'valid'),
-                prod(range(window_shape[0] + 1),
-                     range(window_shape[1] + 1)))
+            chain = itertools.chain
+            return chain(('same_shape', 'full', 'valid'),
+                         prod(range(window_shape[0] + 1),
+                              range(window_shape[1] + 1)))
 
-    for expected_func, make_node_func in safe_izip(expected_subwindow_funcs,
-                                                   make_node_funcs):
+    for (expected_func,
+         pad_value,
+         make_node_func) in safe_izip(expected_subwindow_funcs,
+                                      pad_values,
+                                      make_node_funcs):
+
+        # An image with the maximum amount of padding.  We will vary the amount
+        # of padding in practice by taking centered subwindows of this image.
+        max_padded_images = numpy.empty((batch_size,
+                                         num_channels,
+                                         max_pad * 2 + max_window_size + 1,
+                                         max_pad * 2 + max_window_size + 4),
+                                        dtype=input_dtype)
+        max_padded_images[...] = pad_value
+
+        images = get_padded_image(max_padded_images, (0, 0))
+        # images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
+        images[...] = numpy.arange(images.size).reshape(images.shape)
+        assert_all_greater(images.shape, 0)
+
+        if max_pad == 0:
+            assert_array_equal(images, max_padded_images)
+        else:
+            assert_array_equal(images, max_padded_images[:,
+                                                         :,
+                                                         max_pad:-max_pad,
+                                                         max_pad:-max_pad])
+
+        # Make input_nodes with weird axis names and axis order
+        axis_map = {'b': 'b', 'see': 'c', 'zero': '0', 'one': '1'}
+        input_node_axes = ('b', 'see', 'zero', 'one')
+        # input_node_axes = ('b', 'zero', 'see', 'one')
+        transpose_indices = [('b', 'see', 'zero', 'one').index(a)
+                             for a in input_node_axes]
+        input_node_shape = [images.shape[t] for t in transpose_indices]
+        input_node_shape[input_node_axes.index('b')] = -1
+        input_node = InputNode(DenseFormat(axes=input_node_axes,
+                                           shape=input_node_shape,
+                                           dtype=input_dtype))
 
         # Loops through all possible window_shapes, pads (including padding
         # bigger than the window shape), strides.
@@ -621,32 +655,45 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                                            window_shape,
                                                            strides)
 
-                    node = make_node_func(input_node,
-                                          window_shape=window_shape,
-                                          strides=strides,
-                                          pads=pad_arg,  # pads,
-                                          axis_map=axis_map)
+                    # If pads are bigger than window_size, expect an exception
+                    # when creating the node.
+                    if not isinstance(pads, basestring) and \
+                       numpy.any(pads >= window_shape):
+                        assert_raises_regexp(AssertionError,
+                                             "Not all pads",
+                                             make_node_func,
+                                             input_node,
+                                             window_shape=window_shape,
+                                             strides=strides,
+                                             pads=pad_arg,
+                                             axis_map=axis_map)
+                    else:
+                        node = make_node_func(input_node,
+                                              window_shape=window_shape,
+                                              strides=strides,
+                                              pads=pad_arg,
+                                              axis_map=axis_map)
 
-                    node_func = theano.function([input_node.output_symbol],
-                                                node.output_symbol)
-                    transposed_images = images.transpose(transpose_indices)
-                    actual_images = node_func(transposed_images)
-                    try:
-                        node.output_format.check(actual_images)
-                    except AssertionError:
-                        pdb.set_trace()
+                        node_func = theano.function([input_node.output_symbol],
+                                                    node.output_symbol)
+                        transposed_images = images.transpose(transpose_indices)
+                        actual_images = node_func(transposed_images)
+                        try:
+                            node.output_format.check(actual_images)
+                        except AssertionError:
+                            pdb.set_trace()
 
-                    kwargs = {}
-                    if rtol is not None:
-                        kwargs['rtol'] = rtol
+                        kwargs = {}
+                        if rtol is not None:
+                            kwargs['rtol'] = rtol
 
-                    try:
-                        # pylint: disable=star-args
-                        assert_allclose(actual_images,
-                                        expected_images,
-                                        **kwargs)
-                    except AssertionError:
-                        pdb.set_trace()
+                        try:
+                            # pylint: disable=star-args
+                            assert_allclose(actual_images,
+                                            expected_images,
+                                            **kwargs)
+                        except AssertionError:
+                            pdb.set_trace()
 
 
 def test_pool2d():
@@ -671,28 +718,141 @@ def test_pool2d():
     def make_average_pool_node(input_node,
                                window_shape,
                                strides,
-                               _,  # ignore 'pads' arg
+                               pads,
                                axis_map):
         return Pool2D(input_node=input_node,
                       window_shape=window_shape,
                       strides=strides,
                       mode='average',
+                      pad=pads,
                       axis_map=axis_map)
 
     def make_max_pool_node(input_node,
                            window_shape,
                            strides,
-                           _,  # ignore 'pads' arg
+                           pads,
                            axis_map):
         return Pool2D(input_node=input_node,
                       window_shape=window_shape,
                       strides=strides,
                       mode='max',
+                      pad=pads,
                       axis_map=axis_map)
 
     _sliding_window_2d_testimpl([average_pool, max_pool],
+                                [0.0, -numpy.inf],
                                 [make_average_pool_node, make_max_pool_node],
-                                supports_padding=False)
+                                supports_padding=True)
+
+
+def test_pool2d_pylearn2():
+    '''
+    Tests that pool2d's 'pylearn2' padding mode indeed creates the same results
+    as pylearn2's pooling operator.
+    '''
+    if not pylearn2_installed:
+        return
+
+    floatX = theano.config.floatX
+
+    batch_size = 2
+    num_channels = 2  # num. of conv filters
+    image_shape = (2, 3)  # size of conv+bias output
+    input_node = InputNode(DenseFormat(axes=('b', 'c', '0', '1'),
+                                       shape=(-1, num_channels) + image_shape,
+                                       dtype=floatX))
+
+    pool_shape = (2, 2)
+    pool_strides = (2, 2)
+    pl_pooled_symbol = mlp.max_pool(bc01=input_node.output_symbol,
+                                    pool_shape=pool_shape,
+                                    pool_stride=pool_strides,
+                                    image_shape=image_shape)
+
+    pl_pool_func = theano.function([input_node.output_symbol],
+                                   pl_pooled_symbol)
+
+    sl_pool_node = Pool2D(input_node=input_node, window_shape=pool_shape,
+                          strides=pool_strides, mode='max',
+                          pad='pylearn2')
+
+    sl_pool_func = theano.function([input_node.output_symbol],
+                                   sl_pool_node.output_symbol)
+
+    input_batch = numpy.arange(batch_size *
+                               numpy.prod(input_node.output_format.shape[1:]))
+    input_batch = numpy.cast[floatX](input_batch)
+    input_batch = input_batch.reshape(input_node.output_format.shape)
+
+    pl_pooled_batch = pl_pool_func(input_batch)
+    sl_pooled_batch = sl_pool_func(input_batch)
+    assert_array_equal(sl_pooled_batch, pl_pooled_batch)
+
+
+def test_pool2d_quick():
+    '''
+    Tests max and avg pooling for all pad keyword values.
+    Confirms that they pad with -inf and 0, respectively.
+    '''
+    # make all inputs negative, to make sure max pooling pads with -inf, while
+    # avg pooling pads with 0.
+    input_image = numpy.asarray([1, 2, 3, 4, 3, 2, 1], dtype='float32')
+    input_image -= 5.0
+    assert_true((input_image < 0).all())
+
+    # convert to bc01 format
+    newaxis = numpy.newaxis
+    input_image = input_image[newaxis, newaxis, newaxis, :]
+
+    def make_pool_func(mode, pad):
+        shape = list(input_image.shape)
+        shape[0] = -1
+        input_node = InputNode(DenseFormat(shape=shape,
+                                           axes=('b', 'c', '0', '1'),
+                                           dtype=input_image.dtype))
+        pool_node = Pool2D(input_node,
+                           (1, 4),
+                           (1, 2),
+                           mode=mode,
+                           pad=pad)
+        return theano.function([input_node.output_symbol],
+                               pool_node.output_symbol[0, 0, 0, :])
+
+    # TODO: max_pooled_pylearn2_padding, avg_pooled_pylearn2_padding
+
+    max_pooled_pylearn2_padding = \
+        make_pool_func(mode='max', pad='pylearn2')(input_image)
+    assert_array_equal(max_pooled_pylearn2_padding, [-1, -1, -2])
+
+    max_pooled_min_padding = make_pool_func(mode='max', pad='min')(input_image)
+    assert_array_equal(max_pooled_min_padding, [-2, -1, -1])
+
+    max_pooled_valid_padding = \
+        make_pool_func(mode='max', pad='valid')(input_image)
+    assert_array_equal(max_pooled_valid_padding, [-1, -1])
+
+    max_pooled_full_padding = \
+        make_pool_func(mode='max', pad='full')(input_image)
+    assert_array_equal(max_pooled_full_padding, [-4, -2, -1, -1, -3])
+
+    max_pooled_2_padding = make_pool_func(mode='max', pad=(0, 2))(input_image)
+    assert_array_equal(max_pooled_2_padding, [-3, -1, -1, -2])
+
+    avg_pooled_pylearn2_padding = \
+        make_pool_func(mode='average', pad='pylearn2')(input_image)
+    assert_array_equal(avg_pooled_pylearn2_padding, [-2.5, -2, -9 / 4.])
+
+    avg_pooled_min_padding = \
+        make_pool_func(mode='average', pad='min')(input_image)
+    assert_allclose(avg_pooled_min_padding, [-2.25, -2, -2.5])
+
+    avg_pooled_valid_padding = \
+        make_pool_func(mode='average', pad='valid')(input_image)
+    assert_allclose(avg_pooled_valid_padding, [-2.5, -2])
+
+    avg_pooled_full_padding = \
+        make_pool_func(mode='average', pad='full')(input_image)
+    assert_allclose(avg_pooled_full_padding, [-1, -9 / 4., -2, -2.5, -7 / 4.])
 
 
 def test_conv2d():
@@ -724,7 +884,8 @@ def test_conv2d():
                         num_filters,
                         pads,
                         strides,
-                        axis_map)
+                        axis_map,
+                        conv_mode='cross')
 
         filters = result.filters.get_value()
         filters[...] = rand_floats(filters.shape)
@@ -733,13 +894,14 @@ def test_conv2d():
         return result
 
     _sliding_window_2d_testimpl([convolve],
+                                [0.0],
                                 [make_conv_node],
                                 supports_padding=True,
                                 rtol=1e-3)
 
+
 def test_make_2d_gaussian_filter():
     dtype = theano.config.floatX  # pylint: disable=no-member
-    standard_deviation = 2.0
 
     # Test a range of filter shapes: square, non-square, even dims, odd dims
     for filter_shape in itertools.product(range(3, 7), repeat=2):
@@ -748,7 +910,7 @@ def test_make_2d_gaussian_filter():
         def make_expected_filter(filter_shape):
             standard_deviations = filter_shape / 4.0
 
-            covariance = numpy.diag(standard_deviations**2)
+            covariance = numpy.diag(standard_deviations ** 2)
             inv_covariance = numpy.diag(1.0 / standard_deviations ** 2)
 
             mean = filter_shape // 2
@@ -768,6 +930,7 @@ def test_make_2d_gaussian_filter():
         actual_filter = _make_2d_gaussian_filter(filter_shape, dtype=dtype)
 
         assert_allclose(actual_filter, expected_filter)
+
 
 def test_lcn():
     '''
@@ -815,6 +978,102 @@ def test_lcn():
                                     mono_lcn.output_symbol)
     mono_lcn_batch = mono_function(mono_image_batch)
 
-
     assert_allclose(rgb_lcn_batch.reshape((-1, 1, num_rows, num_columns)),
                     mono_lcn_batch)
+
+
+def test_conv_layer():
+    '''
+    Sees if the Conv2DLayer properly implements
+    conv -> channel-wise bias -> relu -> max pool
+    '''
+
+    image_format = DenseFormat(axes=('b', 'c', '0', '1'),  # TODO: shuffle
+                               shape=(-1, 3, 10, 12),
+                               dtype=theano.config.floatX)
+
+    image_node = InputNode(fmt=image_format)
+
+    rng_seed = 13515
+    # theano_rng_seed = 42235
+
+    # Conv layer parameters
+    filter_shape = (3, 3)
+    num_filters = 2
+    conv_pads = 'same_shape'
+    pool_shape = (4, 4)
+    pool_strides = (2, 2)
+
+    def randomize(rng, params):
+        values = params.get_value()
+        values[...] = rng.uniform(low=-.05, high=.05, size=values.shape)
+        params.set_value(values)
+
+    def make_conv_layer():
+
+        conv_layer_node = Conv2DLayer(image_node,
+                                      filter_shape=filter_shape,
+                                      num_filters=num_filters,
+                                      conv_pads=conv_pads,
+                                      pool_window_shape=pool_shape,
+                                      pool_strides=pool_strides)
+
+        filters = conv_layer_node.conv2d_node.filters
+        biases = conv_layer_node.bias_node.params
+
+        rng = numpy.random.RandomState(rng_seed)
+
+        randomize(rng, filters)
+        randomize(rng, biases)
+        return conv_layer_node
+
+    conv_layer_node = make_conv_layer()
+    conv_layer_function = theano.function([image_node.output_symbol],
+                                          conv_layer_node.output_symbol)
+
+    #
+    # Construct a chain of lesser nodes that should have the same effect as
+    # conv_layer_node. In particular, use a more direct way of expressing the
+    # bias.
+    #
+
+    def make_conv_sequence():
+        conv2d_node = Conv2D(image_node,
+                             filter_shape=filter_shape,
+                             num_filters=num_filters,
+                             pads=conv_pads)
+
+        biases = theano.shared(numpy.zeros((1, num_filters, 1, 1),
+                                           dtype=theano.config.floatX),
+                               broadcastable=(True, False, True, True))
+
+        bias_node = Node(conv2d_node,
+                         conv2d_node.output_symbol + biases,
+                         conv2d_node.output_format)
+
+        relu_node = ReLU(bias_node)
+        pool_node = Pool2D(relu_node,
+                           mode='max',
+                           window_shape=pool_shape,
+                           strides=pool_strides,
+                           pad='valid')
+
+        rng = numpy.random.RandomState(rng_seed)
+        randomize(rng, conv2d_node.filters)
+        randomize(rng, biases)
+
+        return pool_node
+
+    conv_sequence_output_node = make_conv_sequence()
+    conv_sequence_function = theano.function(
+        [image_node.output_symbol],
+        conv_sequence_output_node.output_symbol)
+
+    batch_size = 3
+    image = image_node.output_format.make_batch(is_symbolic=False,
+                                                batch_size=batch_size)
+
+    actual_output = conv_layer_function(image)
+    expected_output = conv_sequence_function(image)
+
+    assert_allclose(actual_output, expected_output)

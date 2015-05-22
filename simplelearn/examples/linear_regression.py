@@ -123,12 +123,12 @@ def main():
         Returns dot(inputs, matrix) + bias.
         '''
         assert_equal(matrix.ndim, 2)
-        assert_equal(bias.ndim, 2)
+        assert_equal(bias.ndim, 1)
         assert_equal(bias.shape[0], matrix.shape[1])
         assert_equal(inputs.ndim, 2)
 
         result = numpy.dot(inputs, matrix) + bias
-        assert_equal(result.shape, (inputs.shape[0], bias.shape[1]))
+        assert_equal(result.shape, (inputs.shape[0], bias.shape[0]))
         return result
 
     def make_random_dataset(matrix,
@@ -190,7 +190,7 @@ def main():
 
     # The "ground truth" affine transform
     matrix = rng.uniform(size=(2, 1))
-    bias = rng.uniform(size=(1, 1))
+    bias = rng.uniform(size=(1, ))
 
     min_input = (-1.0, -1.0)
     max_input = (1.0, 1.0)
@@ -426,7 +426,7 @@ def main():
             batch_size=testing_inputs.shape[0]),
         monitors=[validation_loss_monitor])
 
-    sgd = Sgd(inputs=input_symbols,
+    sgd = Sgd(inputs=[input_node, label_node],
               input_iterator=training_iterator,
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],

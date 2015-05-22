@@ -334,16 +334,14 @@ def test_denseformat_make_batch():
 
     # pylint: disable=anomalous-backslash-in-string
 
-    assert_raises_regexp(ValueError,
-                         "This format has no batch \('b'\) axis",
-                         batchless_format.make_batch,
-                         True)
+    # this should return without crashing
+    batchless_format.make_batch(is_symbolic=True)
 
-    assert_raises_regexp(ValueError,
-                         "This format has no batch \('b'\) axis",
+    assert_raises_regexp(AssertionError,
+                         "this format has no batch \('b'\) axis",
                          batchless_format.make_batch,
-                         False,
-                         2)
+                         is_symbolic=False,
+                         batch_size=2)
 
     axes = ('b', '0', '1', 'c')
     shape = (-1, 2, 3, 4)

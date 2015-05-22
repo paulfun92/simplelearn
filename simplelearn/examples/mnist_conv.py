@@ -4,8 +4,11 @@
 Demonstrates training a convolutional net on MNIST.
 '''
 
+from __future__ import print_function
+
 import os
 import argparse
+import timeit
 import numpy
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
@@ -16,24 +19,20 @@ from nose.tools import (assert_true,
                         assert_greater_equal,
                         assert_less_equal,
                         assert_equal)
-from simplelearn.nodes import (Node,
-                               Conv2D,
-                               Pool2D,
-                               ReLU,
+from simplelearn.nodes import (Conv2DLayer,
                                Dropout,
-                               AffineTransform,
                                CrossEntropy,
                                Misclassification,
-                               Softmax,
+                               SoftmaxLayer,
                                RescaleImage,
                                FormatNode)
 from simplelearn.utils import (safe_izip,
                                assert_floating,
                                assert_all_equal,
                                assert_all_greater,
-                               assert_all_less_equal,
                                assert_all_integers)
 from simplelearn.io import SerializableModel
+from simplelearn.data.dataset import Dataset
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
@@ -41,14 +40,13 @@ from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
                                   LogsToLists,
                                   SavesAtMinimum,
-                                  Monitor,
                                   AverageMonitor,
+                                  EpochCallback,
                                   LimitsNumEpochs,
                                   LinearlyInterpolatesOverEpochs,
                                   PicklesOnEpoch,
                                   ValidationCallback,
                                   StopsOnStagnation)
-import pdb
 
 
 def parse_args():
@@ -89,11 +87,19 @@ def parse_args():
         assert_equal(os.path.splitext(abs_path)[1], "")
         return arg
 
-    def positive_0_to_1(arg):
+    def non_negative_0_to_1(arg):
         result = float(arg)
-        assert_greater(result, 0.0)
+        assert_greater_equal(result, 0.0)
         assert_less_equal(result, 1.0)
         return result
+
+    def max_norm_arg(arg):
+        arg = float(arg)
+        if arg < 0.0:
+            return numpy.inf
+        else:
+            assert_greater(arg, 0.0)
+            return arg
 
     parser.add_argument("--output-prefix",
                         type=legit_prefix,
@@ -101,8 +107,8 @@ def parse_args():
                         help=("Directory and optional prefix of filename to "
                               "save the log to."))
 
-    # Most of the default hyperparameter values below are taken from
-    # Pylearn2, in pylearn2/scripts/tutorials/multilayer_perceptron/:
+    # The default hyperparameter values below are taken from Pylearn2's mlp
+    # tutorial, in pylearn2/scripts/tutorials/multilayer_perceptron/:
     #   multilayer_perceptron.ipynb
     #   mlp_tutorial_part_3.yaml
     #
@@ -111,16 +117,16 @@ def parse_args():
 
     parser.add_argument("--learning-rate",
                         type=positive_float,
-                        default=0.001,  # .01 used in pylearn2 demo
+                        default=0.01,  # .01 used in pylearn2 demo
                         help=("Learning rate."))
 
     parser.add_argument("--initial-momentum",
-                        type=non_negative_float,
-                        default=0.5,
+                        type=non_negative_0_to_1,
+                        default=0.5,  # 0.5 used in original
                         help=("Initial momentum."))
 
     parser.add_argument("--no-nesterov",
-                        default=False,  # True used in pylearn2 demo
+                        default=True,  # original didn't use nesterov
                         action="store_true",
                         help=("Don't use Nesterov accelerated gradients "
                               "(default: False)."))
@@ -130,22 +136,14 @@ def parse_args():
                         default=100,
                         help="batch size")
 
-    parser.add_argument("--dropout-include-rates",
-                        default=(1.0, 1.0),  # i.e. no dropout
-                        type=positive_0_to_1,
-                        nargs=2,
-                        help=("The dropout include rates for the outputs of "
-                              "the first two layers. Must be in the range "
-                              "(0.0, 1.0]. If 1.0, the Dropout node will "
-                              "simply be omitted. For no dropout, use "
-                              "1.0 1.0 (this is the default). Make sure to "
-                              "lower the learning rate when using dropout. "
-                              "I'd suggest a learning rate of 0.001 for "
-                              "dropout-include-rates of 0.5 0.5."))
+    parser.add_argument("--dropout",
+                        action='store_true',
+                        default=False,  # original didn't use dropout
+                        help="Use dropout.")
 
     parser.add_argument("--final-momentum",
-                        type=positive_0_to_1,
-                        default=.5,  # .99 used in pylearn2 demo
+                        type=non_negative_0_to_1,
+                        default=.99,  # original used .99
                         help="Value for momentum to linearly scale up to.")
 
     parser.add_argument("--epochs-to-momentum-saturation",
@@ -154,19 +152,62 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    max_norm = 1.9365 / 2  # 1.9365 used in pylearn2 demo
+    default_max_norm = 1.9365  # value used in original
 
     parser.add_argument("--max-filter-norm",
-                        type=positive_float,
-                        default=max_norm,
-                        help="Max. L2 norm of the convolutional filters.")
+                        type=max_norm_arg,
+                        default=default_max_norm,
+                        help=("Max. L2 norm of the convolutional filters. "
+                              "Enter a negative number to not impose any "
+                              "max norm."))
 
     parser.add_argument("--max-col-norm",
-                        type=positive_float,
-                        default=max_norm,
-                        help="Max. L2 norm of weight matrix columns.")
+                        type=max_norm_arg,
+                        default=default_max_norm,
+                        help=("Max. L2 norm of weight matrix columns. Enter a "
+                              "negative number to not imppose any max norm."))
+
+    parser.add_argument("--weight-decay",
+                        type=non_negative_float,
+                        default=0.00005,
+                        metavar="K",
+                        help=("For each weight matrix or filters tensor W, "
+                              "add K * sqr(W).sum() to each batch's cost, for "
+                              "all weights and filters"))
+
+    parser.add_argument("--validation-size",
+                        type=non_negative_int,
+                        default=10000,
+                        metavar="V",
+                        help=("If this is zero, use the test set as the "
+                              "validation set. Otherwise, use the last V "
+                              "elements of the training set as the validation "
+                              "set."))
 
     return parser.parse_args()
+
+
+class EpochTimer(EpochCallback):
+    '''
+    Prints the epoch number and duration after each epoch.
+    '''
+
+    def __init__(self):
+        self.start_time = None
+        self.epoch_number = None
+
+    def on_start_training(self):
+        self.start_time = timeit.default_timer()
+        self.epoch_number = 0
+
+    def on_epoch(self):
+        end_time = timeit.default_timer()
+
+        print("Epoch {} duration: {}".format(self.epoch_number,
+                                             end_time - self.start_time))
+
+        self.start_time = end_time
+        self.epoch_number += 1
 
 
 def build_conv_classifier(input_node,
@@ -209,38 +250,36 @@ def build_conv_classifier(input_node,
     assert_equal(len(affine_output_sizes), len(affine_init_stddevs))
 
     assert_equal(len(dropout_include_rates),
-                 len(filter_shapes) + len(affine_output_sizes) - 1)
+                 len(filter_shapes) + len(affine_output_sizes))
 
     assert_equal(affine_output_sizes[-1], 10)  # for MNIST
 
-    #
-    # Converts from MNIST's ('b', '0', '1') to ('b', 'c', '0', '1')
-    #
-
     assert_equal(input_node.output_format.axes, ('b', '0', '1'))
+
+    #
+    # Done sanity-checking args.
+    #
 
     input_shape = input_node.output_format.shape
 
-    last_node = FormatNode(
-        input_node,
-        DenseFormat(axes=('b', 'c', '0', '1'),
-                    shape=(input_shape[0],
-                           1,
-                           input_shape[1],
-                           input_shape[2]),
-                    dtype=None),
-        {'1': ('1', 'c')})
+    # Converts from MNIST's ('b', '0', '1') to ('b', 'c', '0', '1')
+    last_node = FormatNode(input_node,
+                           DenseFormat(axes=('b', 'c', '0', '1'),
+                                       shape=(input_shape[0],
+                                              1,
+                                              input_shape[1],
+                                              input_shape[2]),
+                                       dtype=None),
+                           {'b': ('b', 'c')})
+        # {'1': ('1', 'c')})
 
     conv_dropout_include_rates = \
         dropout_include_rates[:len(filter_shapes)]
 
-    # last_node = input_node
+    # Adds a dropout-conv-bias-relu-maxpool stack for each element in
+    # filter_XXXX
 
-    #
-    # Adds a conv-relu-maxpool-dropout stack for each element in filter_XXXX
-    #
-
-    conv_nodes = []
+    conv_layers = []
 
     def uniform_init(rng, params, init_range):
         '''
@@ -268,26 +307,25 @@ def build_conv_classifier(input_node,
                                                  pool_shapes,
                                                  pool_strides,
                                                  conv_dropout_include_rates):
-        last_node = Conv2D(last_node,
-                           filter_shape,
-                           filter_count,
-                           pads='valid')
-        uniform_init(rng, last_node.filters, filter_init_range)
-        conv_nodes.append(last_node)
-
-        last_node = ReLU(last_node)
-
-        last_node = Pool2D(last_node, pool_shape, pool_stride, mode='max')
-
         if conv_dropout_include_rate != 1.0:
             last_node = Dropout(last_node,
                                 conv_dropout_include_rate,
                                 theano_rng)
 
-    affine_dropout_include_rates = \
-        list(dropout_include_rates[len(filter_shapes):]) + [None]
+        last_node = Conv2DLayer(last_node,
+                                filter_shape,
+                                filter_count,
+                                conv_pads='valid',
+                                pool_window_shape=pool_shape,
+                                pool_strides=pool_stride,
+                                pool_pads='pylearn2')
+        conv_layers.append(last_node)
 
-    affine_nodes = []
+        uniform_init(rng, last_node.conv2d_node.filters, filter_init_range)
+
+    affine_dropout_include_rates = dropout_include_rates[len(filter_shapes):]
+
+    affine_layers = []
 
     def normal_distribution_init(rng, params, stddev):
         '''
@@ -303,7 +341,7 @@ def build_conv_classifier(input_node,
         params.set_value(values)
 
     #
-    # Adds an affine-relu-dropout stack for each element in affine_XXXX,
+    # Adds a dropout-affine-relu stack for each element in affine_XXXX,
     # except for the last one, where it omits the dropout.
     #
 
@@ -314,42 +352,42 @@ def build_conv_classifier(input_node,
                   affine_init_stddevs,
                   affine_dropout_include_rates):
 
-        # The first affine node needs an axis map to collapse a feature map
-        # (axes: 'b', 'c', '0', '1') into a feature vector (axes: 'b', 'f')
-        axis_map = ({('c', '0', '1'): 'f'}
-                    if len(affine_nodes) == 0
-                    else None)
-
-        last_node = AffineTransform(last_node,
-                                    DenseFormat(axes=('b', 'f'),
-                                                shape=(-1, affine_size),
-                                                dtype=None),
-                                    input_to_bf_map=axis_map)
-        normal_distribution_init(rng,
-                                 last_node.linear_node.params,
-                                 affine_init_stddev)
-        # stddev_init(rng, last_node.bias_node.params, affine_init_stddev)
-        affine_nodes.append(last_node)
-
-        last_node = ReLU(last_node)
-
-        if len(affine_nodes) == len(affine_output_sizes):
-            assert affine_dropout_include_rate is None
-        elif affine_dropout_include_rate < 1.0:
+        if affine_dropout_include_rate < 1.0:
             last_node = Dropout(last_node,
                                 affine_dropout_include_rate,
                                 theano_rng)
 
-    last_node = Softmax(last_node)
+        # No need to supply an axis map for the first affine transform.
+        # By default, it collapses all non-'b' axes into a feature vector,
+        # which is what we want.
 
-    return conv_nodes, affine_nodes, last_node
+        # remap from bc01 to b01c before flattening to bf, as pylearn2 does,
+        # just so that they do identical things.
+        last_node = SoftmaxLayer(last_node,
+                                 DenseFormat(axes=('b', 'f'),
+                                             shape=(-1, affine_size),
+                                             dtype=None),
+                                 input_to_bf_map={('0', '1', 'c'): 'f'})
+        normal_distribution_init(rng,
+                                 last_node.affine_node.linear_node.params,
+                                 affine_init_stddev)
+        # stddev_init(rng, last_node.bias_node.params, affine_init_stddev)
+        affine_layers.append(last_node)
+
+    return conv_layers, affine_layers, last_node
 
 
-def print_mcr(values, _):
+def print_misclassification_rate(values, _):  # ignores 2nd argument (formats)
+    '''
+    Prints the misclassification rate.
+    '''
     print("Misclassification rate: %s" % str(values))
 
 
-def print_loss(values, _):  # 2nd argument: formats
+def print_loss(values, _):  # ignores 2nd argument (formats)
+    '''
+    Prints the average loss.
+    '''
     print("Average loss: %s" % str(values))
 
 
@@ -371,24 +409,36 @@ def main():
     pool_strides = [(2, 2), (2, 2)]
     affine_output_sizes = [10]
     affine_init_stddevs = [.05] * len(affine_output_sizes)
-    # dropout_include_rates = [.5] * len(filter_counts)
-    # dropout_include_rates += [.5] * (len(affine_output_sizes) - 1)
+    dropout_include_rates = ([.5 if args.dropout else 1.0] *
+                             (len(filter_counts) + len(affine_output_sizes)))
 
     assert_equal(affine_output_sizes[-1], 10)
 
     mnist_training, mnist_testing = load_mnist()
 
+    if args.validation_size != 0:
+        tensors = mnist_training.tensors
+        training_tensors = [t[:-args.validation_size, ...] for t in tensors]
+        testing_tensors = [t[args.validation_size:, ...] for t in tensors]
+        mnist_training = Dataset(tensors=training_tensors,
+                                 names=mnist_training.names,
+                                 formats=mnist_training.formats)
+        mnist_testing = Dataset(tensors=testing_tensors,
+                                names=mnist_training.names,
+                                formats=mnist_training.formats)
+
     mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
+                                                    loop_style='divisible',
                                                     batch_size=args.batch_size)
 
     image_uint8_node, label_node = mnist_testing_iterator.make_input_nodes()
     image_node = RescaleImage(image_uint8_node)
 
-    rng = numpy.random.RandomState(34523)
+    rng = numpy.random.RandomState(1234)
     theano_rng = RandomStreams(23845)
 
-    (conv_nodes,
-     affine_nodes,
+    (conv_layers,
+     affine_layers,
      output_node) = build_conv_classifier(image_node,
                                           filter_shapes,
                                           filter_counts,
@@ -397,12 +447,24 @@ def main():
                                           pool_strides,
                                           affine_output_sizes,
                                           affine_init_stddevs,
-                                          args.dropout_include_rates,
+                                          dropout_include_rates,
                                           rng,
                                           theano_rng)
 
     loss_node = CrossEntropy(output_node, label_node)
     scalar_loss = loss_node.output_symbol.mean()
+
+    if args.weight_decay != 0.0:
+        for conv_layer in conv_layers:
+            filters = conv_layer.conv2d_node.filters
+            filter_loss = args.weight_decay * theano.tensor.sqr(filters).sum()
+            scalar_loss = scalar_loss + filter_loss
+
+        for affine_layer in affine_layers:
+            weights = affine_layer.affine_node.linear_node.params
+            weight_loss = args.weight_decay * theano.tensor.sqr(weights).sum()
+            scalar_loss = scalar_loss + weight_loss
+
     max_epochs = 500
 
     #
@@ -432,44 +494,46 @@ def main():
             args.final_momentum,
             args.epochs_to_momentum_saturation))
 
-    for conv_node in conv_nodes:
-        parameters.append(conv_node.filters)
-        add_updaters(conv_node.filters,
+    for conv_layer in conv_layers:
+        filters = conv_layer.conv2d_node.filters
+        parameters.append(filters)
+        add_updaters(filters,
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
-        limit_param_norms(parameter_updaters[-1],
-                          conv_node.filters,
-                          args.max_filter_norm,
-                          (1, 2, 3))
 
-    for affine_node in affine_nodes:
-        weights = affine_node.linear_node.params
+        if args.max_filter_norm != numpy.inf:
+            limit_param_norms(parameter_updaters[-1],
+                              filters,
+                              args.max_filter_norm,
+                              (1, 2, 3))
+
+        bias = conv_layer.bias_node.params
+        parameters.append(bias)
+        add_updaters(bias,
+                     scalar_loss,
+                     parameter_updaters,
+                     momentum_updaters)
+
+    for affine_layer in affine_layers:
+        weights = affine_layer.affine_node.linear_node.params
         parameters.append(weights)
         add_updaters(weights,
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
-        limit_param_norms(parameter_updater=parameter_updaters[-1],
-                          params=weights,
-                          max_norm=args.max_col_norm,
-                          input_axes=[0])
+        if args.max_col_norm != numpy.inf:
+            limit_param_norms(parameter_updater=parameter_updaters[-1],
+                              params=weights,
+                              max_norm=args.max_col_norm,
+                              input_axes=[0])
 
-        biases = affine_node.bias_node.params
+        biases = affine_layer.affine_node.bias_node.params
         parameters.append(biases)
         add_updaters(biases,
                      scalar_loss,
                      parameter_updaters,
                      momentum_updaters)
-
-    # updates = [updater.updates.values()[0] - updater.updates.keys()[0]
-    #            for updater in parameter_updaters]
-    # update_norm_monitors = [UpdateNormMonitor("layer %d %s" %
-    #                                           (i // 2,
-    #                                            "weights" if i % 2 == 0 else
-    #                                            "bias"),
-    #                                           update)
-    #                         for i, update in enumerate(updates)]
 
     #
     # Makes batch and epoch callbacks
@@ -485,7 +549,7 @@ def main():
                                              min_proportional_decrease=0.0)
         return AverageMonitor(misclassification_node.output_symbol,
                               misclassification_node.output_format,
-                              callbacks=[print_mcr,
+                              callbacks=[print_misclassification_rate,
                                          mcr_logger,
                                          training_stopper])
 
@@ -512,7 +576,12 @@ def main():
         '''
         assert_equal(os.path.splitext(args.output_prefix)[1], "")
 
-        output_dir, output_prefix = os.path.split(args.output_prefix)
+        if os.path.isdir(args.output_prefix):
+            output_dir, output_prefix = args.output_prefix, ""
+        else:
+            output_dir, output_prefix = os.path.split(args.output_prefix)
+            assert_true(os.path.isdir(output_dir))
+
         if output_prefix != "":
             output_prefix = output_prefix + "_"
 
@@ -539,9 +608,10 @@ def main():
         input_iterator=mnist_testing_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
-    # pdb.set_trace()
-    trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
+    # trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
+    trainer = Sgd([image_uint8_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
+                                          loop_style='divisible',
                                           batch_size=args.batch_size),
                   parameters,
                   parameter_updaters,
@@ -559,7 +629,8 @@ def main():
     #      ('model', model)))
 
     trainer.epoch_callbacks = (momentum_updaters +
-                               [PicklesOnEpoch(stuff_to_pickle,
+                               [EpochTimer(),
+                                PicklesOnEpoch(stuff_to_pickle,
                                                make_output_filename(args),
                                                overwrite=False),
                                 validation_callback,

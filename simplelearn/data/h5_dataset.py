@@ -20,19 +20,48 @@ from simplelearn.data.dataset import Dataset
 
 import pdb
 
+
 def make_h5_file(path,
                  partition_names,
                  partition_sizes,
                  tensor_names,
-                 tensor_formats,
-                 dtypes=None):
+                 tensor_formats):
+    # ,
+    #              dtypes=None):
     '''
     Creates a h5py.File with groups that can be wrapped by H5Dataset.
 
-    For example, an h5py.File of labeled images with a test and train set would
-    have the following internal structure:
+    Usage
+    -----
 
-    file: an h5py.File, containing the following named members:
+    h5_file = make_hf_file(file_path, p_names, p_sizes, t_names, t_formats)
+      1: Call this function to create a h5py.File object
+      2: Fill the h5py.File's data tensors with appropriate data.
+      3: Close the h5py.File, then re-open it using H5Dataset,
+         a read-only dataset interface.
+
+    Parameters
+    ----------
+    partition_names: Sequence
+      Names of the sub-datasets, e.g. ['test', 'train'].
+
+    partition_sizes: Sequence
+      Number of examples in each sub-dataset, e.g. [50000, 10000] for
+      MNIST.
+
+    tensor_names: Sequence
+      Names of the data tensors, e.g. ['images', 'labels']. Each
+      sub-tensor uses the same tensor_names.
+
+    tensor_formats: Sequence
+      The DataFormats of the data tensors, e.g. (for MNIST):
+      [DataFormat(axes=['b', '0', '1'], shape=[-1, 28, 28], dtype='uint8'),
+       DataFormat(axes=['b'], shape=[-1], dtype='uint8')]
+
+    The example parameter values above would create an h5py.File
+    with the following hierarchical structure:
+
+    hfpy.File/
       'partition_names': an h5py.Dataset of strings, ['test', 'train']
       'tensor_names': an h5py.Dataset of strings, ['images', 'labels']
       'partitions': an h5py.Group with the following members:
@@ -66,12 +95,12 @@ def make_h5_file(path,
     for tensor_format in tensor_formats:
         assert_in('b', tensor_format.axes)
 
-    if dtypes is not None:
-        tensor_formats = [copy.deepcopy(f) for f in tensor_formats]
-        for fmt, dtype in safe_izip(tensor_formats, dtypes):
-            assert_not_equal(fmt.dtype is None, dtype is None)
-            if fmt.dtype is None:
-                fmt.dtype = dtype
+    # if dtypes is not None:
+    #     tensor_formats = [copy.deepcopy(f) for f in tensor_formats]
+    #     for fmt, dtype in safe_izip(tensor_formats, dtypes):
+    #         assert_not_equal(fmt.dtype is None, dtype is None)
+    #         if fmt.dtype is None:
+    #             fmt.dtype = dtype
 
     # Done sanity-checking args
 
@@ -126,7 +155,8 @@ def make_h5_file(path,
 
 class H5Dataset(Dataset):
     '''
-    A Dataset that wraps a h5py.Group, in a h5py.File created by open_h5_file.
+    A read-only Dataset that wraps a h5py.Group, in a h5py.File created by
+    make_h5_file.
 
     When pickled, this saves the HDF5 file's path, and the group name of
     the partition within it.
@@ -144,6 +174,20 @@ class H5Dataset(Dataset):
 
         assert_is_instance(path, basestring)
         assert_is_instance(partition_name, basestring)
+
+        path = os.path.abspath(path)
+
+        def is_subdir(sub_dir, root_dir):
+            '''
+            Return True iff sub_dir is a subdirectory of root_dir.
+            '''
+
+            sub_dir = os.path.abspath(sub_dir)
+            root_dir = os.path.abspath(root_dir)
+            common_prefix = os.path.commonprefix([root_dir, sub_dir])
+            return common_prefix == root_dir
+
+        assert_true(is_subdir(path, simplelearn.data.data_path))
 
         self.h5_file = h5py.File(path, mode='r')
 
@@ -169,11 +213,9 @@ class H5Dataset(Dataset):
                                shape=shape,
                                dtype=tensor.dtype)
 
-
         formats = [get_format(t) for t in tensors]
 
         super(H5Dataset, self).__init__(tensor_names, tensors, formats)
-
 
     def __getstate__(self):
         '''
@@ -187,6 +229,7 @@ class H5Dataset(Dataset):
     def __setstate__(self, state):
         self.__init__(os.path.join(simplelearn.data.data_path, state[0]),
                       state[1])
+
 
 def load_h5_dataset(h5_path, partition=None, mode='r'):
     '''

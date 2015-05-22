@@ -1,0 +1,1 @@
+-q --no-deps git+git://github.com/Theano/Theano.git#egg=Theano
