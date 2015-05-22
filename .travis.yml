@@ -4,6 +4,9 @@ python:
   # TODO: add this
   #- "3.4"
 
+# cache ubuntu packages
+cache: apt
+
   # command to install dependencies
 install:
   - sudo -E ./travis_install.sh
