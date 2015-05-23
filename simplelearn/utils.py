@@ -15,6 +15,7 @@ import collections
 import urllib2
 import numpy
 import itertools
+import theano
 from nose.tools import (assert_is_instance,
                         assert_equal,
                         assert_not_equal,
@@ -160,6 +161,30 @@ def download_url(url,
                     downloaded_size,
                     downloaded_size * 100. / file_size),
                       end='\r')
+
+
+def cudnn_available(arg=None):
+    '''
+    Returns True iff cuDNN, or a particular component of it, is available.
+
+    Available means that cuDNN is installed, and a particular component
+    hasn't been deactivated by setting theano.config.optimizer_excluding
+    to 'cudnn', 'conv_dnn', or 'pool_dnn'.
+    '''
+
+    if not theano.sandbox.cuda.dnn.dnn_available:
+        return False
+    elif 'cudnn' in theano.config.optimizer_excluding:
+        return False
+    elif arg == 'conv':
+        return 'conv_dnn' in theano.config.optimizer_excluding
+    elif arg == 'pool':
+        return 'pool_dnn' in theano.config.optimizer_excluding
+    elif arg is not None:
+        raise ValueError("Expected cudnn_availble() argument to be 'conv' "
+                         "or 'pool', but got '{}'.".format(arg))
+
+    return True
 
 
 def assert_integer(arg):

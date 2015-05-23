@@ -21,7 +21,7 @@ from nose.tools import (assert_is_instance,
                         assert_true,
                         assert_raises_regexp)
 from simplelearn.formats import DenseFormat
-from simplelearn.utils import safe_izip, assert_all_greater
+from simplelearn.utils import safe_izip, assert_all_greater, cudnn_available
 from simplelearn.nodes import (Node,
                                FormatNode,
                                InputNode,
@@ -393,7 +393,7 @@ def test_crossentropy():
 def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                 pad_values,
                                 make_node_funcs,
-                                supports_padding,
+                                make_pad_args_funcs,
                                 rtol=None):
     '''
     Implementation of tests for 2D sliding-window nodes like Pool2D and Conv2d.
@@ -414,7 +414,7 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     make_node_funcs: Sequence
       A Sequence of functions that create sliding-window Nodes to be tested
       against the ground-truth provided by the corresponding
-      expected_subwindow_funcs.
+      expected_subwindow_funcs. Its paramters are as follows:
 
       Parameters
       ----------
@@ -434,8 +434,10 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
         If the node uses different axis names than 'b', 'c', '0', '1', this
         specifies the mapping from the node's axis names to 'b', 'c', '0', '1'.
 
-    supports_padding: bool
-      True if the nodes being tested support zero-padding; otherwise False.
+    make_pad_args_funcs: Sequence
+      A Sequence of functions that take a window_shape arg (2d array) and
+      returns an Iterable of 'pad' arguments, which can be strings or 2d arrays
+      of ints.
     '''
 
     assert_is_instance(expected_subwindow_funcs, Sequence)
@@ -532,11 +534,13 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     num_channels = 2
     input_dtype = numpy.dtype('int')
 
-    if supports_padding:
-        max_pad = max_window_size + 1
-        # max_pad = max_window_size - 1
-    else:
-        max_pad = 0
+    max_pad = max_window_size + 1
+    # if supports_padding:
+    #     max_pad = max_window_size + 1
+    # else:
+    #     max_pad = 0
+
+
 
     assert_greater_equal(max_pad, 0)
 
@@ -581,23 +585,13 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
 
     prod = itertools.product
 
-    def get_pad_args(window_shape, supports_padding):
-        '''
-        Returns all possible pad_args to try.
-        '''
-        if not supports_padding:
-            return [(0, 0)]
-        else:
-            chain = itertools.chain
-            return chain(('same_shape', 'full', 'valid'),
-                         prod(range(window_shape[0] + 1),
-                              range(window_shape[1] + 1)))
-
     for (expected_func,
          pad_value,
-         make_node_func) in safe_izip(expected_subwindow_funcs,
-                                      pad_values,
-                                      make_node_funcs):
+         make_node_func,
+         make_pad_args_func) in safe_izip(expected_subwindow_funcs,
+                                          pad_values,
+                                          make_node_funcs,
+                                          make_pad_args_funcs):
 
         # An image with the maximum amount of padding.  We will vary the amount
         # of padding in practice by taking centered subwindows of this image.
@@ -638,7 +632,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
         for window_shape in prod(range(1, max_window_size + 1), repeat=2):
             window_shape = numpy.asarray(window_shape)
 
-            for pad_arg in get_pad_args(window_shape, supports_padding):
+            # for pad_arg in get_pad_args(window_shape, supports_padding):
+            for pad_arg in make_pad_args_func(window_shape):
                 # can't use same_shape padding with even window dims
                 if pad_arg == 'same_shape' and (window_shape % 2 == 0).any():
                     continue
@@ -740,10 +735,17 @@ def test_pool2d():
                       pad=pads,
                       axis_map=axis_map)
 
+    def get_pad_args(window_shape):
+        return itertools.chain(('same_shape', 'full', 'valid'),
+                               itertools.prod(range(window_shape[0] + 1),
+                                              range(window_shape[1] + 1)))
+
     _sliding_window_2d_testimpl([average_pool, max_pool],
-                                [0.0, -numpy.inf],
-                                [make_average_pool_node, make_max_pool_node],
-                                supports_padding=True)
+                                pad_values=[0.0, -numpy.inf],
+                                make_node_funcs=[make_average_pool_node,
+                                                 make_max_pool_node],
+                                make_pad_args_funcs=[get_pad_args,
+                                                     get_pad_args])
 
 
 def test_pool2d_pylearn2():
@@ -856,7 +858,8 @@ def test_pool2d_quick():
     assert_allclose(avg_pooled_full_padding, [-1, -9 / 4., -2, -2.5, -7 / 4.])
 
 
-def test_dnn_conv2d():
+def test_conv2d_nodes():
+
     def rand_floats(shape):
         rng = numpy.random.RandomState(382342)
         return rng.uniform(low=-10, high=10, size=shape)
@@ -875,11 +878,11 @@ def test_dnn_conv2d():
 
         return numpy.einsum('bcde,fcde->bf', subwindow, filters)
 
-    def make_conv_node(input_node,
-                       window_shape,
-                       strides,
-                       pads,
-                       axis_map):
+    def make_cudnn_conv2d(input_node,
+                    window_shape,
+                    strides,
+                    pads,
+                    axis_map):
         result = CuDnnConv2d(input_node,
                              window_shape,
                              num_filters,
@@ -887,18 +890,75 @@ def test_dnn_conv2d():
                              strides,
                              axis_map,
                              conv_mode='cross')
-
         filters = result.filters.get_value()
         filters[...] = rand_floats(filters.shape)
         result.filters.set_value(filters)
 
         return result
 
-    _sliding_window_2d_testimpl([convolve],
-                                [0.0],
-                                [make_conv_node],
-                                supports_padding=True,
-                                rtol=1e-3)
+    def make_conv2d(input_node,
+                    window_shape,
+                    strides,
+                    pads,
+                    axis_map):
+        result = Conv2d(input_node,
+                        window_shape,
+                        num_filters,
+                        pads,
+                        strides,
+                        axis_map)
+        filters = result.filters.get_value()
+        filters[...] = rand_floats(filters.shape)
+        result.filters.set_value(filters)
+
+        return result
+
+    # def make_conv_nodes(input_node,
+    #                     window_shape,
+    #                     strides,
+    #                     pads,
+    #                     axis_map):
+    #     args = (input_node,
+    #             window_shape,
+    #             num_filters,
+    #             pads,
+    #             strides,
+    #             axis_map)
+    #     results = [CuDnnConv2d(*args, conv_mode='cross'), Conv2d(*args)]
+
+    #     for conv_node in results:
+    #         filters = conv_node.filters.get_value()
+    #         filters[...] = rand_floats(filters.shape)
+    #         conv_node.filters.set_value(filters)
+
+    #     return results
+
+    # def get_pad_args(window_shape, supports_padding):
+    #     '''
+    #     Returns all possible pad_args to try.
+    #     '''
+    #     if not supports_padding:
+    #         return [(0, 0)]
+    #     else:
+    #         chain = itertools.chain
+    #         return chain(('same_shape', 'full', 'valid'),
+    #                      prod(range(window_shape[0] + 1),
+    #                           range(window_shape[1] + 1)))
+
+    def make_cudnn_conv2d_pad_args(window_shape):
+        return itertools.chain(('same_shape', 'full', 'valid'),
+                               itertools.prod(range(window_shape[0] + 1),
+                                              range(window_shape[1] + 1)))
+
+    def make_conv2d_pad_args(window_shape):
+        return ('full', 'valid')
+
+    _sliding_window_2d_testimpl(
+        [convolve, convolve],
+        pad_values=[0.0, 0.0],
+        make_node_funcs=[make_cudnn_conv2d, make_conv2d],
+        make_pad_args_funcs=[make_cudnn_conv2d_pad_args, make_conv2d_pad_args],
+        rtol=1e-3)
 
 
 def test_make_2d_gaussian_filter():

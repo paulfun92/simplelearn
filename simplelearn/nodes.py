@@ -24,6 +24,7 @@ from nose.tools import (assert_true,
                         assert_not_in)
 from numpy.testing import assert_array_equal
 from simplelearn.utils import (safe_izip,
+                               cudnn_available,
                                assert_integer,
                                assert_floating,
                                assert_all_equal,
@@ -708,7 +709,7 @@ class CuDnnConv2d(Node):
           kernels) or 'cross' (doesn't). Default: conv.
         '''
 
-        assert_true(theano.sandbox.cuda.dnn.dnn_available)
+        assert_true(cudnn_available('conv'))
 
         # Sanity-check args
 
@@ -835,7 +836,7 @@ class Conv2d(Node):
           Keyword args fed directly to theano.tensor.nnet.conv2d
         '''
 
-        if theano.sandbox.cuda.dnn.dnn_available:
+        if cudnn_available('conv'):
             warnings.warn("Using Conv2d, even though cuDNN is installed. "
                           "Are you sure you wouldn't rather use "
                           "CuDnnConv2d?")
@@ -1259,16 +1260,15 @@ class Conv2dLayer(Node):
         '''
         assert_in(channel_axis, input_node.output_format.axes)
 
-        ConvClass = (CuDnnConv2d if theano.sandbox.cuda.dnn.dnn_available
-                     else Conv2d)
+        ConvNodeClass = (CuDnnConv2d if cudnn_available('conv') else Conv2d)
 
-        self.conv2d_node = ConvClass(input_node,
-                                     filter_shape,
-                                     num_filters,
-                                     conv_pads,
-                                     strides=filter_strides,
-                                     axis_map=axis_map,
-                                     **kwargs)
+        self.conv2d_node = ConvNodeClass(input_node,
+                                         filter_shape,
+                                         num_filters,
+                                         conv_pads,
+                                         strides=filter_strides,
+                                         axis_map=axis_map,
+                                         **kwargs)
 
         # Implements channel-wise bias by collapsing non-channel axes into
         # batch axes in the bias node. Bias node then adds a bias per
@@ -1450,8 +1450,7 @@ class Lcn(Node):
 
         filters /= filters.sum()
 
-        ConvNodeClass = (CuDnnConv2d if theano.sandbox.cuda.dnn.dnn_available
-                         else Conv2d)
+        ConvNodeClass = (CuDnnConv2d if cudnn_available('conv') else Conv2d)
 
         # 1-channel to 1-channel convolution with a gaussian filter
         blur_node = ConvNodeClass(input_node=separated_channels_node,
