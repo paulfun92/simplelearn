@@ -535,12 +535,6 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
     input_dtype = numpy.dtype('int')
 
     max_pad = max_window_size + 1
-    # if supports_padding:
-    #     max_pad = max_window_size + 1
-    # else:
-    #     max_pad = 0
-
-
 
     assert_greater_equal(max_pad, 0)
 
@@ -603,8 +597,8 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
         max_padded_images[...] = pad_value
 
         images = get_padded_image(max_padded_images, (0, 0))
-        # images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
-        images[...] = numpy.arange(images.size).reshape(images.shape)
+        images[...] = rng.random_integers(low=-10, high=10, size=images.shape)
+        #images[...] = numpy.arange(images.size).reshape(images.shape)
         assert_all_greater(images.shape, 0)
 
         if max_pad == 0:
@@ -674,22 +668,28 @@ def _sliding_window_2d_testimpl(expected_subwindow_funcs,
                                                     node.output_symbol)
                         transposed_images = images.transpose(transpose_indices)
                         actual_images = node_func(transposed_images)
-                        try:
-                            node.output_format.check(actual_images)
-                        except AssertionError:
-                            pdb.set_trace()
+
+                        node.output_format.check(actual_images)
+                        # try:
+                        #     node.output_format.check(actual_images)
+                        # except AssertionError:
+                        #     pdb.set_trace()
 
                         kwargs = {}
                         if rtol is not None:
                             kwargs['rtol'] = rtol
 
-                        try:
-                            # pylint: disable=star-args
-                            assert_allclose(actual_images,
-                                            expected_images,
-                                            **kwargs)
-                        except AssertionError:
-                            pdb.set_trace()
+                        # pylint: disable=star-args
+                        assert_allclose(actual_images,
+                                        expected_images,
+                                        **kwargs)
+                        # try:
+                        #     # pylint: disable=star-args
+                        #     assert_allclose(actual_images,
+                        #                     expected_images,
+                        #                     **kwargs)
+                        # except AssertionError:
+                        #     pdb.set_trace()
 
 
 def test_pool2d():
@@ -821,8 +821,6 @@ def test_pool2d_quick():
         return theano.function([input_node.output_symbol],
                                pool_node.output_symbol[0, 0, 0, :])
 
-    # TODO: max_pooled_pylearn2_padding, avg_pooled_pylearn2_padding
-
     max_pooled_pylearn2_padding = \
         make_pool_func(mode='max', pad='pylearn2')(input_image)
     assert_array_equal(max_pooled_pylearn2_padding, [-1, -1, -2])
@@ -940,7 +938,6 @@ def test_conv2d():
 
         flipped_filters = numpy.empty_like(filters)
         flipped_filters[...] = filters[:, :, ::-1, ::-1]
-        # flipped_filters[...] = filters[:, :, :, ::-1]
 
         return numpy.einsum('bcde,fcde->bf', subwindow, flipped_filters)
 
@@ -961,56 +958,8 @@ def test_conv2d():
 
         return result
 
-    # def make_conv_nodes(input_node,
-    #                     window_shape,
-    #                     strides,
-    #                     pads,
-    #                     axis_map):
-    #     args = (input_node,
-    #             window_shape,
-    #             num_filters,
-    #             pads,
-    #             strides,
-    #             axis_map)
-    #     results = [CuDnnConv2d(*args, conv_mode='cross'), Conv2d(*args)]
-
-    #     for conv_node in results:
-    #         filters = conv_node.filters.get_value()
-    #         filters[...] = rand_floats(filters.shape)
-    #         conv_node.filters.set_value(filters)
-
-    #     return results
-
-    # def get_pad_args(window_shape, supports_padding):
-    #     '''
-    #     Returns all possible pad_args to try.
-    #     '''
-    #     if not supports_padding:
-    #         return [(0, 0)]
-    #     else:
-    #         chain = itertools.chain
-    #         return chain(('same_shape', 'full', 'valid'),
-    #                      prod(range(window_shape[0] + 1),
-    #                           range(window_shape[1] + 1)))
-
     def make_conv2d_pad_args(window_shape):
         return ('full', 'valid')
-
-    # if cudnn_available('conv'):
-    #     convolution_funcs = [cross_correlate, cross_correlate]
-    #     pad_values = [0.0, 0.0]
-    #     make_node_funcs = [make_cudnn_conv2d, make_conv2d]
-    #     make_pad_arg_funcs = [make_cudnn_conv2d_pad_args, make_conv2d_pad_args]
-    # else:
-    #     pad_values = [0.0, 0.0]
-    #     make_node_funcs = [make_cudnn_conv2d, make_conv2d]
-    #     make_pad_arg_funcs = [make_cudnn_conv2d_pad_args, make_conv2d_pad_args]
-
-    # elif theano.sandbox.cuda.dnn.dnn_available:
-    #     convolution_funcs = [cross_correlate]
-    #     pad_values = [0.0, 0.0]
-    #     make_node_funcs = [make_cudnn_conv2d, make_conv2d]
-    #     make_pad_arg_funcs = [make_cudnn_conv2d_pad_args, make_conv2d_pad_args]
 
     if cudnn_available('conv'):
         conv_function = convolve
@@ -1113,14 +1062,14 @@ def test_conv_layer():
     conv -> channel-wise bias -> relu -> max pool
     '''
 
-    image_format = DenseFormat(axes=('b', 'c', '0', '1'),  # TODO: shuffle
+    # this b01c ordering will get reordered to bc01
+    image_format = DenseFormat(axes=('b', '0', '1', 'c'),
                                shape=(-1, 3, 10, 12),
                                dtype=theano.config.floatX)
 
     image_node = InputNode(fmt=image_format)
 
     rng_seed = 13515
-    # theano_rng_seed = 42235
 
     # Conv layer parameters
     filter_shape = (3, 3)
