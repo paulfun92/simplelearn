@@ -720,17 +720,17 @@ class CuDnnConv2d(Node):
 
         filter_shape = numpy.asarray(filter_shape)
 
-        if isinstance(pads, basestring):
-            assert_in(pads, ('valid', 'full', 'same_shape'))
-            if pads == 'same_shape':
-                assert_true((filter_shape % 2 == 1).all(),
-                            "If pads == 'same_shape', then filter_shape "
-                            "must be odd in both dimensions, but got %s." %
-                            str(filter_shape))
-                pads = tuple(numpy.asarray(filter_shape) // 2)
-        else:
-            _assert_is_shape2d(pads)
-            pads = tuple(pads)
+        # if isinstance(pads, basestring):
+        #     assert_in(pads, ('valid', 'full', 'same_shape'))
+        #     if pads == 'same_shape':
+        #         assert_true((filter_shape % 2 == 1).all(),
+        #                     "If pads == 'same_shape', then filter_shape "
+        #                     "must be odd in both dimensions, but got %s." %
+        #                     str(filter_shape))
+        #         pads = tuple(numpy.asarray(filter_shape) // 2)
+        # else:
+        #     _assert_is_shape2d(pads)
+        #     pads = tuple(pads)
 
         _assert_is_shape2d(strides)
 
@@ -852,7 +852,7 @@ class Conv2d(Node):
 
         filter_shape = numpy.asarray(filter_shape)
 
-        assert_in(pads, ('valid', 'full'))
+        # assert_in(pads, ('valid', 'full'))
 
         if strides is not None:
             _assert_is_shape2d(strides)
@@ -877,24 +877,87 @@ class Conv2d(Node):
                          filter_shape[1]),
                         dtype=theano.config.floatX))
 
-        def make_output_symbol(t_node, filters, pads, strides):
+        def make_output_symbol(bc01_input_node, filters, pads, strides):
             assert_is_instance(pads, basestring)
 
             strides = tuple(strides)
 
-            image_shape = list(copy.deepcopy(t_node.output_format.shape))
+            image_shape = \
+                list(copy.deepcopy(bc01_input_node.output_format.shape))
             assert_equal(image_shape[0], -1)
             image_shape[0] = None
             image_shape = tuple(image_shape)
 
             conv2d = theano.tensor.nnet.conv2d
-            return conv2d(input=t_node.output_symbol,
-                          filters=filters,
-                          image_shape=image_shape,
-                          filter_shape=filters.get_value().shape,  # sic
-                          border_mode=pads,
-                          subsample=strides,
-                          **kwargs)  # pylint: disable=star-args
+            if pads in ('valid', 'full'):
+                return conv2d(input=bc01_input_node.output_symbol,
+                              filters=filters,
+                              image_shape=image_shape,
+                              filter_shape=filters.get_value().shape,  # sic
+                              border_mode=pads,
+                              subsample=strides,
+                              **kwargs)  # pylint: disable=star-args
+            else:  # we have to make our own padded image
+                bc01_input_symbol = bc01_input_node.output_symbol
+                # numeric_pads = _get_pads(pads,
+                #                          image_shape[2:],
+                #                          filter_shape,
+                #                          strides)
+                # T = theano.tensor
+                # floatX = theano.config.floatX
+                # padded_image = T.alloc(
+                #     T.constant(0.0, dtype=floatX),  # zero-padding
+                #     bc01_input_symbol.shape[0],
+                #     bc01_input_symbol.shape[1],
+                #     bc01_input_symbol.shape[2] + numeric_pads[0] * 2,
+                #     bc01_input_symbol.shape[3] + numeric_pads[1] * 2)
+
+                def get_unpadded_region(bc01_image, pads):
+                    end_row = bc01_image.shape[2] + pads[0]
+                    end_col = bc01_image.shape[2] + pads[1]
+                    return bc01_image[:, :, pads[0]:end_row, pads[1]:end_col]
+
+
+                # padded_image = T.set_subtensor(
+                #     get_unpadded_region(padded_image, numeric_pads),
+                #     bc01_input_symbol)
+
+                # print("filter_shape: {}".format(filters.get_value().shape))
+                # image_shape=
+
+                convolved_padded_image = conv2d(
+                    # input=padded_image,
+                    input=bc01_input_symbol,
+                    filters=filters,
+                    image_shape=image_shape, #bc01_input_node.output_format.shape[2:],
+                    filter_shape=filters.get_value().shape,
+                    border_mode='full',  # TODO: change to 'full', remove padding above
+                    subsample=strides,
+                    **kwargs)  # pylint:disable=star-args
+
+                output_pads = [
+                    (convolved_padded_image[2] - bc01_input_symbol.shape[2]) // 2,
+                    (convolved_padded_image[3] - bc01_input_symbol.shape[3]) // 2]
+
+                # result = convolved_padded_image[:,
+                #                                 :,
+                #                                 output_pads[0]:-output_pads[0],
+                #                                 output_pads[1]:-output_pads[1]]
+
+                # No need to check shape here; it'll get checked in Node's
+                # output format check.
+
+                return get_unpadded_region(convolved_padded_image, output_pads)
+
+                # assert_op = theano.tensor.opt.Assert(
+                #     "Expected shape " + str(self.output_format.shape))
+                # eq_op = theano.tensor.eq
+
+                # for d in range(2):
+                #     result = theano_assert(result,
+                #                            eq_op(result.shape[d],
+                #                                  convolved_padded_image.shape[d + 2] -
+                #                                  output_pads[d] * 2))
 
         output = make_output_symbol(input_format_node,
                                     self.filters,
@@ -1040,7 +1103,7 @@ class Pool2D(Node):
                                                         :bc01_symbol.shape[3]],
                                            bc01_symbol)
 
-            self.DEBUG_padded_image_symbol = padded_image
+            # self.DEBUG_padded_image_symbol = padded_image
 
             output_symbol = theano.sandbox.cuda.dnn.dnn_pool(
                 img=padded_image,

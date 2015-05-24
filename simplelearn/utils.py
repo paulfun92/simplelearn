@@ -177,11 +177,13 @@ def cudnn_available(arg=None):
     elif 'cudnn' in theano.config.optimizer_excluding:
         return False
     elif arg == 'conv':
-        return 'conv_dnn' in theano.config.optimizer_excluding
-    elif arg == 'pool':
-        return 'pool_dnn' in theano.config.optimizer_excluding
+        if 'conv_dnn' in theano.config.optimizer_excluding:
+            return False
+    elif arg == 'pool' and 'pool_dnn':
+        if theano.config.optimizer_excluding:
+            return False
     elif arg is not None:
-        raise ValueError("Expected cudnn_availble() argument to be 'conv' "
+        raise ValueError("Expected cudnn_available() argument to be 'conv' "
                          "or 'pool', but got '{}'.".format(arg))
 
     return True

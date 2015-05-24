@@ -737,8 +737,8 @@ def test_pool2d():
 
     def get_pad_args(window_shape):
         return itertools.chain(('same_shape', 'full', 'valid'),
-                               itertools.prod(range(window_shape[0] + 1),
-                                              range(window_shape[1] + 1)))
+                               itertools.product(range(window_shape[0] + 1),
+                                                 range(window_shape[1] + 1)))
 
     _sliding_window_2d_testimpl([average_pool, max_pool],
                                 pad_values=[0.0, -numpy.inf],
@@ -858,15 +858,14 @@ def test_pool2d_quick():
     assert_allclose(avg_pooled_full_padding, [-1, -9 / 4., -2, -2.5, -7 / 4.])
 
 
-def test_conv2d_nodes():
-
+def test_cudnn_conv2d():
     def rand_floats(shape):
         rng = numpy.random.RandomState(382342)
         return rng.uniform(low=-10, high=10, size=shape)
 
     num_filters = 10
 
-    def convolve(subwindow):
+    def cross_correlate(subwindow):
         '''
         Convolution without flipping the filters (aka cross-correlation).
         '''
@@ -879,10 +878,10 @@ def test_conv2d_nodes():
         return numpy.einsum('bcde,fcde->bf', subwindow, filters)
 
     def make_cudnn_conv2d(input_node,
-                    window_shape,
-                    strides,
-                    pads,
-                    axis_map):
+                          window_shape,
+                          strides,
+                          pads,
+                          axis_map):
         result = CuDnnConv2d(input_node,
                              window_shape,
                              num_filters,
@@ -895,6 +894,55 @@ def test_conv2d_nodes():
         result.filters.set_value(filters)
 
         return result
+
+    def make_cudnn_conv2d_pad_args(window_shape):
+        return itertools.chain(('same_shape', 'full', 'valid'),
+                               itertools.product(range(window_shape[0] + 1),
+                                                 range(window_shape[1] + 1)))
+
+
+    _sliding_window_2d_testimpl(
+        [cross_correlate],
+        pad_values=[0.0],
+        make_node_funcs=[make_cudnn_conv2d],
+        make_pad_args_funcs=[make_cudnn_conv2d_pad_args],
+        rtol=1e-3)
+
+def test_conv2d():
+
+    def rand_floats(shape):
+        rng = numpy.random.RandomState(382342)
+        return rng.uniform(low=-10, high=10, size=shape)
+
+    num_filters = 10
+
+    def cross_correlate(subwindow):
+        '''
+        Convolution without flipping the filters (aka cross-correlation).
+        '''
+        floatX = theano.config.floatX  # pylint: disable=no-member
+        subwindow = numpy.cast[floatX](subwindow)
+        filters = numpy.zeros(shape=(num_filters, ) + subwindow.shape[1:],
+                              dtype=floatX)
+        filters[...] = rand_floats(filters.shape)
+
+        return numpy.einsum('bcde,fcde->bf', subwindow, filters)
+
+    def convolve(subwindow):
+        '''
+        Convolution (filters are left-right flipped).
+        '''
+        floatX = theano.config.floatX  # pylint: disable=no-member
+        subwindow = numpy.cast[floatX](subwindow)
+        filters = numpy.zeros(shape=(num_filters, ) + subwindow.shape[1:],
+                              dtype=floatX)
+        filters[...] = rand_floats(filters.shape)
+
+        flipped_filters = numpy.empty_like(filters)
+        flipped_filters[...] = filters[:, :, ::-1, ::-1]
+        # flipped_filters[...] = filters[:, :, :, ::-1]
+
+        return numpy.einsum('bcde,fcde->bf', subwindow, flipped_filters)
 
     def make_conv2d(input_node,
                     window_shape,
@@ -945,19 +993,35 @@ def test_conv2d_nodes():
     #                      prod(range(window_shape[0] + 1),
     #                           range(window_shape[1] + 1)))
 
-    def make_cudnn_conv2d_pad_args(window_shape):
-        return itertools.chain(('same_shape', 'full', 'valid'),
-                               itertools.prod(range(window_shape[0] + 1),
-                                              range(window_shape[1] + 1)))
-
     def make_conv2d_pad_args(window_shape):
         return ('full', 'valid')
 
+    # if cudnn_available('conv'):
+    #     convolution_funcs = [cross_correlate, cross_correlate]
+    #     pad_values = [0.0, 0.0]
+    #     make_node_funcs = [make_cudnn_conv2d, make_conv2d]
+    #     make_pad_arg_funcs = [make_cudnn_conv2d_pad_args, make_conv2d_pad_args]
+    # else:
+    #     pad_values = [0.0, 0.0]
+    #     make_node_funcs = [make_cudnn_conv2d, make_conv2d]
+    #     make_pad_arg_funcs = [make_cudnn_conv2d_pad_args, make_conv2d_pad_args]
+
+    # elif theano.sandbox.cuda.dnn.dnn_available:
+    #     convolution_funcs = [cross_correlate]
+    #     pad_values = [0.0, 0.0]
+    #     make_node_funcs = [make_cudnn_conv2d, make_conv2d]
+    #     make_pad_arg_funcs = [make_cudnn_conv2d_pad_args, make_conv2d_pad_args]
+
+    if cudnn_available('conv'):
+        conv_function = convolve
+    else:
+        conv_function = cross_correlate
+
     _sliding_window_2d_testimpl(
-        [convolve, convolve],
-        pad_values=[0.0, 0.0],
-        make_node_funcs=[make_cudnn_conv2d, make_conv2d],
-        make_pad_args_funcs=[make_cudnn_conv2d_pad_args, make_conv2d_pad_args],
+        [conv_function],
+        pad_values=[0.0],
+        make_node_funcs=[make_conv2d],
+        make_pad_args_funcs=[make_conv2d_pad_args],
         rtol=1e-3)
 
 
