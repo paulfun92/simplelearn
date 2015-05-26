@@ -248,15 +248,7 @@ def make_instance_dataset(norb_name,
             out_labels[:len(a_indices), :] = a_labels[a_indices, :]
             out_labels[len(a_indices):, :] = b_labels[b_indices, :]
 
-            # # Shuffles the output images and labels in the same way
-            # for out_tensor, tensor_name in safe_izip((out_images, out_labels),
-            #                                          ('images', 'labels')):
-            #     # same seed for each loop means same shuffle order
-            #     rng = numpy.random.RandomState(rng_seed)
-
-            #     print("Shuffling {} {}...".format(partition_name,
-            #                                       tensor_name))
-            #     rng.shuffle(out_tensor)
+            # Don't shuffle the data; that's the iterator's job.
 
     return h5_path
 
