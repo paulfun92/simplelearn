@@ -30,7 +30,7 @@ from simplelearn.utils import (safe_izip,
                                assert_floating,
                                assert_all_equal,
                                assert_all_greater,
-                               assert_all_integers)
+                               assert_all_integer)
 from simplelearn.io import SerializableModel
 from simplelearn.data.dataset import Dataset
 from simplelearn.data.mnist import load_mnist
@@ -241,7 +241,7 @@ def build_conv_classifier(input_node,
 
     for conv_shapes in conv_shape_args:
         for conv_shape in conv_shapes:
-            assert_all_integers(conv_shape)
+            assert_all_integer(conv_shape)
             assert_all_greater(conv_shape, 0)
 
     conv_args = conv_shape_args + (filter_counts, filter_init_uniform_ranges)

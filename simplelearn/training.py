@@ -29,7 +29,7 @@ from simplelearn.utils import (assert_integer,
                                assert_floating,
                                assert_all_less,
                                assert_all_greater_equal,
-                               assert_all_integers)
+                               assert_all_integer)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip, check_is_subdtype
 from simplelearn.formats import Format
@@ -271,7 +271,7 @@ class LinearlyInterpolatesOverEpochs(EpochCallback):
                  epochs_to_saturation):
         assert_is_instance(shared_value,
                            theano.tensor.sharedvar.SharedVariable)
-        assert_floating(shared_value)
+        assert_is_subdtype(shared_value.dtype, numpy.floating)
         assert_floating(final_value)
         if not numpy.isscalar(final_value):
             assert_equal(final_value.shape,
@@ -978,7 +978,7 @@ def limit_param_norms(parameter_updater, params, max_norm, input_axes):
     assert_greater(max_norm, 0.0)
 
     assert_greater(len(input_axes), 0)
-    assert_all_integers(input_axes)
+    assert_all_integer(input_axes)
     assert_all_greater_equal(input_axes, 0)
     assert_all_less(input_axes, params.ndim)
 

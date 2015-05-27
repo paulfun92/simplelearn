@@ -15,7 +15,7 @@ import simplelearn
 from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_all_is_instance,
-                               assert_all_integers,
+                               assert_all_integer,
                                assert_all_greater_equal)
 from simplelearn.formats import DenseFormat
 from simplelearn.data.dataset import Dataset
@@ -87,7 +87,7 @@ def make_h5_file(path,
     assert_all_is_instance(partition_names, basestring)
     assert_equal(len(frozenset(partition_names)), len(partition_names))
 
-    assert_all_integers(partition_sizes)
+    assert_all_integer(partition_sizes)
     assert_all_greater_equal(partition_sizes, 0)
 
     assert_all_is_instance(tensor_names, basestring)

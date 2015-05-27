@@ -28,7 +28,7 @@ from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_floating,
                                assert_all_equal,
-                               assert_all_integers,
+                               assert_all_integer,
                                assert_all_is_instance,
                                assert_all_greater,
                                assert_all_greater_equal)
@@ -481,7 +481,7 @@ class AffineTransform(Function1dTo1d):
 
 
 def _assert_is_shape2d(arg):
-    assert_all_integers(arg)
+    assert_all_integer(arg)
     assert_equal(len(arg), 2)
     assert_all_greater_equal(arg, 0)
 
@@ -1424,7 +1424,7 @@ def _make_2d_gaussian_filter(filter_shape, covariance=None, dtype=None):
     Returns a 2D Gaussian filter.
     '''
     assert_equal(len(filter_shape), 2)
-    assert_all_integers(filter_shape)
+    assert_all_integer(filter_shape)
     assert_all_greater(filter_shape, 0)
 
     filter_shape = numpy.asarray(filter_shape, dtype=int)
@@ -1470,10 +1470,9 @@ class Lcn(Node):
                  filter_shape=(7, 7),
                  threshold=1e-4,
                  axis_map=None):
-        assert_floating(input_node.output_symbol)
-
+        assert_is_subdtype(input_node.output_symbol.dtype, numpy.floating)
         assert_equal(len(filter_shape), 2)
-        assert_all_integers(filter_shape)
+        assert_all_integer(filter_shape)
         assert_all_greater(filter_shape, 0)
 
         assert_greater_equal(threshold, 0.0)
@@ -1663,7 +1662,7 @@ class Misclassification(Node):
     def __init__(self, softmax_node, target_node):
         assert_equal(softmax_node.output_format.axes, ('b', 'f'))
         assert_in(target_node.output_format.axes, (('b', 'f'), ('b', )))
-        assert_integer(target_node.output_symbol)
+        assert_is_subdtype(target_node.output_symbol.dtype, numpy.integer)
         assert_is_instance(softmax_node, (Softmax, SoftmaxLayer))
 
         # If targets are one-hot vectors, convert them to target indices

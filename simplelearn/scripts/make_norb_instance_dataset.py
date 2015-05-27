@@ -13,7 +13,7 @@ from simplelearn.utils import (safe_izip,
                                assert_integer,
                                assert_all_equal,
                                assert_all_true,
-                               assert_all_integers,
+                               assert_all_integer,
                                assert_all_greater_equal)
 
 from simplelearn.formats import DenseFormat
@@ -95,14 +95,8 @@ def make_instance_dataset(norb_name,
         assert_is_instance(objects, Sequence)
         for id_pair in objects:
             assert_equal(len(id_pair), 2)
-            assert_all_integers(id_pair)
+            assert_all_integer(id_pair)
             assert_all_greater_equal(id_pair, 0)
-
-    # if rng_seed is None:
-    #     rng_seed = 3252
-    # else:
-    #     assert_integer(rng_seed)
-    #     assert_greater_equal(rng_seed, 0)
 
     #
     # Done sanity-checking args

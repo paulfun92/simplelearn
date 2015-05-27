@@ -13,8 +13,9 @@ __license__ = "Apache 2.0"
 import os
 import collections
 import urllib2
-import numpy
 import itertools
+import numpy
+import h5py
 import theano
 from nose.tools import (assert_is_instance,
                         assert_equal,
@@ -27,6 +28,12 @@ from nose.tools import (assert_is_instance,
 
 import pdb
 
+import theano.sandbox.cuda.type
+
+_array_like_types = (numpy.ndarray,
+                     numpy.memmap,
+                     h5py.Dataset,
+                     theano.sandbox.cuda.type.CudaNdarrayType)
 
 def safe_izip(*iterables):
     """
@@ -189,41 +196,98 @@ def cudnn_available(arg=None):
     return True
 
 
-def assert_integer(arg):
+def assert_is_subdtype(dtype, super_dtype):
     '''
-    Checks that arg is of integral type.
+    Checks that <dtype> is a subdtype of <super_dtype>
+    '''
+    dtype = numpy.dtype(dtype)
+    assert_true(numpy.issubdtype(dtype, super_dtype),
+                "{} is not a sub-dtype of {}.".format((dtype, super_dtype)))
+
+
+def assert_integer(scalar):
+    '''
+    Checks that scalar is a scalar of integral type
 
     Parameters
     ----------
-    arg: scalar, or any type with a 'dtype' member (e.g. numpy.ndarray).
+    scalar: a numeric primitive (e.g. int, float, etc).
     '''
 
-    if hasattr(arg, 'dtype'):
-        dtype = arg.dtype
-    else:
-        dtype = type(arg)
+    dtype = type(scalar)
 
-    assert_true(numpy.issubdtype(dtype, numpy.integer),
-                "%s is not an integer" % type(arg))
+    assert_is_subdttype(dtype, numpy.integer)
 
 
-def assert_all_integers(arg):
+def assert_floating(scalar):
     '''
-    Checks that arg is an Iterable of integral-typed scalars.
+    Checks that <scalar> is a scalar of floating-point type.
 
     Parameters
     ----------
-    arg: Sequence
+    scalar: a numerical primitive type (e.g. int, float, etc)
+    '''
+    dtype = type(scalar)
+
+    assert_is_subdtype(dtype, numpy.floating)
+
+
+def assert_integer_dtype(type):
+    assert_is_subdtype(dtype, numpy.integer)
+
+
+def assert_floating_dtype(dtype):
+    assert_is_subdtype(dtype, numpy.floating)
+
+
+def assert_all_subdtype(iterable, super_dtype):
+    '''
+    Checks that iterable is an Iterable of integral-typed scalars.
+
+    Parameters
+    ----------
+    iterable: Iterable
 
     size: int
-      Optional. If specified, this checks that len(arg) == size.
+      Optional. If specified, this checks that len(iterable) == size.
     '''
-    assert_is_instance(arg, collections.Iterable)
+    assert_is_instance(iterable, collections.Iterable)
 
-    for index, element in enumerate(arg):
-        assert_true(numpy.issubdtype(type(element), numpy.integer),
-                    "Element %d (%s) is not an integer, but a %s." %
-                    (index, element, type(element)))
+    if isinstance(iterable, utils._array_like_types):
+        assert_is_subdtype(iterable.dtype, super_dtype)
+    else:
+        for index, element in enumerate(iterable):
+            assert_true(numpy.issubdtype(type(element), numpy.integer),
+                        "Element %d (%s) is not an integer, but a %s." %
+                        (index, element, type(element)))
+
+
+def assert_all_integer(iterable):
+    '''
+    Checks that iterable is an Iterable of integral-typed scalars.
+
+    Parameters
+    ----------
+    iterable: Iterable
+
+    size: int
+      Optional. If specified, this checks that len(iterable) == size.
+    '''
+    assert_all_subdtype(iterable, numpy.integer)
+
+
+def assert_all_floating(iterable, size=None):
+    '''
+    Checks that iterable is an Iterable of floating-point scalars.
+
+    Parameters
+    ----------
+    iterable: Iterable
+
+    size: int
+      Optional. If specified, this checks that len(iterable) == size.
+    '''
+    assert_all_subdtype(iterable, numpy.floating)
 
 
 def assert_all_true(arg):
@@ -231,6 +295,9 @@ def assert_all_true(arg):
     Checks that all elements of arg are true.
     '''
     assert_is_instance(arg, collections.Iterable)
+
+    if isinstance(iterable, utils._array_like_types):
+        assert_true(numpy.all(arg))
 
     for index, element in enumerate(arg):
         assert_true(element,
@@ -243,7 +310,7 @@ def assert_all_is_instance(arg, expected_type):
 
     Parameters
     ----------
-    arg: Sequence
+    arg: Iterable
 
     expected_type: type
       The type that all elements of arg should be an instance of.
@@ -254,45 +321,6 @@ def assert_all_is_instance(arg, expected_type):
         assert_is_instance(element, expected_type,
                            "Element %d (%s) is not an integer, but a %s." %
                            (index, element, type(element)))
-
-
-def assert_floating(arg):
-    '''
-    Checks that arg is a scalar of floating-point type.
-
-    Parameters
-    ----------
-    arg: scalar, or any type with a 'dtype' member (e.g. numpy.ndarray).
-    '''
-    if hasattr(arg, 'dtype'):
-        dtype = arg.dtype
-    else:
-        dtype = type(arg)
-
-    assert_true(numpy.issubdtype(dtype, numpy.floating),
-                "%s is not of a floating-point type." % dtype)
-
-
-def assert_all_floating(arg, size=None):
-    '''
-    Checks that arg is an Iterable of floating-point scalars.
-
-    Parameters
-    ----------
-    args: Sequence
-
-    size: int
-      Optional. If specified, this checks that len(arg) == size.
-    '''
-    if size is not None:
-        assert_equal(len(arg), size)
-
-    assert_is_instance(arg, collections.Iterable)
-
-    for element, index in enumerate(arg):
-        assert_true(numpy.issubdtype(type(element), numpy.floating),
-                    "Element %d (%s) is not a floating-point number, but a %s."
-                    % (index, element, type(element)))
 
 
 def assert_all_equal(arg0, arg1=None):
@@ -319,6 +347,14 @@ def assert_all_equal(arg0, arg1=None):
     arg1: scalar, or Sequence (optional)
     '''
     assert_is_instance(arg0, collections.Sequence)
+
+    if isinstance(arg0, utils._array_like_types):
+        if arg1 is None:
+            assert_all_equal(arg0[1:], arg0[0])
+        else:
+            assert_true(numpy.all(arg0 == arg1))
+
+
     if arg1 is None:
         first_value = arg0[0]
         for a0 in arg0[1:]:
@@ -337,7 +373,8 @@ def assert_all_greater_equal(arg0, arg1):
     arg1 may be a scalar, or an Iterable of equal length as arg0.
     '''
 
-    assert_is_instance(arg0, collections.Iterable)
+    if isinstance(arg0, utils._array_like_types):
+        return numpy.all(arg0 >= arg1)
 
     for (index,
          elem0,
@@ -357,6 +394,9 @@ def assert_all_greater(arg0, arg1):
 
     arg1 may be a scalar or an Iterable of equal length as arg0.
     '''
+    if isinstance(arg0, utils._array_like_types):
+        return numpy.all(arg0 > arg1)
+
     for (index,
          elem0,
          elem1) in safe_izip(xrange(len(arg0)),
@@ -375,6 +415,10 @@ def assert_all_less(arg0, arg1):
 
     arg1 may be a scalar or an Iterable of equal length as arg0.
     '''
+    if isinstance(arg0, utils._array_like_types):
+        return numpy.all(arg0 < arg1)
+
+
     for (index,
          elem0,
          elem1) in safe_izip(xrange(len(arg0)),
@@ -393,6 +437,10 @@ def assert_all_less_equal(arg0, arg1):
 
     arg1 may be a scalar or an Iterable of equal length as arg0.
     '''
+
+    if isinstance(arg0, utils._array_like_types):
+        return numpy.all(arg0 <= arg1)
+
     for (index,
          elem0,
          elem1) in safe_izip(xrange(len(arg0)),

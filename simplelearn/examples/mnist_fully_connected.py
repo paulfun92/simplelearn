@@ -24,7 +24,7 @@ from simplelearn.nodes import (Node,
 from simplelearn.utils import (safe_izip,
                                assert_all_greater,
                                assert_all_less_equal,
-                               assert_all_integers)
+                               assert_all_integer)
 from simplelearn.io import SerializableModel
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
@@ -217,7 +217,7 @@ def build_fc_classifier(input_node,
     assert_all_greater(sizes, 0)
 
     assert_equal(len(sparse_init_counts), len(sizes) - 1)
-    assert_all_integers(sparse_init_counts)
+    assert_all_integer(sparse_init_counts)
     assert_all_greater(sparse_init_counts, 0)
     assert_all_less_equal(sparse_init_counts, sizes[:-1])
 
