@@ -274,18 +274,10 @@ class SequentialIterator(DataIterator):
             return self._next_batch_start == 0
 
     def _next(self):
-        num_samples = \
-            self._tensors[0].shape[self._formats[0].axes.index('b')]
 
-        if self._loop_style == 'truncate':
-            num_samples = num_samples - numpy.mod(num_samples,
-                                                  self._batch_size)
-
-        assert_less(self._next_batch_start, num_samples)
-
-        def get_range(tensor, fmt, start, end):
+        def get_batch(tensor, fmt, start, end):
             """
-            Returns a tuple of batches from batch index = start to end.
+            Returns a batch from batch index = start to end.
             """
             assert_less_equal(start, end)
             assert 'b' in fmt.axes
@@ -295,6 +287,15 @@ class SequentialIterator(DataIterator):
             result = tensor[index]
             assert_equal(result.shape[fmt.axes.index('b')], end - start)
             return result
+
+        num_samples = \
+            self._tensors[0].shape[self._formats[0].axes.index('b')]
+
+        if self._loop_style == 'truncate':
+            num_samples = num_samples - numpy.mod(num_samples,
+                                                  self._batch_size)
+
+        assert_less(self._next_batch_start, num_samples)
 
         if self._next_batch_start + self._batch_size > num_samples:
             assert_not_equal(self._loop_style,
@@ -323,20 +324,20 @@ class SequentialIterator(DataIterator):
                 for subbatch, tensor, fmt in safe_izip(batch,
                                                        self._tensors,
                                                        self._formats):
-                    get_range(subbatch,
+                    get_batch(subbatch,
                               fmt,
                               0,
                               chunk_size)[...] = \
-                        get_range(tensor,
+                        get_batch(tensor,
                                   fmt,
                                   self._next_batch_start,
                                   num_samples)
 
-                    get_range(subbatch,
+                    get_batch(subbatch,
                               fmt,
                               chunk_size,
                               self._batch_size)[...] = \
-                        get_range(tensor,
+                        get_batch(tensor,
                                   fmt,
                                   0,
                                   self._batch_size - chunk_size)
@@ -349,7 +350,7 @@ class SequentialIterator(DataIterator):
                                  "constructor."
                                  % (self._loop_style, type(self)))
 
-        subbatches = tuple(get_range(tensor,
+        subbatches = tuple(get_batch(tensor,
                                      fmt,
                                      self._next_batch_start,
                                      self._next_batch_start +

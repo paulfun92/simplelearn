@@ -9,9 +9,12 @@ import os
 import cPickle
 import numpy
 from nose.tools import (assert_equal, assert_less)
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_array_equal, assert_allclose
 from simplelearn.utils import safe_izip
 from simplelearn.data.mnist import load_mnist
+from simplelearn.data.dataset import Dataset
+from simplelearn.formats import DenseFormat
+from simplelearn.data.h5_dataset import RandomIterator
 
 
 def _file_size_in_bytes(file_path):
@@ -70,3 +73,61 @@ def test_pickle_h5_dataset():
             assert_equal(name, expected_name)
             assert_equal(fmt, expected_fmt)
             assert_array_equal(tensor, expected_tensor)
+
+def test_random_iterator():
+    num_classes = 3
+    dataset_size = 100 * num_classes
+
+    vectors = numpy.arange(dataset_size).reshape((1, dataset_size))
+    labels = numpy.arange(dataset_size) % num_classes
+
+    dataset = Dataset(tensors=(vectors, labels),
+                       names=('vectors', 'labels'),
+                       formats=(DenseFormat(axes=('f', 'b'),
+                                            shape=(1, -1),
+                                            dtype=int),
+                                DenseFormat(axes=['b'],
+                                            shape=[-1],
+                                            dtype=int)))
+
+    seed = 225234
+    batch_size = 231
+
+    iterator = RandomIterator(dataset,
+                              batch_size=batch_size,
+                              rng=numpy.random.RandomState(seed))
+
+    rng = numpy.random.RandomState(seed)
+
+    # Set each label's probability to be proportional to the label value.
+    iterator.probabilities[:] = labels / float(labels.sum())
+
+    counts = numpy.zeros(num_classes, dtype=int)
+
+    for batch_index in xrange(iterator.batches_per_epoch * 100):
+        batch_vectors, batch_labels = iterator.next()
+
+        expected_indices = rng.choice(iterator.probabilities.shape[0],
+                                      size=batch_size,
+                                      replace=True,
+                                      p=iterator.probabilities)
+        expected_indices.sort()
+        expected_vectors = dataset.tensors[0][:, expected_indices]
+        expected_labels = dataset.tensors[1][expected_indices]
+
+        assert_array_equal(batch_vectors, expected_vectors)
+        assert_array_equal(batch_labels, expected_labels)
+
+        assert_equal(iterator.next_is_new_epoch(),
+                     (batch_index + 1) % iterator.batches_per_epoch == 0)
+
+        for label_value in range(num_classes):
+            counts[label_value] += \
+                numpy.count_nonzero(expected_labels == label_value)
+
+    probabilities = counts / float(counts.sum())
+    expected_probabilities = (numpy.arange(num_classes) /
+                              float(numpy.arange(num_classes).sum()))
+    assert_allclose(probabilities, expected_probabilities, atol=.01)
+
+    assert_equal(counts[0], 0)
