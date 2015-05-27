@@ -149,8 +149,8 @@ def test_format_make_batch():
     floatX_format = Format('floatX')
     none_format = Format(None)
 
-    assert_raises_regexp(TypeError,
-                         "Expected batch_size to be a <type 'numpy.integer'",
+    assert_raises_regexp(AssertionError,
+                         "float64 is not a sub-dtype of <type 'numpy.integer'",
                          floatX_format.make_batch,
                          False,
                          1.)

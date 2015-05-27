@@ -23,16 +23,15 @@ from nose.tools import (assert_true,
                         assert_in,
                         assert_not_in)
 from numpy.testing import assert_array_equal
-from simplelearn.utils import (safe_izip,
-                               cudnn_available,
-                               assert_is_subdtype,
-                               assert_integer,
-                               assert_floating,
-                               assert_all_equal,
-                               assert_all_integer,
-                               assert_all_is_instance,
-                               assert_all_greater,
-                               assert_all_greater_equal)
+from simplelearn.utils import safe_izip, cudnn_available
+from simplelearn.asserts import (assert_is_subdtype,
+                                 assert_integer,
+                                 assert_floating,
+                                 assert_all_equal,
+                                 assert_all_integer,
+                                 assert_all_is_instance,
+                                 assert_all_greater,
+                                 assert_all_greater_equal)
 from simplelearn.formats import Format, DenseFormat
 import pdb
 

@@ -26,11 +26,11 @@ from simplelearn.nodes import (Conv2DLayer,
                                SoftmaxLayer,
                                RescaleImage,
                                FormatNode)
-from simplelearn.utils import (safe_izip,
-                               assert_floating,
-                               assert_all_equal,
-                               assert_all_greater,
-                               assert_all_integer)
+from simplelearn.utils import safe_izip
+from simplelearn.asserts import (assert_floating,
+                                 assert_all_equal,
+                                 assert_all_greater,
+                                 assert_all_integer)
 from simplelearn.io import SerializableModel
 from simplelearn.data.dataset import Dataset
 from simplelearn.data.mnist import load_mnist

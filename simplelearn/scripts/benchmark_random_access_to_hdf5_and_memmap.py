@@ -9,8 +9,8 @@ import numpy
 from nose.tools import assert_true, assert_is_instance
 from numpy.lib.format import open_memmap
 from simplelearn.utils import (human_readable_memory_size,
-                               human_readable_duration,
-                               assert_integer)
+                               human_readable_duration)
+from simplelearn.asserts import assert_integer
 
 
 def main():

@@ -25,14 +25,14 @@ from nose.tools import (assert_true,
                         assert_is_instance,
                         assert_is_not,
                         assert_in)
-from simplelearn.utils import (assert_integer,
-                               assert_floating,
-                               assert_all_less,
-                               assert_all_greater_equal,
-                               assert_all_integer,
-                               assert_is_subdtype)
+from simplelearn.asserts import (assert_integer,
+                                 assert_floating,
+                                 assert_all_less,
+                                 assert_all_greater_equal,
+                                 assert_all_integer,
+                                 assert_is_subdtype)
 from simplelearn.data import DataIterator
-from simplelearn.utils import safe_izip, check_is_subdtype
+from simplelearn.utils import safe_izip
 from simplelearn.formats import Format
 from simplelearn.nodes import Node
 import pdb
@@ -887,7 +887,7 @@ class SgdParameterUpdater(object):
         assert_equal(parameter.broadcastable, gradient.broadcastable,
                      "If an Op's .grad() method is buggy, it can return "
                      "broadcast masks.")
-        check_is_subdtype(gradient, 'gradient', numpy.floating)
+        assert_is_subdtype(gradient.dtype, numpy.floating)
         assert_greater_equal(learning_rate, 0)
         assert_greater_equal(momentum, 0)
         assert_is_instance(use_nesterov, bool)
