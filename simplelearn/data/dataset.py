@@ -9,7 +9,7 @@ __license__ = "Apache 2.0"
 
 import collections
 import numpy
-from simplelearn.utils import assert_all_equal, assert_integer
+from simplelearn.asserts import assert_all_equal, assert_integer
 from numpy.testing import assert_equal
 from nose.tools import (assert_is_instance,
                         assert_less,

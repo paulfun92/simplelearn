@@ -9,7 +9,8 @@ import nose
 from nose.tools import assert_equal, assert_true
 from simplelearn.formats import DenseFormat
 from simplelearn.data.mnist import load_mnist
-from simplelearn.utils import safe_izip, assert_all_equal
+from simplelearn.utils import safe_izip
+from simplelearn.asserts import assert_all_equal
 from simplelearn.nodes import RescaleImage
 
 try:

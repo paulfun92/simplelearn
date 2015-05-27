@@ -12,11 +12,11 @@ from nose.tools import (assert_true,
                         assert_is_instance,
                         assert_greater)
 import simplelearn
-from simplelearn.utils import (safe_izip,
-                               assert_integer,
-                               assert_all_is_instance,
-                               assert_all_integer,
-                               assert_all_greater_equal)
+from simplelearn.utils import safe_izip
+from simplelearn.asserts import (assert_integer,
+                                 assert_all_is_instance,
+                                 assert_all_integer,
+                                 assert_all_greater_equal)
 from simplelearn.formats import DenseFormat
 from simplelearn.data.dataset import Dataset
 from simplelearn.data import DataIterator

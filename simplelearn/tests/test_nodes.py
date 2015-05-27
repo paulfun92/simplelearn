@@ -21,7 +21,8 @@ from nose.tools import (assert_is_instance,
                         assert_true,
                         assert_raises_regexp)
 from simplelearn.formats import DenseFormat
-from simplelearn.utils import safe_izip, assert_all_greater, cudnn_available
+from simplelearn.utils import safe_izip, cudnn_available
+from simplelearn.asserts import assert_all_greater
 from simplelearn.nodes import (Node,
                                FormatNode,
                                InputNode,

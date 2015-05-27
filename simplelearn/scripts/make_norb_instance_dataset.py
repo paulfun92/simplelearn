@@ -9,12 +9,12 @@ from nose.tools import (assert_equal,
                         assert_greater,
                         assert_greater_equal)
 import simplelearn
-from simplelearn.utils import (safe_izip,
-                               assert_integer,
-                               assert_all_equal,
-                               assert_all_true,
-                               assert_all_integer,
-                               assert_all_greater_equal)
+from simplelearn.utils import safe_izip
+from simplelearn.asserts import (assert_integer,
+                                 assert_all_equal,
+                                 assert_all_true,
+                                 assert_all_integer,
+                                 assert_all_greater_equal)
 
 from simplelearn.formats import DenseFormat
 from simplelearn.data.dataset import Dataset

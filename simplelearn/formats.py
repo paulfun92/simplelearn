@@ -26,7 +26,8 @@ import theano
 from theano.gof.op import get_debug_values
 from theano.tensor import TensorType
 from theano.sandbox.cuda.type import CudaNdarrayType
-from simplelearn.utils import safe_izip, flatten, check_is_subdtype
+from simplelearn.utils import safe_izip, flatten
+from simplelearn.asserts import assert_integer
 import pdb
 
 # Batch size to use when theano.config.compute_test_value is not 'off'.
@@ -285,7 +286,7 @@ class Format(object):
 
         # Sanity-checks batch_size
         if not is_symbolic:
-            check_is_subdtype(batch_size, 'batch_size', numpy.integer)
+            assert_integer(batch_size)
             assert_greater_equal(batch_size, 0)
 
         # checks is_symbolic vs name
