@@ -32,6 +32,7 @@ import pdb
 # Batch size to use when theano.config.compute_test_value is not 'off'.
 test_batch_size = 2
 
+
 class Format(object):
     '''
     The format of a numeric or symbolic data batch.

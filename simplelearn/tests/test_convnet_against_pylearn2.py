@@ -14,7 +14,7 @@ from nose.tools import assert_true, assert_equal, assert_is_instance
 from numpy.testing import assert_array_equal, assert_allclose
 import theano
 from simplelearn.formats import DenseFormat
-from simplelearn.nodes import (Conv2DLayer,
+from simplelearn.nodes import (Conv2dLayer,
                                SoftmaxLayer,
                                RescaleImage,
                                FormatNode,
@@ -81,7 +81,7 @@ def make_sl_model(mnist_image_node):
                                    filter_shapes,
                                    pool_shapes,
                                    pool_strides):
-        last_node = Conv2DLayer(last_node,
+        last_node = Conv2dLayer(last_node,
                                 filter_shape,
                                 filter_count,
                                 conv_pads='valid',
@@ -231,7 +231,7 @@ def init_biases(sl_layers, pl_model):
 
     for sl_layer, pl_layer in safe_izip(sl_layers, pl_model.layers):
         sl_bias = (sl_layer.bias_node.params
-                   if isinstance(sl_layer, Conv2DLayer)
+                   if isinstance(sl_layer, Conv2dLayer)
                    else sl_layer.affine_node.bias_node.params)
         pl_bias = pl_layer.b
 

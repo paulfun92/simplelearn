@@ -25,6 +25,7 @@ from nose.tools import (assert_true,
 from numpy.testing import assert_array_equal
 from simplelearn.utils import (safe_izip,
                                cudnn_available,
+                               assert_is_subdtype,
                                assert_integer,
                                assert_floating,
                                assert_all_equal,

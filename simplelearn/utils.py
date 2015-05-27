@@ -202,7 +202,7 @@ def assert_is_subdtype(dtype, super_dtype):
     '''
     dtype = numpy.dtype(dtype)
     assert_true(numpy.issubdtype(dtype, super_dtype),
-                "{} is not a sub-dtype of {}.".format((dtype, super_dtype)))
+                "{} is not a sub-dtype of {}.".format(dtype, super_dtype))
 
 
 def assert_integer(scalar):
@@ -216,7 +216,7 @@ def assert_integer(scalar):
 
     dtype = type(scalar)
 
-    assert_is_subdttype(dtype, numpy.integer)
+    assert_is_subdtype(dtype, numpy.integer)
 
 
 def assert_floating(scalar):
@@ -253,7 +253,9 @@ def assert_all_subdtype(iterable, super_dtype):
     '''
     assert_is_instance(iterable, collections.Iterable)
 
-    if isinstance(iterable, utils._array_like_types):
+    global _array_like_types
+
+    if isinstance(iterable, _array_like_types):
         assert_is_subdtype(iterable.dtype, super_dtype)
     else:
         for index, element in enumerate(iterable):
@@ -296,7 +298,9 @@ def assert_all_true(arg):
     '''
     assert_is_instance(arg, collections.Iterable)
 
-    if isinstance(iterable, utils._array_like_types):
+    global _array_like_types
+
+    if isinstance(iterable, _array_like_types):
         assert_true(numpy.all(arg))
 
     for index, element in enumerate(arg):
@@ -348,7 +352,9 @@ def assert_all_equal(arg0, arg1=None):
     '''
     assert_is_instance(arg0, collections.Sequence)
 
-    if isinstance(arg0, utils._array_like_types):
+    global _array_like_types
+
+    if isinstance(arg0, _array_like_types):
         if arg1 is None:
             assert_all_equal(arg0[1:], arg0[0])
         else:
@@ -373,7 +379,9 @@ def assert_all_greater_equal(arg0, arg1):
     arg1 may be a scalar, or an Iterable of equal length as arg0.
     '''
 
-    if isinstance(arg0, utils._array_like_types):
+    global _array_like_types
+
+    if isinstance(arg0, _array_like_types):
         return numpy.all(arg0 >= arg1)
 
     for (index,
@@ -394,7 +402,10 @@ def assert_all_greater(arg0, arg1):
 
     arg1 may be a scalar or an Iterable of equal length as arg0.
     '''
-    if isinstance(arg0, utils._array_like_types):
+
+    global _array_like_types
+
+    if isinstance(arg0, _array_like_types):
         return numpy.all(arg0 > arg1)
 
     for (index,
@@ -415,7 +426,10 @@ def assert_all_less(arg0, arg1):
 
     arg1 may be a scalar or an Iterable of equal length as arg0.
     '''
-    if isinstance(arg0, utils._array_like_types):
+
+    global _array_like_types
+
+    if isinstance(arg0, _array_like_types):
         return numpy.all(arg0 < arg1)
 
 
@@ -438,7 +452,9 @@ def assert_all_less_equal(arg0, arg1):
     arg1 may be a scalar or an Iterable of equal length as arg0.
     '''
 
-    if isinstance(arg0, utils._array_like_types):
+    global _array_like_types
+
+    if isinstance(arg0, _array_like_types):
         return numpy.all(arg0 <= arg1)
 
     for (index,
