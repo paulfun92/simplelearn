@@ -19,7 +19,7 @@ from nose.tools import (assert_true,
                         assert_greater_equal,
                         assert_less_equal,
                         assert_equal)
-from simplelearn.nodes import (Conv2DLayer,
+from simplelearn.nodes import (Conv2dLayer,
                                Dropout,
                                CrossEntropy,
                                Misclassification,
@@ -228,7 +228,7 @@ def build_conv_classifier(input_node,
     -------
     rval: tuple
       (conv_nodes, affine_nodes, output_node), where:
-         conv_nodes is a list of the Conv2D nodes.
+         conv_nodes is a list of the Conv2d nodes.
          affine_nodes is a list of the AffineNodes.
          output_node is the final node, a Softmax.
     '''
@@ -312,7 +312,7 @@ def build_conv_classifier(input_node,
                                 conv_dropout_include_rate,
                                 theano_rng)
 
-        last_node = Conv2DLayer(last_node,
+        last_node = Conv2dLayer(last_node,
                                 filter_shape,
                                 filter_count,
                                 conv_pads='valid',

@@ -302,7 +302,7 @@ def build_fc_classifier(input_node,
     # Initialize the affine layer weights (not the biases, and not the softmax
     # weights)
     for sparse_init_count, affine_node in safe_izip(sparse_init_counts,
-                                                     affine_nodes[:-1]):
+                                                    affine_nodes[:-1]):
         # pylearn2 doesn't sparse_init the biases. I also found that
         # doing so slightly increases the final misclassification rate.
         init_sparse_linear(affine_node.linear_node.params,

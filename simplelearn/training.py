@@ -273,10 +273,16 @@ class LinearlyInterpolatesOverEpochs(EpochCallback):
         assert_is_instance(shared_value,
                            theano.tensor.sharedvar.SharedVariable)
         assert_is_subdtype(shared_value.dtype, numpy.floating)
-        assert_is_subdtype(final_value.dtype, numpy.floating)
-        if not numpy.isscalar(final_value):
+
+        assert_equal(shared_value.ndim == 0, numpy.isscalar(final_value))
+
+        if numpy.isscalar(final_value):
+            assert_floating(final_value)
+        else:
+            assert_is_subdtype(final_value.dtype, numpy.floating)
             assert_equal(final_value.shape,
                          shared_value.get_value().shape)
+
         assert_integer(epochs_to_saturation)
         assert_greater(epochs_to_saturation, 0)
 

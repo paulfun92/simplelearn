@@ -24,6 +24,7 @@ from simplelearn.io import SerializableModel
 from simplelearn.data import DummyIterator
 from simplelearn.data.mnist import load_mnist
 from simplelearn.nodes import (Softmax,
+                               SoftmaxLayer,
                                CastNode,
                                RescaleImage,
                                InputNode,
@@ -100,7 +101,7 @@ def main():
     assert_equal(len(model.input_nodes), 1)
 
     output_node = model.output_nodes[0]
-    assert_is_instance(output_node, Softmax)
+    assert_is_instance(output_node, (Softmax, SoftmaxLayer))
     assert_equal(output_node.output_format.axes, ('b', 'f'))
 
     input_uint8_node = model.input_nodes[0]
