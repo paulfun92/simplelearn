@@ -29,10 +29,10 @@ ln -s /usr/local/cuda-7.0 /usr/local/cuda
 
 
 # install Theano
-pip install -q --no-deps git+git://github.com/Theano/Theano.git
+pip install -H -q --no-deps git+git://github.com/Theano/Theano.git
 
 # install Pylearn2, for comparison tests
-pip install -q --no-deps git+git://github.com/lisa-lab/pylearn2.git
+pip install -H -q --no-deps git+git://github.com/lisa-lab/pylearn2.git
 
 mkdir ./datasets
 export SIMPLELEARN_DATA_PATH=./data/datasets
