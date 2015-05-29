@@ -24,7 +24,8 @@ from simplelearn.training import (StopsOnStagnation,
                                   limit_param_norms,
                                   Sgd,
                                   Monitor,
-                                  AverageMonitor)
+                                  AverageMonitor,
+                                  EpochCallback)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
 from simplelearn.data.dataset import Dataset
@@ -40,13 +41,16 @@ class L2Norm(Node):
     '''
 
     def __init__(self, input_node):
+        assert_equal(frozenset(input_node.output_format.axes),
+                     frozenset(['b', 'f']))
+
         feature_axis = input_node.output_format.axes.index('f')
         input_symbol = input_node.output_symbol
 
         output_symbol = \
             T.sqrt((input_symbol * input_symbol).sum(axis=feature_axis))
 
-        output_format = DenseFormat(axes=('b'), shape=(-1, ), dtype=None)
+        output_format = DenseFormat(axes=['b'], shape=[-1], dtype=None)
         super(L2Norm, self).__init__([input_node],
                                      output_symbol,
                                      output_format)
@@ -56,7 +60,7 @@ def test_average_monitor():
 
     rng = numpy.random.RandomState(3851)
 
-    vectors = rng.uniform(-1.0, 1.0, size=(3, 10))
+    vectors = rng.uniform(-1.0, 1.0, size=(12, 10))
     fmt = DenseFormat(axes=('b', 'f'), shape=(-1, 10), dtype=vectors.dtype)
     dataset = Dataset(names=['vectors'], formats=[fmt], tensors=[vectors])
     iterator = dataset.iterator('sequential',
@@ -64,22 +68,30 @@ def test_average_monitor():
                                 loop_style="divisible")
 
     input_node = iterator.make_input_nodes()[0]
-    l2_norm_node = L2Norm([input_node])
+    l2_norm_node = L2Norm(input_node)
 
-    num_averages_compared = 0
+    num_averages_compared = [0]
 
-    def compare_with_expected_average(average):
+    def compare_with_expected_average(values, _):  # ignore formats arg
+        assert_equal(len(values), 1)
+        average = values[0]
+
+        assert_is_instance(fmt, DenseFormat)
         l2_norms = numpy.sqrt((vectors ** 2.0).sum(fmt.axes.index('f')))
         expected_average = l2_norms.sum() / l2_norms.size
 
         assert_allclose(average, expected_average)
-        num_averages_compared += 1
+        num_averages_compared[0] += 1
 
     average_monitor = AverageMonitor([l2_norm_node.output_symbol],
                                      [l2_norm_node.output_format],
                                      [compare_with_expected_average])
 
     class DatasetRandomizer(EpochCallback):
+        '''
+        Fills the dataset with a fresh set of random values after each epoch.
+        '''
+
         def on_start_training(self):
             pass
 
@@ -91,12 +103,12 @@ def test_average_monitor():
                   parameters=[],
                   parameter_updaters=[],
                   monitors=[average_monitor],
-                  epoch_callbacks=[LimitNumEpochs(3),
+                  epoch_callbacks=[LimitsNumEpochs(3),
                                    DatasetRandomizer()])
 
     trainer.train()
 
-    assert_equal(num_averages_compared, 3)
+    assert_equal(num_averages_compared[0], 3)
 
 # def test_stops_on_stagnation():
 

@@ -536,6 +536,9 @@ class ReduceMonitor(Monitor):
     def _reduce_batch(self, input_batch, batch_axis):
         '''
         Reduce input_batch along its batch_axis, and return the result.
+
+        The result should collapse its 'b' (batch) axis to size 1, but not
+        remove it.
         '''
         raise NotImplementedError("%s._reduce_batch() not yet implemented." %
                                   type(self))
