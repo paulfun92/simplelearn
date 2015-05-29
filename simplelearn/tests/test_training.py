@@ -32,44 +32,71 @@ from simplelearn.data.dataset import Dataset
 import pdb
 
 
-# class L2Norm(Node):
+class L2Norm(Node):
+    '''
+    Computes the L2 norm of a single vector.
 
-#     def __init__(self, input_node):
-#         feature_axis = input_node.output_format.axes.index('f')
-#         input_symbol = input_node.output_symbol
+    Unlike nodes.L2Loss, which is a function of two vectors.
+    '''
 
-#         output_symbol = \
-#             T.sqrt((input_symbol * input_symbol).sum(axis=feature_axis))
+    def __init__(self, input_node):
+        feature_axis = input_node.output_format.axes.index('f')
+        input_symbol = input_node.output_symbol
 
-#         output_format = DenseFormat(axes=('b'), shape=(-1, ), dtype=None)
-#         super(L2Norm, self).__init__(output_symbol,
-#                                      output_format,
-#                                      input_node)
+        output_symbol = \
+            T.sqrt((input_symbol * input_symbol).sum(axis=feature_axis))
+
+        output_format = DenseFormat(axes=('b'), shape=(-1, ), dtype=None)
+        super(L2Norm, self).__init__([input_node],
+                                     output_symbol,
+                                     output_format)
 
 
-# def test_computes_average_over_epoch():
-#     rng = numpy.random.RandomState(3851)
-#     tensor = rng.uniform(-1.0, 1.0, size=(3, 10))
-#     fmt = DenseFormat(axes=('b', 'f'), shape=(-1, 10), dtype=tensor.dtype)
-#     dataset = Dataset(names=('x', ), formats=(fmt, ), tensors=(tensor, ))
+def test_average_monitor():
 
-#     l2norm_node = L2Norm(*dataset.make_input_nodes())
-#     averages = []
+    rng = numpy.random.RandomState(3851)
 
-#     l2norms = numpy.sqrt((tensor * tensor).sum(axis=1))
-#     expected_average = l2norms.sum() / l2norms.size
+    vectors = rng.uniform(-1.0, 1.0, size=(3, 10))
+    fmt = DenseFormat(axes=('b', 'f'), shape=(-1, 10), dtype=vectors.dtype)
+    dataset = Dataset(names=['vectors'], formats=[fmt], tensors=[vectors])
+    iterator = dataset.iterator('sequential',
+                                batch_size=2,
+                                loop_style="divisible")
 
-#     averager = ComputesAverageOverEpoch(l2norm_node,
-#                                         dataset.iterator('sequential',
-#                                                          batch_size=1,
-#                                                          loop_style="wrap"),
-#                                         (lambda x: averages.append(x), ))
+    input_node = iterator.make_input_nodes()[0]
+    l2_norm_node = L2Norm([input_node])
 
-#     for ii in range(2):
-#         averager()
-#         assert_equal(len(averages), ii + 1)
-#         assert_allclose(averages[ii], expected_average)
+    num_averages_compared = 0
 
+    def compare_with_expected_average(average):
+        l2_norms = numpy.sqrt((vectors ** 2.0).sum(fmt.axes.index('f')))
+        expected_average = l2_norms.sum() / l2_norms.size
+
+        assert_allclose(average, expected_average)
+        num_averages_compared += 1
+
+    average_monitor = AverageMonitor([l2_norm_node.output_symbol],
+                                     [l2_norm_node.output_format],
+                                     [compare_with_expected_average])
+
+    class DatasetRandomizer(EpochCallback):
+        def on_start_training(self):
+            pass
+
+        def on_epoch(self):
+            vectors[...] = rng.uniform(-1.0, 1.0, size=vectors.shape)
+
+    trainer = Sgd([input_node],
+                  iterator,
+                  parameters=[],
+                  parameter_updaters=[],
+                  monitors=[average_monitor],
+                  epoch_callbacks=[LimitNumEpochs(3),
+                                   DatasetRandomizer()])
+
+    trainer.train()
+
+    assert_equal(num_averages_compared, 3)
 
 # def test_stops_on_stagnation():
 
@@ -233,7 +260,7 @@ def test_limit_param_norms():
                   epoch_callbacks=[])
         sgd.train()
 
-        weight_norm = numpy.sqrt((weights.get_value()**2.0).sum())
+        weight_norm = numpy.sqrt((weights.get_value() ** 2.0).sum())
         assert_almost_equal(weight_norm, max_norm, decimal=6)
 
         # an optional sanity-check to confirm that the weights are on a
