@@ -110,34 +110,50 @@ def test_average_monitor():
 
     assert_equal(num_averages_compared[0], 3)
 
-# def test_stops_on_stagnation():
 
-#     def get_values(stepsize, kink_index):
-#         descending_values = (numpy.arange(kink_index) * (-stepsize)) + 100.
-#         flat_values = numpy.zeros(kink_index)
-#         flat_values[:] = descending_values[-1]
-#         return numpy.concatenate((descending_values, flat_values))
+def test_stops_on_stagnation():
+    '''
+    Tests StopsOnStagnation.
 
-#     threshold = .1
-#     kink_index = 20
-#     values = get_values(threshold + .0001, kink_index)
+    Presents the EpochCallback with a sequence of loss values in the shape
+    of a hockey stick: constant downward slope, followed by a kink into
+    a flat, stagnant section.
+    '''
 
-#     num_epochs = 5
-#     assert num_epochs < kink_index
+    def get_values(min_proportional_decrease, kink_index):
+        descending_values = numpy.zeros(kink_index, dtype=float)
+        descending_values[0] = 1.0
+        scale = 1.0 - (min_proportional_decrease + .001)
+        for i in range(1, len(descending_values)):
+            descending_values[i] = descending_values[i - 1] * scale
 
-#     index = 0
-#     stops_on_stagnation = StopsOnStagnation("hockey stick",
-#                                             num_epochs,
-#                                             threshold)
+        # descending_values = (numpy.arange(kink_index) * (-stepsize)) + 100.
+        flat_values = numpy.zeros(kink_index)
+        flat_values[:] = descending_values[-1]
+        result = numpy.concatenate((descending_values, flat_values))
+        return result[:, numpy.newaxis]
 
-#     try:
-#         for value in values:
-#             stops_on_stagnation(value)
-#             index += 1
-#     except StopTraining, st:
-#         assert_equal(index, kink_index + num_epochs)
-#         assert_equal(st.status, 'ok')
-#         assert "didn't decrease for" in st.message
+    min_proportional_decrease = .1
+    kink_index = 20
+    values = get_values(min_proportional_decrease, kink_index)
+
+    num_epochs = 5
+    assert num_epochs < kink_index
+
+    index = 0
+    stops_on_stagnation = StopsOnStagnation(num_epochs,
+                                            min_proportional_decrease)
+    fmt = DenseFormat(axes=['b'], shape=[-1], dtype=None)
+
+    try:
+        for value in values:
+            index += 1
+            stops_on_stagnation([value], [fmt])
+    except StopTraining, st:
+        assert_equal(index, kink_index + num_epochs)
+        assert_equal(st.status, 'ok')
+        assert "Value did not lower" in st.message
+
 
 class WeightMonitor(Monitor):
 

@@ -774,7 +774,7 @@ class StopsOnStagnation(object):
 
         self._max_epochs_since_min = max_epochs
         self._min_proportional_decrease = min_proportional_decrease
-        self._epochs_since_min = 0
+        self._epochs_since_min = None
         self._min_value = None
 
     def __call__(self, values, formats):
@@ -787,23 +787,19 @@ class StopsOnStagnation(object):
         assert_equal(values[0].shape, (1, ))
         value = values[0][0]
 
-        if self._min_value is None:
-            self._min_value = value
-        elif value < (1.0 - self._min_proportional_decrease) * self._min_value:
+        if self._min_value is None or \
+           value < (1.0 - self._min_proportional_decrease) * self._min_value:
             self._epochs_since_min = 0
             self._min_value = value
         else:
             self._epochs_since_min += 1
 
         if self._epochs_since_min >= self._max_epochs_since_min:
-            message = ("%s stopping training. Value did not lower %s"
-                       "below last min value of %g for %d epochs." %
-                       (type(self),
-                        ("more than %g " % self._min_proportional_decrease
-                         if self._min_proportional_decrease > 0.0
-                         else ""),
-                        self._min_value,
-                        self._epochs_since_min))
+            message = ("{} stopping training. Value did not lower by "
+                       "a fraction exceeding {} for {} epochs.".format(
+                           self._min_proportional_decrease,
+                           self._min_value,
+                           self._epochs_since_min))
 
             raise StopTraining("ok", message)
 
