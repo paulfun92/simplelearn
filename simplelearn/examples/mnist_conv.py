@@ -416,22 +416,27 @@ def main():
 
     mnist_training, mnist_testing = load_mnist()
 
-    if args.validation_size != 0:
+    if args.validation_size == 0:
+        # use testing set as validation set
+        mnist_validation = mnist_testing
+    else:
+        # split training set into training and validation sets
         tensors = mnist_training.tensors
         training_tensors = [t[:-args.validation_size, ...] for t in tensors]
-        testing_tensors = [t[args.validation_size:, ...] for t in tensors]
+        validation_tensors = [t[args.validation_size:, ...] for t in tensors]
         mnist_training = Dataset(tensors=training_tensors,
                                  names=mnist_training.names,
                                  formats=mnist_training.formats)
-        mnist_testing = Dataset(tensors=testing_tensors,
-                                names=mnist_training.names,
-                                formats=mnist_training.formats)
+        mnist_validation = Dataset(tensors=validation_tensors,
+                                   names=mnist_training.names,
+                                   formats=mnist_training.formats)
 
-    mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
-                                                    loop_style='divisible',
-                                                    batch_size=args.batch_size)
+    mnist_validation_iterator = mnist_validation.iterator(
+        iterator_type='sequential',
+        loop_style='divisible',
+        batch_size=args.batch_size)
 
-    image_uint8_node, label_node = mnist_testing_iterator.make_input_nodes()
+    image_uint8_node, label_node = mnist_validation_iterator.make_input_nodes()
     image_node = RescaleImage(image_uint8_node)
 
     rng = numpy.random.RandomState(1234)
@@ -604,8 +609,8 @@ def main():
         callbacks=[validation_loss_logger, saves_best])
 
     validation_callback = ValidationCallback(
-        inputs=[image_node.output_symbol, label_node.output_symbol],
-        input_iterator=mnist_testing_iterator,
+        inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
+        input_iterator=mnist_validation_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
     # trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
