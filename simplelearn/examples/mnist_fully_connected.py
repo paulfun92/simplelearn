@@ -142,10 +142,14 @@ def parse_args():
                         help=("# of epochs until momentum linearly scales up "
                               "to --momentum_final_value."))
 
-    parser.add_argument("--conv",
-                        default=False,
-                        action='store_true',
-                        help=("Use convolutional classifier."))
+    parser.add_argument("--validation-size",
+                        type=non_negative_int,
+                        default=10000,
+                        metavar="V",
+                        help=("Hold out the last V examples of the training "
+                              "set to use as a validation set. If V is 0, "
+                              "use the MNIST test set as the validation set."))
+
 
     return parser.parse_args()
 
@@ -362,9 +366,25 @@ def main():
 
     mnist_training, mnist_testing = load_mnist()
 
-    mnist_testing_iterator = mnist_testing.iterator(iterator_type='sequential',
-                                                    batch_size=args.batch_size)
-    image_uint8_node, label_node = mnist_testing_iterator.make_input_nodes()
+    if args.validation_size == 0:
+        # use testing set as validation set
+        mnist_validation = mnist_testing
+    else:
+        # split training set into training and validation sets
+        tensors = mnist_training.tensors
+        training_tensors = [t[:-args.validation_size, ...] for t in tensors]
+        validation_tensors = [t[args.validation_size:, ...] for t in tensors]
+        mnist_training = Dataset(tensors=training_tensors,
+                                 names=mnist_training.names,
+                                 formats=mnist_training.formats)
+        mnist_validation = Dataset(tensors=validation_tensors,
+                                   names=mnist_training.names,
+                                   formats=mnist_training.formats)
+
+    mnist_validation_iterator = mnist_validation.iterator(
+        iterator_type='sequential',
+        batch_size=args.batch_size)
+    image_uint8_node, label_node = mnist_validation_iterator.make_input_nodes()
     image_node = CastNode(image_uint8_node, 'floatX')
     # image_node = RescaleImage(image_uint8_node)
 
@@ -475,7 +495,7 @@ def main():
 
     validation_callback = ValidationCallback(
         inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
-        input_iterator=mnist_testing_iterator,
+        input_iterator=mnist_validation_iterator,
         monitors=[validation_loss_monitor, mcr_monitor])
 
     trainer = Sgd([image_uint8_node, label_node],
