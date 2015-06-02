@@ -9,7 +9,8 @@ cache: apt
 
   # command to install dependencies
 before_install:
-  - sudo apt-get install libhdf5-dev
+  # fix for this error: http://argansos.blogspot.co.uk/2014/07/pip-install-h5py-error-fix.html
+  - sudo apt-get install libhdf5-serial-dev
 install:
 #  - "pip install -r requirements.txt"
   - pip install numpy
