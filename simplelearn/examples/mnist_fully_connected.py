@@ -26,6 +26,7 @@ from simplelearn.asserts import (assert_all_greater,
                                  assert_all_less_equal,
                                  assert_all_integer)
 from simplelearn.io import SerializableModel
+from simplelearn.data.dataset import Dataset
 from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
