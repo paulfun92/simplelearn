@@ -2,7 +2,10 @@
 
 set -e
 
-apt-get install python-dev python-numpy python-matplotlib python-nose python-h5py python-pip
+# Python packages must be installed via pip, since travis uses virtualenv, which somehow fails with apt-installed python packages. See:
+# http://stackoverflow.com/a/17800821/399397
+
+# apt-get install python-dev python-numpy python-matplotlib python-nose python-h5py python-pip
 
 # install CUDA
 CUDA_URL=http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_7.0-28_amd64.deb

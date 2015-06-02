@@ -8,6 +8,8 @@ python:
 cache: apt
 
   # command to install dependencies
+before_install:
+  - sudo apt-get install libhdf5-dev
 install:
 #  - "pip install -r requirements.txt"
   - pip install numpy
