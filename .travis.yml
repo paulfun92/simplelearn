@@ -10,7 +10,7 @@ cache: apt
   # command to install dependencies
 before_install:
   # libhdf5-serial-dev needed to fix this error: http://argansos.blogspot.co.uk/2014/07/pip-install-h5py-error-fix.html
-  - sudo apt-get install libhdf5-serial-dev #libopenblas-dev
+  - sudo apt-get install python-dev gfortran libhdf5-serial-dev libopenblas-dev liblapack-dev
 install:
 #  - "pip install -r requirements.txt"
   - pip install numpy
