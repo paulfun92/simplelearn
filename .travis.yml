@@ -14,7 +14,7 @@ before_install:
 install:
 #  - "pip install -r requirements.txt"
   - pip install numpy
-  - pip install scipy
+  - travis_wait pip install scipy
   - pip install h5py
 #  - pip install scipy
   # - pip install --use-mirrors pyparsing
