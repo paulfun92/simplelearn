@@ -18,7 +18,8 @@ install:
   - pip install h5py
 #  - pip install scipy
   # - pip install --use-mirrors pyparsing
-  - pip install --use-mirrors matplotlib
+  # - pip install --use-mirrors matplotlib
+  - pip install matplotlib
   - pip install Theano --user
   - sudo -E ./travis_install.sh
 #script: nosetests

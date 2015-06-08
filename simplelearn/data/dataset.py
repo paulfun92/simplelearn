@@ -136,26 +136,143 @@ class Dataset(DataSource):
             raise NotImplementedError("'%s' iterator type not supported." %
                                       iterator_type)
 
+def _get_num_examples(dataset):
 
-class SequentialIterator(DataIterator):
+    example_counts = tuple(tensor.shape[fmt.axes.index('b')]
+                           for tensor, fmt
+                           in safe_izip(dataset.tensors, dataset.formats))
+
+    if not all(sc == example_counts[0] for sc in example_counts[1:]):
+        raise ValueError("Expected all tensors to have the same number of "
+                         "samples, but got {}.".format(example_counts))
+
+    return example_counts[0]
+
+
+class DatasetIterator(DataIterator):
+    '''
+    An abstract superclass of iterators for Dataset, a fixed-size DataSource.
+    '''
+
+    def __init__(self, dataset, batch_size):
+        assert_is_instance(dataset, Dataset)
+        assert_greater(batch_size, 0)
+        assert_integer(batch_size)
+
+        self.dataset = dataset
+        self.batch_size = batch_size
+
+    def _next_batch_indices(self):
+        '''
+        Returns
+        -------
+        rval: slice or tuple of ints
+
+          Used to index into the batch axis to select the next batch of
+          examples.
+        '''
+        raise NotImplementedError("{}._next_batch_indices() not yet "
+                                  "implemented".format(type(self)))
+
+    def _next(self):
+
+        def get_batch(tensor, fmt, batch_indices):
+            """
+            Returns a batch containing selected examples.
+
+            Parameters
+            ----------
+            tensor: numpy.ndarray, or similar
+              The tensor to select a batch from.
+
+            fmt: simplelearn.format.DenseFormat
+              The tensor's format
+
+            batch_indices: Sequence
+              an array of example indices.
+            """
+
+            assert 'b' in fmt.axes
+            index = tuple(batch_indices if axis == 'b'
+                          else slice(None)
+                          for axis in fmt.axes)
+            result = tensor[index]
+            assert_equal(result.shape[fmt.axes.index('b')],
+                         len(batch_indices))
+            return result
+
+
+        batch_indices = self._next_batch_indices()
+
+        return tuple(get_batch(tensor, fmt, example_indices)
+                     for tensor, fmt
+                     in safe_izip(self._h5_dataset.tensors,
+                                  self._h5_dataset.formats))
+
+
+    def make_input_nodes(self):
+        NamedTupleOfNodes = collections.namedtuple('NamedNodes',
+                                                   self.dataset.names)
+        nodes = tuple(InputNode(fmt) for fmt in self.dataset.formats)
+        return NamedTupleOfNodes(*nodes)  # pylint: disable=star-args
+
+
+class RandomIterator(DatasetIterator):
+    '''
+    Iterates through samples in a Dataset in random order.
+
+    By default, all examples in the dataset have an equal probability of
+    being selected for the next batch. To change this, edit self.probabilities.
+    Make sure they add up to 1.0, or else numpy will throw an error.
+    '''
+
+    def __init__(self, dataset, batch_size, rng):
+        super(RandomIterator, self).__init__(dataset, batch_size)
+        assert_is_instance(rng, numpy.random.RandomState)
+        self._rng = rng
+
+        num_examples = _get_num_examples(dataset)
+
+        self.probabilities = (numpy.ones(num_examples, dtype=float) /
+                              num_examples)
+
+        self.batches_per_epoch = (num_examples // batch_size +
+                                  0 if num_examples % batch_size == 0 else 1)
+        self.num_batches_shown = 0
+
+    def next_is_new_epoch(self):
+        return ((self.num_batches_shown % self.batches_per_epoch) == 0)
+
+    def _next_batch_indices(self):
+        self._rng.choice(self.probabilities.shape[0],
+                                           size=self._batch_size,
+                                           replace=True,
+                                           p=self.probabilities)
+
+    def _next(self):
+
+        result = super(RandomIterator, self)._next()
+
+        self.num_batches_shown += 1
+
+        return result
+
+
+class SequentialIterator(DatasetIterator):
     """
     Iterates through samples in a Dataset in memory order.
     """
 
-    def __init__(self, batch_size, names, formats, tensors, **kwargs):
+    def __init__(self,
+                 dataset,
+                 batch_size,
+                 loop_style='wrap'):
         """
         Parameters
         ----------
+        dataset: Dataset
+
         batch_size: int
-
-        names: sequence of strings
-          tensors' names.
-
-        formats: sequence of Formats
-          tensors' formats. All must have a 'b' (batch) axis.
-
-        tensors: sequence of numpy tensors
-          All must have the same number of samples.
 
         loop_style: str (optional)
           How to handle the case where the number of samples in the dataset
@@ -173,90 +290,36 @@ class SequentialIterator(DataIterator):
           'divisible': If the number of samples isn't divisible by batch_size,
                        raise a ValueError in the constructor.
         """
-
-        #
-        # Sanity-checks arguments
-        #
-
-        if not numpy.issubdtype(type(batch_size), numpy.integer):
-            raise TypeError("batch_size must be an integer, not a %s." %
-                            type(batch_size))
-
-        if not batch_size > 0:
-            raise ValueError("batch_size must be positive, not %d." %
-                             batch_size)
-
-        if len(names) != len(formats) or len(names) != len(tensors):
-            raise ValueError("Expected equal # of names, formats and tensors, "
-                             "not %d names, %d formats, and %d tensors." %
-                             (len(names), len(formats), len(tensors)))
-
-        if len(formats) == 0:
-            raise ValueError("Got empty sequences for 'names', 'formats' & "
-                             "'tensors' arguments.")
-
-        for name in names:
-            if not isinstance(name, basestring):
-                raise TypeError("Expected names to be strings, but got a %s."
-                                % type(name))
-
-        for fmt in formats:
-            if not isinstance(fmt, Format):
-                raise TypeError("Expected formats to be Formats, but got a "
-                                "%s.", type(fmt))
-
-        for tensor in tensors:
-            if not Format.is_numeric(tensor):
-                raise TypeError("Expected tensors to be numeric arrays, but "
-                                "got a %s." % type(tensor))
-
-        self._loop_style = kwargs.get('loop_style', None)
-        if self._loop_style is None:
-            self._loop_style = 'wrap'
+        super(SequentialIterator, self).__init__(dataset, batch_size)
 
         loop_style_values = ('truncate', 'wrap', 'divisible')
 
-        if self._loop_style not in loop_style_values:
+        if loop_style not in loop_style_values:
             raise ValueError("'loop_style' argument must be one of %s, not "
-                             "'%s'." % (str(loop_style_values),
-                                        self._loop_style))
+                             "'%s'." % (str(loop_style_values), loop_style))
 
-        def get_num_samples(tensor, fmt):
-            '''
-            Returns the size along the batch axis.
-            '''
-            batch_index = fmt.axes.index('b')
-            return tensor.shape[batch_index]
+        self._loop_style = loop_style
 
-        sample_counts = tuple(get_num_samples(t, f)
-                              for t, f in safe_izip(tensors, formats))
-        if not all(sc == sample_counts[0] for sc in sample_counts[1:]):
-            raise ValueError("Expected all tensors to have the same number of "
-                             "samples, but got %s." % str(sample_counts))
+        num_examples = _get_num_examples(dataset)
 
-        num_samples = sample_counts[0]
-
-        if num_samples < batch_size:
+        if num_examples < batch_size:
             raise ValueError("# of samples %d must be greater than "
                              "batch_size %d." %
-                             (num_samples, batch_size))
+                             (num_examples, batch_size))
 
         if self._loop_style == 'divisible' and \
-           numpy.mod(num_samples, batch_size) != 0:
+           numpy.mod(num_examples, batch_size) != 0:
             raise ValueError("# of samples %d is not divisible by "
                              "batch_size %d (remainder = %d)." %
-                             (num_samples,
+                             (num_examples,
                               batch_size,
-                              numpy.mod(num_samples, batch_size)))
+                              numpy.mod(num_examples, batch_size)))
 
         self._next_batch_start = 0
-        self._batch_size = batch_size
-        self._names = names
-        self._formats = formats
-        self._tensors = tensors
-        # self.Batch = collections.namedtuple('Batch', names)
-
-        super(SequentialIterator, self).__init__()
+        # self._batch_size = batch_size
+        # self._names = names
+        # self._formats = formats
+        # self._tensors = tensors
 
     def make_input_nodes(self):
         NamedTupleOfNodes = collections.namedtuple('NamedNodes', self._names)
@@ -265,8 +328,8 @@ class SequentialIterator(DataIterator):
         return NamedTupleOfNodes(*nodes)
 
     def next_is_new_epoch(self):
-        num_samples = self._tensors[0].shape[self._formats[0].axes.index('b')]
-        assert_less(self._next_batch_start, num_samples)
+        num_examples = self._tensors[0].shape[self._formats[0].axes.index('b')]
+        assert_less(self._next_batch_start, num_examples)
 
         if self._loop_style == 'wrap':
             return self._next_batch_start < self._batch_size
@@ -288,22 +351,22 @@ class SequentialIterator(DataIterator):
             assert_equal(result.shape[fmt.axes.index('b')], end - start)
             return result
 
-        num_samples = \
+        num_examples = \
             self._tensors[0].shape[self._formats[0].axes.index('b')]
 
         if self._loop_style == 'truncate':
-            num_samples = num_samples - numpy.mod(num_samples,
-                                                  self._batch_size)
+            num_examples = num_examples - numpy.mod(num_examples,
+                                                    self._batch_size)
 
-        assert_less(self._next_batch_start, num_samples)
+        assert_less(self._next_batch_start, num_examples)
 
-        if self._next_batch_start + self._batch_size > num_samples:
+        if self._next_batch_start + self._batch_size > num_examples:
             assert_not_equal(self._loop_style,
                              'divisible',
                              "Number of samples %d wasn't divisible by "
                              "batch size %d. This should've been caught "
                              "in the %s constructor." %
-                             (num_samples,
+                             (num_examples,
                               self._batch_size,
                               type(self)))
 
@@ -311,14 +374,14 @@ class SequentialIterator(DataIterator):
                              'truncated',
                              "Truncated number of samples %d wasn't divisible "
                              "by batch size %d. It must've been coded wrong." %
-                             (num_samples, self._batch_size))
+                             (num_examples, self._batch_size))
 
             if self._loop_style == 'wrap':
                 batch = tuple(fmt.make_batch(is_symbolic=False,
                                              batch_size=self._batch_size)
                               for fmt in self._formats)
 
-                chunk_size = num_samples - self._next_batch_start
+                chunk_size = num_examples - self._next_batch_start
                 assert_greater(chunk_size, 0)
 
                 for subbatch, tensor, fmt in safe_izip(batch,
@@ -331,7 +394,7 @@ class SequentialIterator(DataIterator):
                         get_batch(tensor,
                                   fmt,
                                   self._next_batch_start,
-                                  num_samples)
+                                  num_examples)
 
                     get_batch(subbatch,
                               fmt,
@@ -359,9 +422,9 @@ class SequentialIterator(DataIterator):
                            in safe_izip(self._tensors, self._formats))
 
         self._next_batch_start += self._batch_size
-        assert_less_equal(self._next_batch_start, num_samples)
+        assert_less_equal(self._next_batch_start, num_examples)
 
-        if self._next_batch_start == num_samples:
+        if self._next_batch_start == num_examples:
             self._next_batch_start = 0
 
         return subbatches
