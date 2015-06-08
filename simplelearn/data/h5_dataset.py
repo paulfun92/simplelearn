@@ -82,7 +82,9 @@ def make_h5_file(path,
     assert_is_instance(path, basestring)
     assert_equal(os.path.splitext(path)[1], '.h5')
     absolute_path = os.path.abspath(path)
-    assert_true(absolute_path.startswith(simplelearn.data.data_path))
+    assert_true(absolute_path.startswith(simplelearn.data.data_path),
+                ("{} is not a subdirectory of simplelearn.data.data_path "
+                 "{}").format(absolute_path, simplelearn.data.data_path))
 
     assert_all_is_instance(partition_names, basestring)
     assert_equal(len(frozenset(partition_names)), len(partition_names))

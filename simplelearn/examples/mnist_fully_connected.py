@@ -151,7 +151,6 @@ def parse_args():
                               "set to use as a validation set. If V is 0, "
                               "use the MNIST test set as the validation set."))
 
-
     return parser.parse_args()
 
 
