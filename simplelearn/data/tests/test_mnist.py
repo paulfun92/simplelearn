@@ -31,7 +31,7 @@ def test_mnist():
 
     for mnist, expected_size in safe_izip((train_set, test_set),
                                           (60000, 10000)):
-        assert_equal(mnist.size, expected_size)
+        assert_equal(mnist.num_examples(), expected_size)
 
     expected_formats = [DenseFormat(shape=[-1, 28, 28],
                                     axes=['b', '0', '1'],

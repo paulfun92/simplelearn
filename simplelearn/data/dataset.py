@@ -9,7 +9,9 @@ __license__ = "Apache 2.0"
 
 import collections
 import numpy
-from simplelearn.asserts import assert_all_equal, assert_integer
+from simplelearn.asserts import (assert_all_equal,
+                                 assert_integer,
+                                 assert_all_integer)
 from numpy.testing import assert_equal
 from nose.tools import (assert_in,
                         assert_is_not,
@@ -62,8 +64,7 @@ class Dataset(DataSource):
         self.formats = tuple(formats)
         self.tensors = tuple(tensors)
 
-    @property
-    def size(self):
+    def num_examples(self):
         '''
         The number of examples contained in this Dataset.
 
@@ -76,7 +77,7 @@ class Dataset(DataSource):
         sizes = [t.shape[f.axes.index('b')]
                  for t, f in safe_izip(self.tensors, self.formats)]
         assert_all_equal(sizes)
-        return sizes[1]
+        return sizes[0]
 
     @staticmethod
     def _getitem_arg_to_slice(arg):
@@ -195,15 +196,17 @@ class DatasetIterator(DataIterator):
 
         batch_indices = self._next_batch_indices()
 
-        if isinstance(batch_indices, numpy.ndarray):
-            # Workaround to a bug in h5py.Dataset where indexing by a length-1
-            # array is treated like indexing with the integer it contains.
-            if len(batch_indices) == 1:
-                batch_indices = tuple(batch_indices)
-        else:
-            assert_is_instance(batch_indices, (slice, collections.Sequence))
+        if not isinstance(batch_indices, slice):
+            assert_all_integer(batch_indices)
 
-        assert_all_integers(batch_indices)
+            if isinstance(batch_indices, numpy.ndarray):
+                # Workaround to a bug in h5py.Dataset where indexing by a
+                # length-1 array is treated like indexing with the integer it
+                # contains.
+                if len(batch_indices) == 1:
+                    batch_indices = tuple(batch_indices)
+            else:
+                assert_is_instance(batch_indices, collections.Sequence)
 
         result = []
         for tensor, fmt in safe_izip(self.dataset.tensors,
