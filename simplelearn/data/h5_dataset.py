@@ -227,103 +227,27 @@ class H5Dataset(Dataset):
         self.__init__(os.path.join(simplelearn.data.data_path, state[0]),
                       state[1])
 
-class RandomIterator(DataIterator):
+
+class RandomIterator(simplelearn.data.dataset.RandomIterator):
     '''
-    Iterates through samples in an H5Dataset in random order.
+    Like dataset.RandomIterator, this yields random examples.
 
-    Within each batch, the examples will be sorted in memory order. This is
-    because h5py requires that when indexing into h5py.Dataset with an array of
-    indices, the indices must be sorted. This should not affect the outcome of
-    SGD, but if it is problematic for any other reason, you can shuffle the
-    batch contents before using them.
+    Unlike dataset.RandomIterator, the random examples are listed within the
+    batch in memory-order. This is because h5py.Dataset requires that batch
+    indices must be sorted.
 
-    Initially, all examples in the h5_dataset have an equal probability of
-    being selected for the next batch. To change this, edit self.probabilities.
-    Make sure they add up to 1.0, or else numpy will throw an error.
+    This should not affect the outcome of SGD. If it's problematic for
+    other reasons, then you can always shuffle the examples within the batch
+    before using it.
     '''
 
     def __init__(self, h5_dataset, batch_size, rng):
-        assert_is_instance(h5_dataset, Dataset)  # not necessarily an H5Dataset
-        assert_greater(len(h5_dataset.tensors), 0)
+        super(RandomIterator, self).__init__(h5_dataset, batch_size, rng)
 
-        assert_integer(batch_size)
-        assert_greater(batch_size, 0)
-
-        assert_is_instance(rng, numpy.random.RandomState)
-
-        super(RandomIterator, self).__init__()
-
-        def get_num_examples():
-            tensor = h5_dataset.tensors[0]
-            fmt = h5_dataset.formats[0]
-            return tensor.shape[fmt.axes.index('b')]
-
-        self._h5_dataset = h5_dataset
-        self._batch_size = batch_size
-        self._rng = rng
-
-        num_examples = get_num_examples()
-
-        self.probabilities = numpy.empty(get_num_examples(), dtype=float)
-        self.probabilities[:] = 1.0 / float(self.probabilities.shape[0])
-        self.batches_per_epoch = (num_examples // batch_size +
-                                  0 if num_examples % batch_size == 0 else 1)
-        self.num_batches_shown = 0
-
-    def make_input_nodes(self):
-        NamedTupleOfNodes = collections.namedtuple('NamedNodes',
-                                                   self._h5_dataset.names)
-        nodes = tuple(InputNode(fmt) for fmt in self._h5_dataset.formats)
-        return NamedTupleOfNodes(*nodes)  # pylint: disable=star-args
-
-    def next_is_new_epoch(self):
-        return ((self.num_batches_shown % self.batches_per_epoch) == 0)
-
-    def _next(self):
-
-        def get_batch(tensor, fmt, example_indices):
-            """
-            Returns a batch containing selected examples.
-
-            Parameters
-            ----------
-            tensor: numpy.ndarray, or similar
-              The tensor to select a batch from.
-
-            fmt: simplelearn.format.DenseFormat
-              The tensor's format
-
-            example_indices: Sequence
-              an array of example indices.
-            """
-
-            assert 'b' in fmt.axes
-            index = tuple(example_indices if axis == 'b'
-                          else slice(None)
-                          for axis in fmt.axes)
-            result = tensor[index]
-            assert_equal(result.shape[fmt.axes.index('b')],
-                         len(example_indices))
-            return result
-
-        example_indices = self._rng.choice(self.probabilities.shape[0],
-                                           size=self._batch_size,
-                                           replace=True,
-                                           p=self.probabilities)
-
-        # h5py.Datasets requires that index arrays be sorted. This should not
-        # affect the outcome of SGD, which is invariant to the order of
-        # examples within a batch.
-        example_indices.sort()  # in-place quicksort
-
-        result = tuple(get_batch(tensor, fmt, example_indices)
-                       for tensor, fmt
-                       in safe_izip(self._h5_dataset.tensors,
-                                    self._h5_dataset.formats))
-
-        self.num_batches_shown += 1
-
-        return result
+    def _next_batch_indices(self):
+        batch_indices = super(RandomIterator, self)._next_batch_indices()
+        batch_indices.sort()
+        return batch_indices
 
 
 def load_h5_dataset(h5_path, partition=None, mode='r'):

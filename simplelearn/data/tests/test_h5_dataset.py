@@ -74,6 +74,7 @@ def test_pickle_h5_dataset():
             assert_equal(fmt, expected_fmt)
             assert_array_equal(tensor, expected_tensor)
 
+
 def test_random_iterator():
     num_classes = 3
     dataset_size = 100 * num_classes
@@ -82,13 +83,13 @@ def test_random_iterator():
     labels = numpy.arange(dataset_size) % num_classes
 
     dataset = Dataset(tensors=(vectors, labels),
-                       names=('vectors', 'labels'),
-                       formats=(DenseFormat(axes=('f', 'b'),
-                                            shape=(1, -1),
-                                            dtype=int),
-                                DenseFormat(axes=['b'],
-                                            shape=[-1],
-                                            dtype=int)))
+                      names=('vectors', 'labels'),
+                      formats=(DenseFormat(axes=('f', 'b'),
+                                           shape=(1, -1),
+                                           dtype=int),
+                               DenseFormat(axes=['b'],
+                                           shape=[-1],
+                                           dtype=int)))
 
     seed = 225234
     batch_size = 231
