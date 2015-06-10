@@ -11,7 +11,8 @@ import collections
 import numpy
 from simplelearn.asserts import assert_all_equal, assert_integer
 from numpy.testing import assert_equal
-from nose.tools import (assert_is_instance,
+from nose.tools import (assert_is_not,
+                        assert_is_instance,
                         assert_less,
                         assert_greater,
                         assert_not_equal)
@@ -19,6 +20,8 @@ from simplelearn.data import DataSource, DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.nodes import InputNode
 from simplelearn.formats import Format
+
+import pdb
 
 
 class Dataset(DataSource):
@@ -188,6 +191,8 @@ class DatasetIterator(DataIterator):
             return tensor[index]
 
         batch_indices = self._next_batch_indices()
+
+        assert_is_not(batch_indices, None)
 
         result = []
         for tensor, fmt in safe_izip(self.dataset.tensors,
@@ -482,10 +487,10 @@ class RandomIterator(DatasetIterator):
         return (self.num_batches_shown % self.batches_per_epoch) == 0
 
     def _next_batch_indices(self):
-        self._rng.choice(self.probabilities.shape[0],
-                         size=self.batch_size,
-                         replace=True,
-                         p=self.probabilities)
+        return self._rng.choice(self.probabilities.shape[0],
+                                size=self.batch_size,
+                                replace=True,
+                                p=self.probabilities)
 
     def _next(self):
         result = super(RandomIterator, self)._next()

@@ -17,6 +17,7 @@ from simplelearn.data.norb import load_norb
 
 import pdb
 
+
 def main():
     '''
     Entry point of script.
