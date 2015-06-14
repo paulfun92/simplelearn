@@ -184,7 +184,9 @@ class H5Dataset(Dataset):
             common_prefix = os.path.commonprefix([root_dir, sub_dir])
             return common_prefix == root_dir
 
-        assert_true(is_subdir(path, simplelearn.data.data_path))
+        assert_true(path.startswith(simplelearn.data.data_path),
+                    ("{} is not a subdirectory of simplelearn.data.data_path "
+                     "{}").format(path, simplelearn.data.data_path))
 
         self.h5_file = h5py.File(path, mode='r')
 

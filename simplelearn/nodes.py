@@ -774,7 +774,7 @@ class CuDnnConv2d(Node):
         output = dnn_conv(img=input_format_node.output_symbol,
                           kerns=self.filters,
                           border_mode=pads,
-                          subsample=strides,
+                          subsample=tuple(strides),
                           **kwargs)
 
         super(CuDnnConv2d, self).__init__([input_node], output, output_format)
