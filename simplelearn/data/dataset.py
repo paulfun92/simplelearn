@@ -408,6 +408,8 @@ class RandomIterator(DatasetIterator):
         return (self.num_batches_shown % self.batches_per_epoch) == 0
 
     def _next_batch_indices(self):
+        print("in dataset's next_batch_indices")
+
         return self._rng.choice(self.probabilities.shape[0],
                                 size=self.batch_size,
                                 replace=True,

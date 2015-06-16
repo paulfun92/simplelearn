@@ -229,6 +229,14 @@ class H5Dataset(Dataset):
         self.__init__(os.path.join(simplelearn.data.data_path, state[0]),
                       state[1])
 
+    def iterator(self, iterator_type, batch_size, **kwargs):
+        if iterator_type == 'random':
+            return RandomIterator(self, batch_size, **kwargs)
+        else:
+            super(H5Dataset, self).iterator(iterator_type,
+                                            batch_size,
+                                            **kwargs)
+
 
 class RandomIterator(simplelearn.data.dataset.RandomIterator):
     '''
@@ -247,6 +255,7 @@ class RandomIterator(simplelearn.data.dataset.RandomIterator):
         super(RandomIterator, self).__init__(h5_dataset, batch_size, rng)
 
     def _next_batch_indices(self):
+        print("in h5's next_batch_indices")
         batch_indices = super(RandomIterator, self)._next_batch_indices()
         batch_indices.sort()
         return batch_indices
