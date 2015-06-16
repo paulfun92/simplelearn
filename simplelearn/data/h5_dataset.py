@@ -19,6 +19,7 @@ from simplelearn.asserts import (assert_integer,
                                  assert_all_greater_equal)
 from simplelearn.formats import DenseFormat
 from simplelearn.data.dataset import Dataset
+from simplelearn.data.dataset import RandomIterator as DatasetRandomIterator
 from simplelearn.data import DataIterator
 from simplelearn.nodes import InputNode
 
@@ -238,7 +239,7 @@ class H5Dataset(Dataset):
                                             **kwargs)
 
 
-class RandomIterator(simplelearn.data.dataset.RandomIterator):
+class RandomIterator(DatasetRandomIterator):
     '''
     Like dataset.RandomIterator, this yields random examples.
 
