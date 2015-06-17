@@ -6,8 +6,6 @@ import argparse
 from timeit import default_timer
 from nose.tools import assert_greater
 import numpy
-# from simplelearn.data.norb import load_norb
-# from simplelearn.data.mnist import load_mnist
 from simplelearn.data.h5_dataset import load_h5_dataset
 from simplelearn.utils import safe_izip, human_readable_duration
 
@@ -46,8 +44,6 @@ def main():
 
     args = parse_args()
 
-    # dataset = load_mnist()[1]
-    #dataset = load_norb(which_norb='big')[0]
     dataset = load_h5_dataset(args.input)[0]
 
     sequential_iter = dataset.iterator(iterator_type='sequential',
