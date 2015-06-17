@@ -170,53 +170,75 @@ class DatasetIterator(DataIterator):
         raise NotImplementedError("{}._next_batch_indices() not yet "
                                   "implemented".format(type(self)))
 
+    def _get_batches(self, tensors, formats, batch_indices):
+        '''
+        Extracts batches from tensors, given batch_indices.
+
+        Parameters
+        ----------
+        tensors: Iterable of numpy.ndarray, or similar
+          The tensors to select a batch from. Usually self.dataset.tensors.
+
+        fmt: simplelearn.format.DenseFormat
+          The formats corresponding to <tensors>. Usually self.dataset.formats.
+
+        batch_indices: Sequence
+          The output of _get_batch_indices.
+        '''
+
+        def get_batch(tensor, fmt):
+
+            # h5py has a bug where if len(index_tuple) == 1,
+            # Dataset.__getitem__ treats it the same as just
+            # index_tuple[0]. Adding a gratuitous Ellipsis element to the end
+            # prevents this.
+            #
+            # See h5py bug report: https://github.com/h5py/h5py/issues/586
+            index_tuple = tuple(batch_indices if axis == 'b' else slice(None)
+                                for axis in fmt.axes) + (Ellipsis, )
+
+            return tensor[index_tuple]
+
+        return tuple(get_batch(tensor, fmt) for tensor, fmt
+                     in safe_izip(tensors, formats))
+
     def _next(self):
 
-        def get_batch(tensor, fmt, batch_indices):
-            """
-            Returns a batch containing selected examples.
-
-            Parameters
-            ----------
-            tensor: numpy.ndarray, or similar
-              The tensor to select a batch from.
-
-            fmt: simplelearn.format.DenseFormat
-              The tensor's format
-
-            batch_indices: Sequence
-              an array of example indices.
-            """
-
-            assert_in('b', fmt.axes)
-            index = tuple(batch_indices if axis == 'b'
-                          else slice(None)
-                          for axis in fmt.axes)
-            return tensor[index]
-
         batch_indices = self._next_batch_indices()
+        # pdb.set_trace()
 
+        # sanity-check output of _next_batch_indices()
         if not isinstance(batch_indices, slice):
             assert_all_integer(batch_indices)
 
             if isinstance(batch_indices, numpy.ndarray):
                 # Workaround to a bug in h5py.Dataset where indexing by a
-                # length-1 array is treated like indexing with the integer it
+                # length-1 ndarray is treated like indexing with the integer it
                 # contains.
                 if len(batch_indices) == 1:
                     batch_indices = tuple(batch_indices)
             else:
                 assert_is_instance(batch_indices, collections.Sequence)
 
-        result = []
-        for tensor, fmt in safe_izip(self.dataset.tensors,
-                                     self.dataset.formats):
-            batch = get_batch(tensor, fmt, batch_indices)
-            batch_index = fmt.axes.index('b')
-            assert_equal(batch.shape[batch_index], self.batch_size)
-            result.append(batch)
+        result = tuple(self._get_batches(self.dataset.tensors,
+                                         self.dataset.formats,
+                                         batch_indices))
 
-        return tuple(result)
+        # sanity-check size of batches
+        for batch, fmt in safe_izip(result, self.dataset.formats):
+            assert_equal(batch.shape[fmt.axes.index('b')], self.batch_size)
+
+        return result
+
+        # result = []
+        # for tensor, fmt in safe_izip(self.dataset.tensors,
+        #                              self.dataset.formats):
+        #     batch = fmt.get_batch(tensor, batch_indices)
+        #     batch_index = fmt.axes.index('b')
+        #     assert_equal(batch.shape[batch_index], self.batch_size)
+        #     result.append(batch)
+
+        # return tuple(result)
 
     def make_input_nodes(self):
         NamedTupleOfNodes = collections.namedtuple('NamedNodes',
@@ -376,6 +398,7 @@ class SequentialIterator(DatasetIterator):
             next_batch_end = self._next_batch_start + self.batch_size
             result = slice(self._next_batch_start, next_batch_end)
 
+            # mod needed in case next_batch_end == num_examples
             self._next_batch_start = next_batch_end % num_examples
 
             return result
@@ -401,15 +424,13 @@ class RandomIterator(DatasetIterator):
                               num_examples)
 
         self.batches_per_epoch = (num_examples // batch_size +
-                                  0 if num_examples % batch_size == 0 else 1)
+                                  (0 if num_examples % batch_size == 0 else 1))
         self.num_batches_shown = 0
 
     def next_is_new_epoch(self):
         return (self.num_batches_shown % self.batches_per_epoch) == 0
 
     def _next_batch_indices(self):
-        print("in dataset's next_batch_indices")
-
         return self._rng.choice(self.probabilities.shape[0],
                                 size=self.batch_size,
                                 replace=True,

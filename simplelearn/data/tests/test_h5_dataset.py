@@ -105,14 +105,18 @@ def test_random_iterator():
 
     counts = numpy.zeros(num_classes, dtype=int)
 
-    for batch_index in xrange(iterator.batches_per_epoch * 100):
+    num_epochs_seen = 0
+    expected_num_epochs = 100
+
+    for batch_index in xrange(iterator.batches_per_epoch *
+                              expected_num_epochs):
         batch_vectors, batch_labels = iterator.next()
 
         expected_indices = rng.choice(iterator.probabilities.shape[0],
                                       size=batch_size,
                                       replace=True,
                                       p=iterator.probabilities)
-        expected_indices.sort()
+        # expected_indices.sort()
         expected_vectors = dataset.tensors[0][:, expected_indices]
         expected_labels = dataset.tensors[1][expected_indices]
 
@@ -125,6 +129,11 @@ def test_random_iterator():
         for label_value in range(num_classes):
             counts[label_value] += \
                 numpy.count_nonzero(expected_labels == label_value)
+
+        if iterator.next_is_new_epoch():
+            num_epochs_seen += 1
+
+    assert_equal(num_epochs_seen, expected_num_epochs)
 
     probabilities = counts / float(counts.sum())
     expected_probabilities = (numpy.arange(num_classes) /

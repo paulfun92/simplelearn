@@ -3,25 +3,21 @@ A dataset that lives on disk as an HDF5 file.
 '''
 
 import os
-import collections
 import h5py
 import numpy
 from nose.tools import (assert_true,
                         assert_equal,
                         assert_in,
-                        assert_is_instance,
-                        assert_greater)
+                        assert_is_instance)
 import simplelearn
 from simplelearn.utils import safe_izip
-from simplelearn.asserts import (assert_integer,
-                                 assert_all_is_instance,
+from simplelearn.asserts import (assert_all_is_instance,
                                  assert_all_integer,
                                  assert_all_greater_equal)
 from simplelearn.formats import DenseFormat
+from simplelearn.data import dataset
 from simplelearn.data.dataset import Dataset
-from simplelearn.data.dataset import RandomIterator as DatasetRandomIterator
-from simplelearn.data import DataIterator
-from simplelearn.nodes import InputNode
+# from simplelearn.data.dataset import RandomIterator as DatasetRandomIterator
 
 import pdb
 
@@ -175,16 +171,6 @@ class H5Dataset(Dataset):
 
         path = os.path.abspath(path)
 
-        def is_subdir(sub_dir, root_dir):
-            '''
-            Return True iff sub_dir is a subdirectory of root_dir.
-            '''
-
-            sub_dir = os.path.abspath(sub_dir)
-            root_dir = os.path.abspath(root_dir)
-            common_prefix = os.path.commonprefix([root_dir, sub_dir])
-            return common_prefix == root_dir
-
         assert_true(path.startswith(simplelearn.data.data_path),
                     ("{} is not a subdirectory of simplelearn.data.data_path "
                      "{}").format(path, simplelearn.data.data_path))
@@ -231,35 +217,141 @@ class H5Dataset(Dataset):
                       state[1])
 
     def iterator(self, iterator_type, batch_size, **kwargs):
+        if iterator_type == 'sequential':
+            return SequentialIterator(self, batch_size, **kwargs)
         if iterator_type == 'random':
             return RandomIterator(self, batch_size, **kwargs)
         else:
-            super(H5Dataset, self).iterator(iterator_type,
-                                            batch_size,
-                                            **kwargs)
+            raise NotImplementedError("{} doesn't yet support '{}' "
+                                      "iterators".format(iterator_type))
 
-
-class RandomIterator(DatasetRandomIterator):
+def make_h5_iterator_type(iterator_type_name, dataset_iterator_type):
     '''
-    Like dataset.RandomIterator, this yields random examples.
+    Returns an H5Dataset version  of the given Dataset iterator type.
 
-    Unlike dataset.RandomIterator, the random examples are listed within the
-    batch in memory-order. This is because h5py.Dataset requires that batch
-    indices must be sorted.
-
-    This should not affect the outcome of SGD. If it's problematic for
-    other reasons, then you can always shuffle the examples within the batch
-    before using it.
+    This subclass overrides _get_batches() to work around
     '''
 
-    def __init__(self, h5_dataset, batch_size, rng):
-        super(RandomIterator, self).__init__(h5_dataset, batch_size, rng)
+    class H5Iterator(dataset_iterator_type):
+        def __init__(self, h5_dataset, batch_size, **kwargs):
+            super(H5Iterator, self).__init__(h5_dataset, batch_size, **kwargs)
 
-    def _next_batch_indices(self):
-        print("in h5's next_batch_indices")
-        batch_indices = super(RandomIterator, self)._next_batch_indices()
-        batch_indices.sort()
-        return batch_indices
+        def _get_batches(self, tensors, formats, batch_indices):
+            '''
+            Extracts batches form self.dataset.tensors.
+
+            Overrides superclass' _get_batch, because h5py.Dataset can't handle
+            duplicate or out-of-order elements in batch_indices.
+            '''
+            if isinstance(batch_indices, slice):
+                return super(H5Iterator, self)._get_batches(tensors,
+                                                            formats,
+                                                            batch_indices)
+
+            assert_is_instance(batch_indices, numpy.ndarray)
+            assert_all_integer(batch_indices)
+
+            # pylint: disable=unbalanced-tuple-unpacking
+            (unique_batch_indices,
+             unique_to_batch_indices) = numpy.unique(batch_indices,
+                                                     return_inverse=True)
+
+            super_self = super(H5Iterator, self)
+
+            unique_batches = super_self._get_batches(tensors,
+                                                     formats,
+                                                     unique_batch_indices)
+
+            return super_self._get_batches(unique_batches,
+                                           formats,
+                                           unique_to_batch_indices)
+
+    H5Iterator.__name__ = iterator_type_name
+    return H5Iterator
+
+SequentialIterator = make_h5_iterator_type('SequentialIterator',
+                                           dataset.SequentialIterator)
+RandomIterator = make_h5_iterator_type('RandomIterator',
+                                       dataset.RandomIterator)
+
+# class RandomIterator(dataset.RandomIterator):
+#     '''
+#     Like dataset.RandomIterator, this yields random examples.
+
+#     Unlike dataset.RandomIterator, the random examples are listed within the
+#     batch in memory-order. This is because h5py.Dataset requires that batch
+#     indices must be sorted.
+
+#     This should not affect the outcome of SGD. If it's problematic for
+#     other reasons, then you can always shuffle the examples within the batch
+#     before using it.
+#     '''
+
+#     def __init__(self, h5_dataset, batch_size, rng):
+#         super(RandomIterator, self).__init__(h5_dataset, batch_size, rng)
+
+#     # def _next_batch_indices(self):
+#     #     '''
+#     #     Returns random indices, but sorted (for h5py.Dataset).
+#     #     '''
+#     #     # (unique_batch_indices,
+#     #     #  self._unique_to_batch_indices) = numpy.unique(batch_indices,
+#     #     #                                                return_inverse=True)
+
+#     #     print("in h5's next_batch_indices")
+#     #     return unique_batch_indices
+
+#     #     # batch_indices = super(RandomIterator, self)._next_batch_indices()
+#     #     # batch_indices.sort()
+#     #     # return batch_indices
+
+#     def _get_batches(self, tensors, formats, batch_indices):
+#         '''
+#         Extracts batches form self.dataset.tensors.
+
+#         Overrides superclass' _get_batch, because h5py.Dataset can't handle
+#         duplicate or out-of-order elements in batch_indices.
+#         '''
+
+#         assert_is_instance(batch_indices, numpy.ndarray)
+#         assert_all_integer(batch_indices)
+
+#         # pylint: disable=unbalanced-tuple-unpacking
+#         (unique_batch_indices,
+#          unique_to_batch_indices) = numpy.unique(batch_indices,
+#                                                  return_inverse=True)
+
+#         super_self = super(RandomIterator, self)
+
+#         unique_batches = super_self._get_batches(tensors,
+#                                                  formats,
+#                                                  unique_batch_indices)
+
+#         return super_self._get_batches(unique_batches,
+#                                        formats,
+#                                        unique_to_batch_indices)
+#         # return tuple(result)
+
+
+#         # result = []
+#         # for tensor, fmt in safe_izip(tensors, formats):
+#         #     unique_samples = fmt.get_batch(tensor, unique_batch_indices)
+#         #     result.append(fmt.get_batch(unique_samples,
+#         #                                 unique_to_batch_indices))
+
+#         # unique_batches =  tuple(fmt.get_batch(tensor, unique_batch_indices)
+#         #              for tensor, fmt in safe_izip(tensors, formats))
+#         # # (unique_batch_indices,
+#         # #  unique_to_batch_indices) = numpy.unique(batch_indices,
+#         # #                                          return_inverse=True)
+
+#         # super_get_batch = super(RandomIterator, self)._get_batch
+#         # unique_samples = super_get_batch(tensor,
+#         #                                  fmt,
+#         #                                  unique_batch_indices)
+#         # duplicate_samples = super_get_batch(unique_samples,
+#         #                                     fmt,
+#         #                                     unique_to_batch_indices)
 
 
 def load_h5_dataset(h5_path, partition=None, mode='r'):
