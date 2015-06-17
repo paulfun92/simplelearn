@@ -3,6 +3,7 @@ A dataset that lives on disk as an HDF5 file.
 '''
 
 import os
+import collections
 import h5py
 import numpy
 from nose.tools import (assert_true,
@@ -386,9 +387,12 @@ def load_h5_dataset(h5_path, partition=None, mode='r'):
 
     partition_names = h5_file['partition_names']
     if partition is None:
+
         with h5py.File(h5_path, mode='r') as h5_file:
             partition_names = list(h5_file['partition_names'])
 
-        return tuple(H5Dataset(h5_path, n) for n in partition_names)
+        NamedTuple = collections.namedtuple("NamedTuple", partition_names)
+        return NamedTuple(*tuple(H5Dataset(h5_path, n)
+                                 for n in partition_names))
     else:
         return H5Dataset(h5_path, partition)
