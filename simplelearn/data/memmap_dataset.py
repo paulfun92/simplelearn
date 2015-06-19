@@ -55,7 +55,7 @@ def make_memmap_file(path, num_examples, tensor_names, tensor_formats):
     memmap_file = numpy.lib.format.open_memmap(path,
                                                mode='w+',
                                                dtype=dtype_dict,
-                                               shape=num_examples)
+                                               shape=(num_examples, ))
 
     return memmap_file
 
@@ -84,8 +84,14 @@ class MemmapDataset(Dataset):
         axes_list = [field[2] for field
                      in self.memmap.dtype.fields.itervalues()]
 
+        def replace_element(arg, index, new_value):
+            assert_is_instance(arg, tuple)
+            result = list(arg)
+            result[index] = new_value
+            return tuple(result)
+
         formats = [DenseFormat(axes=axes,
-                               shape=(num_examples, ) + tensor.shape,
+                               shape=replace_element(tensor.shape, 0, -1),
                                dtype=tensor.dtype)
                    for axes, tensor in safe_izip(axes_list, tensors)]
 

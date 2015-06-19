@@ -67,9 +67,11 @@ def main():
         memmap_tensors = [memmap[name] for name in dataset.names]
         for in_tensor, out_tensor in safe_izip(dataset.tensors,
                                                memmap_tensors):
+            assert_equal(out_tensor.shape, in_tensor.shape)
             out_tensor[...] = in_tensor
 
 
         print("Wrote {}".format(output_filepath))
+
 if __name__ == '__main__':
     main()
