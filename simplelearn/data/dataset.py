@@ -230,16 +230,6 @@ class DatasetIterator(DataIterator):
 
         return result
 
-        # result = []
-        # for tensor, fmt in safe_izip(self.dataset.tensors,
-        #                              self.dataset.formats):
-        #     batch = fmt.get_batch(tensor, batch_indices)
-        #     batch_index = fmt.axes.index('b')
-        #     assert_equal(batch.shape[batch_index], self.batch_size)
-        #     result.append(batch)
-
-        # return tuple(result)
-
     def make_input_nodes(self):
         NamedTupleOfNodes = collections.namedtuple('NamedNodes',
                                                    self.dataset.names)
