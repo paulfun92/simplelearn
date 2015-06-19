@@ -33,8 +33,6 @@ def parse_args():
                               "'-o dir/mnist.npy' will create two files: "
                               "dir/mnist_train.npy and dir/mnist_test.py"))
 
-
-
     result = parser.parse_args()
 
     if result.output is None:

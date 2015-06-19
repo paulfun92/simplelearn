@@ -3,10 +3,12 @@
 from __future__ import print_function
 
 import argparse
+import os
 from timeit import default_timer
 from nose.tools import assert_greater
 import numpy
 from simplelearn.data.h5_dataset import load_h5_dataset
+from simplelearn.data.memmap_dataset import MemmapDataset
 from simplelearn.utils import safe_izip, human_readable_duration
 
 import pdb
@@ -24,7 +26,7 @@ def parse_args():
 
     parser.add_argument("-i",
                         "--input",
-                        help="Path to .h5 file of dataset.")
+                        help="Path to .h5 or .npy file of dataset.")
 
     parser.add_argument("-b",
                         "--batch-size",
@@ -42,9 +44,19 @@ def parse_args():
 
 def main():
 
+    def load_training_dataset(path):
+        if path.endswith('.h5'):
+            return load_h5_dataset(args.input)[0]
+        elif path.endswith('.npy'):
+            return MemmapDataset(path)
+        else:
+            raise ValueError("Unexpected file extension {}".format(
+                os.path.splitext(path)[1]))
+
+
     args = parse_args()
 
-    dataset = load_h5_dataset(args.input)[0]
+    dataset = load_training_dataset(args.input)
 
     sequential_iter = dataset.iterator(iterator_type='sequential',
                                        batch_size=args.batch_size)
