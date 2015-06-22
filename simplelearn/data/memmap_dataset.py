@@ -112,19 +112,19 @@ class MemmapDataset(Dataset):
         self.__init__(os.path.join(simplelearn.data.data_path, state[0]))
 
 
-    # def load_to_memory(self):
-    #     '''
-    #     Returns a copy where the data lives in RAM.
+    def load_to_memory(self):
+        '''
+        Returns a copy where the data lives in RAM.
 
-    #     Returns
-    #     -------
-    #     rval: Dataset
-    #     '''
+        Returns
+        -------
+        rval: Dataset
+        '''
 
-    #     tensors = [numpy.array(t) for t in self.tensors]
-    #     for tensor in tensors:
-    #         assert_is_instance(tensor, numpy.ndarray)
+        tensors = [numpy.array(t) for t in self.tensors]
+        for tensor in tensors:
+            assert_is_instance(tensor, numpy.ndarray)
 
-    #     return Dataset(tensors=tensors,
-    #                    names=self.names,
-    #                    formats=self.formats)
+        return Dataset(tensors=tensors,
+                       names=self.names,
+                       formats=self.formats)
