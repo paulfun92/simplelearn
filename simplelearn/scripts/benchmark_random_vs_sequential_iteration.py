@@ -40,6 +40,11 @@ def parse_args():
                         type=positive_int,
                         help="Number of epochs (default=5).")
 
+    parser.add_argument("-m",
+                        "--memory",
+                        action="store_true",
+                        help="load dataset into memory before benchmarking.")
+
     return parser.parse_args()
 
 def main():
@@ -57,6 +62,11 @@ def main():
     args = parse_args()
 
     dataset = load_training_dataset(args.input)
+    if args.memory:
+        start_time = default_timer()
+        dataset = dataset.load_to_memory()
+        print("Loaded dataset to memory in {}".format(
+            human_readable_duration(default_timer() - start_time)))
 
     sequential_iter = dataset.iterator(iterator_type='sequential',
                                        batch_size=args.batch_size)

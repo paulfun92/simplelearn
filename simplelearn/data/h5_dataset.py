@@ -227,6 +227,25 @@ class H5Dataset(Dataset):
                                       "iterators".format(type(self),
                                                          iterator_type))
 
+    def load_to_memory(self):
+        '''
+        Returns a copy where the data lives in RAM.
+
+        Returns
+        -------
+        rval: Dataset
+        '''
+
+        tensors = [t[...] for t in self.tensors]
+        for tensor in tensors:
+            assert_is_instance(tensor, numpy.ndarray)
+
+        return Dataset(tensors=tensors,
+                       names=self.names,
+                       formats=self.formats)
+
+
+
 def make_h5_iterator_type(iterator_type_name, dataset_iterator_type):
     '''
     Returns an H5Dataset version  of the given Dataset iterator type.
@@ -240,7 +259,7 @@ def make_h5_iterator_type(iterator_type_name, dataset_iterator_type):
 	    # when the superclass is passed in at runtime.
 
         # pylint: disable=super-on-old-class
- 
+
         def __init__(self, h5_dataset, batch_size, **kwargs):
             super(H5Iterator, self).__init__(h5_dataset, batch_size, **kwargs)
 
