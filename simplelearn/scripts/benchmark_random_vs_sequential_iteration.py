@@ -7,6 +7,7 @@ import os
 from timeit import default_timer
 from nose.tools import assert_greater
 import numpy
+import theano
 from simplelearn.data.h5_dataset import load_h5_dataset
 from simplelearn.data.memmap_dataset import MemmapDataset
 from simplelearn.utils import safe_izip, human_readable_duration
@@ -45,6 +46,12 @@ def parse_args():
                         action="store_true",
                         help="load dataset into memory before benchmarking.")
 
+    parser.add_argument("-g",
+                        "--num-gpu-batches",
+                        default=None,
+                        type=int,
+                        help="# of batches to transfer to GPU at a time.")
+
     return parser.parse_args()
 
 def main():
@@ -74,6 +81,24 @@ def main():
                                    batch_size=args.batch_size,
                                    rng=numpy.random.RandomState(4829))
 
+    batch_queues = []
+    gpu_batch_queues = []
+    batch_symbols = []
+    for fmt in [i.output_format for i in random_iter.make_input_nodes()]:
+        batches = fmt.make_batch(is_symbolic=False, batch_size=args.batch_size)
+        batches.resize((args.num_gpu_batches, ) + batches.shape)
+        # batches = numpy.outer(numpy.ones(args.num_gpu_batches), batch)
+        batch_queues.append(batches)
+        gpu_batch_queues.append(theano.shared(batch_queues[-1]))
+        batch_symbols.append(fmt.make_batch(is_symbolic=True))
+
+    # batch_number_symbol = theano.scalar.iscalar()
+    # gpu_batches = [q[batch_number_symbol, ...] for q in gpu_batch_queues]
+    # theano_function = theano.function([theano.scalar.iscalar()],
+    #                                   batch_symbols,
+    #                                   givens=dict(safe_izip(batch_symbols,
+    #                                                         gpu_batches)))
+
     for iterator, iterator_type in safe_izip((sequential_iter, random_iter),
                                              ('sequential', 'random')):
         print("Timing {} iterator:".format(iterator_type))
@@ -84,8 +109,19 @@ def main():
         start_time = default_timer()
 
         while epochs_seen < args.num_epochs:
-            iterator.next()
+            batches = iterator.next()
             num_batches += 1
+
+            for batch, batch_queue in safe_izip(batches, batch_queues):
+                queue_index = (num_batches - 1) % args.num_gpu_batches
+                batch_queue[queue_index, ...] = batch
+
+            if args.num_gpu_batches is not None and \
+               (num_batches % args.num_gpu_batches) == 0:
+                for (batch_queue,
+                     gpu_batch_queue) in safe_izip(batch_queues,
+                                                   gpu_batch_queues):
+                    gpu_batch_queue.set_value(batch_queue)
 
             if iterator.next_is_new_epoch():
                 epochs_seen += 1
