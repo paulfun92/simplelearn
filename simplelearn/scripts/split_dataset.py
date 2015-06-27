@@ -29,16 +29,6 @@ def parse_args():
                      "The output will be either a single .h5 file with two "
                      "partitions, or two .npy files, one for each partition."))
 
-    # def dataset_path(arg):
-    #     if not arg.endswith('.h5') and not arg.endswith('.npy'):
-    #         print("Expected dataset to be a .h5 or .npy file, but got " + arg)
-    #         sys.exit(1)
-
-    #     parent_dir = os.path.dirname(os.path.abspath(arg))
-    #     assert_true(os.path.isdir(parent_dir))
-
-    #     return arg
-
     def partition_name(arg):
         # a limitation of h5
         allowed_characters = string.ascii_letters + string.digits + "_"

@@ -63,6 +63,19 @@ def assert_floating(scalar):
     assert_is_subdtype(dtype, numpy.floating)
 
 
+def assert_number(scalar):
+    '''
+    Checks that <scalar> is a number of integer or floating-point type.
+
+    Parameters
+    ----------
+    scalar: a numerical primitive type (e.g. int, float, etc)
+    '''
+
+    dtype = type(scalar)
+    assert_is_subdtype(dtype, numpy.number)
+
+
 def assert_integer_dtype(type):
     assert_is_subdtype(dtype, numpy.integer)
 

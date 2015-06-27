@@ -186,8 +186,7 @@ class RescaleImage(Node):  # TODO: rename to be a noun
                              "non-batch axes, but got %d: %s" %
                              (len(non_batch_axes), str(input_node.axes)))
 
-        assert_true(numpy.issubdtype(input_node.output_symbol.dtype,
-                                     numpy.integer))
+        assert_is_subdtype(input_node.output_symbol.dtype, numpy.integer)
 
         dtype = str(theano.config.floatX
                     if str(output_dtype) == 'floatX'
