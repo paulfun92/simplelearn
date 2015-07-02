@@ -372,9 +372,8 @@ def main():
     else:
         # split training set into training and validation sets
         tensors = mnist_training.tensors
-        size_tensors = tensors[0].shape[0]
         training_tensors = [t[:-args.validation_size, ...] for t in tensors]
-        validation_tensors = [t[size_tensors - args.validation_size:, ...] for t in tensors]
+        validation_tensors = [t[-args.validation_size:, ...] for t in tensors]
         mnist_training = Dataset(tensors=training_tensors,
                                  names=mnist_training.names,
                                  formats=mnist_training.formats)
