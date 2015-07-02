@@ -1085,14 +1085,7 @@ class Sgd(object):
         assert_equal(len(epoch_callbacks), len(frozenset(epoch_callbacks)))
 
         assert_is_instance(epoch_callbacks, Sequence)
-        for epoch_callback in epoch_callbacks:
-            assert_is_instance(epoch_callback, EpochCallback)
-            if isinstance(epoch_callback, Monitor):
-                warnings.warn("You've passed a Monitor subclass %s "
-                              "as one of the epoch_callbacks. If you want the "
-                              ".on_batch() method to be called on this, you "
-                              "need to pass it in as one of the monitors." %
-                              str(epoch_callback))
+        assert_all_is_instance(epoch_callbacks, EpochCallback)
 
         #
         # Sets members
