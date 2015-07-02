@@ -30,7 +30,8 @@ from simplelearn.asserts import (assert_integer,
                                  assert_all_less,
                                  assert_all_greater_equal,
                                  assert_all_integer,
-                                 assert_is_subdtype)
+                                 assert_is_subdtype,
+                                 assert_all_is_instance)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.formats import Format
@@ -1023,7 +1024,6 @@ class Sgd(object):
                  input_iterator,
                  parameters,
                  parameter_updaters,
-                 monitors,
                  epoch_callbacks,
                  theano_function_mode=None):
 
@@ -1047,12 +1047,9 @@ class Sgd(object):
           updaters for the corresponding elements in <parameters>.
           These are defined using the loss function to be minimized.
 
-        monitors: (optional) sequence of Monitors.
-          These are also used as epoch callbacks.
-
         epoch_callbacks: sequence of EpochCallbacks
           One of these must throw a StopTraining exception for the training to
-          halt.
+          halt. Monitors go here.
 
         theano_function_mode: theano.compile.Mode
           Optional. The 'mode' argument to pass to theano.function().
@@ -1085,75 +1082,44 @@ class Sgd(object):
 
             assert_in(parameter, updater.updates)
 
-        assert_is_instance(monitors, Sequence)
-        for monitor in monitors:
-            assert_is_instance(monitor, Monitor)
+        assert_equal(len(epoch_callbacks), len(frozenset(epoch_callbacks)))
 
         assert_is_instance(epoch_callbacks, Sequence)
-        for epoch_callback in epoch_callbacks:
-            assert_is_instance(epoch_callback, EpochCallback)
-            if isinstance(epoch_callback, Monitor):
-                warnings.warn("You've passed a Monitor subclass %s "
-                              "as one of the epoch_callbacks. If you want the "
-                              ".on_batch() method to be called on this, you "
-                              "need to pass it in as one of the monitors." %
-                              str(epoch_callback))
+        assert_all_is_instance(epoch_callbacks, EpochCallback)
 
         #
         # Sets members
         #
 
+        self._inputs = inputs
         self._input_iterator = input_iterator
         self._parameters = tuple(parameters)
         self._parameter_updaters = tuple(parameter_updaters)
-        self._monitors = tuple(monitors)
-
-        input_symbols = [i.output_symbol for i in inputs]
-        self._compile_update_function_args = \
-            {'input_symbols': input_symbols,
-             'monitors': self._monitors,
-             'parameter_updaters': self._parameter_updaters,
-             'theano_function_mode': theano_function_mode}
-
-        self._update_function = self._compile_update_function(
-            **self._compile_update_function_args)
-
-        repeated_callbacks = frozenset(monitors).intersection(epoch_callbacks)
-        assert_equal(len(repeated_callbacks),
-                     0,
-                     "There were duplicate entries between monitors and "
-                     "epoch_callbacks: %s" % str(repeated_callbacks))
+        self._theano_function_mode = theano_function_mode
 
         # These get called once before any training, and after each epoch
         # thereafter. One of them must halt the training at some point by
         # throwing a StopTraining exception.
-        self.epoch_callbacks = tuple(epoch_callbacks)
+        self.epoch_callbacks = list(epoch_callbacks)
 
         self._train_called = False
 
-    @staticmethod
-    def _compile_update_function(input_symbols,
-                                 monitors,
-                                 parameter_updaters,
-                                 theano_function_mode):
-        '''
-        Compiles the function that computes the monitored values.
-        '''
+    def _compile_update_function(self):
+        input_symbols = [i.output_symbol for i in self._inputs]
 
-        output_symbols = []
-        for monitor in monitors:
-            output_symbols.extend(monitor.monitored_values)
+        monitored_symbols = []
+        for epoch_callback in self.epoch_callbacks:
+            if isinstance(epoch_callback, Monitor):
+                monitored_symbols.extend(epoch_callback.monitored_values)
 
-        updates = OrderedDict()
-        for updater in parameter_updaters:
-            assert_is_instance(updater.updates, OrderedDict)
-            updates.update(updater.updates)
+        parameter_updates = OrderedDict()
+        for parameter_updater in self._parameter_updaters:
+            parameter_updates.update(parameter_updater.updates)
 
         return theano.function(input_symbols,
-                               output_symbols,
-                               updates=updates,
-                               mode=theano_function_mode)
-
+                               monitored_symbols,
+                               updates=parameter_updates,
+                               mode=self._theano_function_mode)
 
     def train(self):
         '''
@@ -1176,20 +1142,25 @@ class Sgd(object):
 
         self._train_called = True
 
-        if len(self.epoch_callbacks) + len(self._monitors) == 0:
-            raise RuntimeError("self._monitors and self.epoch_callbacks are "
-                               "both empty, so this will "
+        if len(self.epoch_callbacks) == 0:
+            raise RuntimeError("self.epoch_callbacks is empty, so Sgd will "
                                "iterate through the training data forever. "
-                               "Please add an EpochCallback or "
-                               "Monitor that will throw a "
+                               "Please add an EpochCallback that will throw a "
                                "StopTraining exception at some point.")
+
+
+        assert_all_is_instance(self.epoch_callbacks, EpochCallback)
 
         #
         # End sanity checks
         #
 
+        update_function = self._compile_update_function()
+
+        monitors = [c for c in self.epoch_callbacks if isinstance(c, Monitor)]
+
         try:
-            all_callbacks = self._monitors + tuple(self.epoch_callbacks)
+            all_callbacks = tuple(self.epoch_callbacks)
             for callback in all_callbacks:
                 callback.on_start_training()
 
@@ -1200,11 +1171,11 @@ class Sgd(object):
 
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
-                outputs = self._update_function(*cost_arguments)
+                outputs = update_function(*cost_arguments)
 
                 # updates monitors
                 output_index = 0
-                for monitor in self._monitors:
+                for monitor in monitors:
                     new_output_index = (output_index +
                                         len(monitor.monitored_values))
                     assert_less_equal(new_output_index, len(outputs))

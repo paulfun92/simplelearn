@@ -18,7 +18,7 @@ from simplelearn.asserts import (assert_all_is_instance,
 from simplelearn.formats import DenseFormat
 from simplelearn.data import dataset
 from simplelearn.data.dataset import Dataset
-# from simplelearn.data.dataset import RandomIterator as DatasetRandomIterator
+
 
 import pdb
 
@@ -245,7 +245,6 @@ class H5Dataset(Dataset):
                        formats=self.formats)
 
 
-
 def make_h5_iterator_type(iterator_type_name, dataset_iterator_type):
     '''
     Returns an H5Dataset version  of the given Dataset iterator type.
@@ -255,8 +254,8 @@ def make_h5_iterator_type(iterator_type_name, dataset_iterator_type):
 
     class H5Iterator(dataset_iterator_type):
 
-		# Pylint is unable to detect that the superclass is a new-style class,
-	    # when the superclass is passed in at runtime.
+        # Pylint is unable to detect that the superclass is a new-style class,
+        # when the superclass is passed in at runtime.
 
         # pylint: disable=super-on-old-class
 

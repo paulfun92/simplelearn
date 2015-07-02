@@ -620,8 +620,7 @@ def main():
                                           batch_size=args.batch_size),
                   parameters,
                   parameter_updaters,
-                  monitors=[training_loss_monitor],
-                  epoch_callbacks=[])
+                  epoch_callbacks=[training_loss_monitor])
 
     stuff_to_pickle = OrderedDict(
         (('model', model),
@@ -633,13 +632,13 @@ def main():
     #      ('validation_loss_logger', validation_loss_logger),
     #      ('model', model)))
 
-    trainer.epoch_callbacks = (momentum_updaters +
-                               [EpochTimer(),
-                                PicklesOnEpoch(stuff_to_pickle,
-                                               make_output_filename(args),
-                                               overwrite=False),
-                                validation_callback,
-                                LimitsNumEpochs(max_epochs)])
+    trainer.epoch_callbacks += (momentum_updaters +
+                                [EpochTimer(),
+                                 PicklesOnEpoch(stuff_to_pickle,
+                                                make_output_filename(args),
+                                                overwrite=False),
+                                 validation_callback,
+                                 LimitsNumEpochs(max_epochs)])
 
     trainer.train()
 
