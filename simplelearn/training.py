@@ -822,6 +822,47 @@ class LogsToLists(object):
             log.append(value)
 
 
+class EpochLogger(Monitor):
+    '''
+    Logs the
+    '''
+
+    def _log_batch(self, values, _):  # ignore formats
+        assert_equal(len(values), len(formats))
+
+        for name, value, in safe_izip(self.names, self.values):
+            self.h5_file[name]log.append(value)
+
+        self.h5_file.flush()
+
+    def __init__(self, nodes, names, file_path):
+        assert_all_is_instance(monitors, Monitor)
+        assert_all_is_instance(names, basestring)
+        assert_equal(len(nodes), len(names))
+
+        self._names = names
+        self._nodes = nodes
+        self.h5_file = h5py.File(file_path, mode='w+')
+
+        logs = self.h5_file.create_group("logs")
+
+        for name, node in safe_izip(names, nodes):
+            batch_dim = node.output_format.axes.index('b')
+
+            initial_shape = list(node.output_format.shape)
+            initial_shape[batch_dim] = 0
+
+            max_shape = list(initial_shape)
+            max_shape[batch_dim] = None
+
+            logs.create_dataset(name,
+                                initial_shape,
+                                max_shape=max_shape,
+                                dtype=node.output_symbol.dtype)
+
+        super(EpochLogger, self).__init__(nodes, callbacks=_log_batch)
+
+
 class SgdParameterUpdater(object):
     '''
     Defines how to update parameters using SGD with momentum.
