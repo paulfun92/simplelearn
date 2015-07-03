@@ -363,7 +363,7 @@ def main():
         '''
 
         def __init__(self):
-            super(Replotter, self).__init__([], [], [])
+            super(Replotter, self).__init__([], [])
             self.model_surface = [plot_model_surface()]
             self.logger_plots = []
             points_axes.set_title("Hit space to optimize. q to quit.")
@@ -408,16 +408,14 @@ def main():
 
     input_symbols = [n.output_symbol for n in (input_node, label_node)]
 
-    training_loss_monitor = AverageMonitor(loss_node.output_symbol,
-                                           loss_node.output_format,
+    training_loss_monitor = AverageMonitor(loss_node,
                                            callbacks=[training_loss_logger])
 
     training_stopper = StopsOnStagnation(max_epochs=10,
                                          min_proportional_decrease=.01)
-    validation_loss_monitor = AverageMonitor(
-        loss_node.output_symbol,
-        loss_node.output_format,
-        callbacks=[validation_loss_logger, training_stopper])
+    validation_loss_monitor = AverageMonitor(loss_node,
+                                             callbacks=[validation_loss_logger,
+                                                        training_stopper])
 
     validation_callback = ValidationCallback(
         inputs=input_symbols,
@@ -431,8 +429,10 @@ def main():
               parameters=[affine_node.linear_node.params,
                           affine_node.bias_node.params],
               parameter_updaters=parameter_updaters,
-              monitors=[training_loss_monitor, Replotter()],
-              epoch_callbacks=[LimitsNumEpochs(100), validation_callback])
+              epoch_callbacks=[training_loss_monitor,
+                               Replotter(),
+                               LimitsNumEpochs(100),
+                               validation_callback])
 
     def on_key_press(event):
         '''

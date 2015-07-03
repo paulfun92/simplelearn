@@ -83,8 +83,7 @@ def test_average_monitor():
         assert_allclose(average, expected_average)
         num_averages_compared[0] += 1
 
-    average_monitor = AverageMonitor([l2_norm_node.output_symbol],
-                                     [l2_norm_node.output_format],
+    average_monitor = AverageMonitor(l2_norm_node,
                                      [compare_with_expected_average])
 
     class DatasetRandomizer(EpochCallback):
@@ -272,8 +271,7 @@ def test_limit_param_norms():
         limit_param_norms(param_updater, weights, max_norm, input_axes)
 
         stops_on_stagnation = StopsOnStagnation(max_epochs=10)
-        average_cost_monitor = AverageMonitor(costs_node.output_symbol,
-                                              costs_node.output_format,
+        average_cost_monitor = AverageMonitor(costs_node,
                                               callbacks=[stops_on_stagnation])
                                               # callbacks=[stops_on_stagnation,
                                               #            print_cost])

@@ -17,6 +17,7 @@ from nose.tools import (assert_equal,
 from simplelearn.utils import safe_izip
 from simplelearn.data import DataIterator, DummyIterator
 from simplelearn.formats import DenseFormat
+from simplelearn.nodes import Node
 from simplelearn.training import (Monitor,
                                   AverageMonitor,
                                   LogsToLists,
@@ -105,49 +106,49 @@ def parse_args():
     return result
 
 
-class RecordingMonitor(Monitor):
-    '''
-    Logs the values of given symbolic expressions on each training batch.
-    '''
+# class RecordingMonitor(Monitor):
+#     '''
+#     Logs the values of given symbolic expressions on each training batch.
+#     '''
 
-    def __init__(self, values_to_record, formats, callbacks):
-        super(RecordingMonitor, self).__init__(values_to_record,
-                                               formats,
-                                               callbacks)
-        self.logs = None
-        self.epoch_start_indices = None
-        # self.clear()  # initializes logs, epoch_start_indices
+#     def __init__(self, values_to_record, formats, callbacks):
+#         super(RecordingMonitor, self).__init__(values_to_record,
+#                                                formats,
+#                                                callbacks)
+#         self.logs = None
+#         self.epoch_start_indices = None
+#         # self.clear()  # initializes logs, epoch_start_indices
 
-    def _on_batch(self, _, value_batches):
-        assert_greater(len(value_batches), 0)
-        self.num_batches += 1
+#     def _on_batch(self, _, value_batches):
+#         assert_greater(len(value_batches), 0)
+#         self.num_batches += 1
 
-        if self.logs is None:
-            self.logs = [[batch] for batch in value_batches]
-        else:
-            for log, batch in safe_izip(self.logs, value_batches):
-                log.append(batch)
+#         if self.logs is None:
+#             self.logs = [[batch] for batch in value_batches]
+#         else:
+#             for log, batch in safe_izip(self.logs, value_batches):
+#                 log.append(batch)
 
-    # def on_start_training(self):
-    #     self.on_epoch()
+#     # def on_start_training(self):
+#     #     self.on_epoch()
 
-    def _on_epoch(self):
-        if self.logs is not None:
-            self.epoch_start_indices.append(len(self.logs[0]))
+#     def _on_epoch(self):
+#         if self.logs is not None:
+#             self.epoch_start_indices.append(len(self.logs[0]))
 
-    # def clear(self):
-    def on_start_training(self):
-        '''
-        Resets the logs.
-        '''
-        self.logs = None
+#     # def clear(self):
+#     def on_start_training(self):
+#         '''
+#         Resets the logs.
+#         '''
+#         self.logs = None
 
-        # Note that these are batch indices, NOT example indices.
-        self.epoch_start_indices = [0]
+#         # Note that these are batch indices, NOT example indices.
+#         self.epoch_start_indices = [0]
 
-        self.num_batches = 0
+#         self.num_batches = 0
 
-        self.on_epoch()
+#         self.on_epoch()
 
 
 def matrix_weighted_norm(covariance, batch_of_vectors):
@@ -347,10 +348,11 @@ def main():
                     cost_format = DenseFormat(axes=['b'],
                                               shape=[-1],
                                               dtype=floatX)
-
+                    cost_node = Node(input_nodes=[],
+                                     output_symbol=cost_batch,
+                                     output_format=cost_format)
                     loss_monitor = AverageMonitor(
-                        cost_batch,
-                        cost_format,
+                        cost_node,
                         StopsOnStagnation(
                             max_epochs=args.stagnation_iters,
                             min_proportional_decrease=args.stagnation_threshold))
@@ -358,20 +360,22 @@ def main():
                     point_format = DenseFormat(axes=['b', 'f'],
                                                shape=[-1, 2],
                                                dtype=floatX)
+                    point_node = Node(input_nodes=[],
+                                      output_symbol=point,
+                                      output_format=point_format)
 
                     logger = LogsToLists()
                     point_and_loss_monitor = AverageMonitor(
-                        [point, cost_batch],
-                        [point_format, cost_format],
+                        [point_node, cost_node],
                         [logger])
 
                     trainer = Sgd(inputs=[],
                                   parameters=[point],
                                   parameter_updaters=[param_updater],
                                   input_iterator=DummyIterator(),
-                                  monitors=[loss_monitor,
-                                            point_and_loss_monitor],
                                   epoch_callbacks=[
+                                      loss_monitor,
+                                      point_and_loss_monitor,
                                       LimitsNumEpochs(args.max_iters)])
 
                     trajectory = optimize_with_trainer(trainer,

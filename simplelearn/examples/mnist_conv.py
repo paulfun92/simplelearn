@@ -552,8 +552,7 @@ def main():
         mcr_logger = LogsToLists()
         training_stopper = StopsOnStagnation(max_epochs=10,
                                              min_proportional_decrease=0.0)
-        return AverageMonitor(misclassification_node.output_symbol,
-                              misclassification_node.output_format,
+        return AverageMonitor(misclassification_node,
                               callbacks=[print_misclassification_rate,
                                          mcr_logger,
                                          training_stopper])
@@ -562,8 +561,7 @@ def main():
 
     # batch callback (monitor)
     training_loss_logger = LogsToLists()
-    training_loss_monitor = AverageMonitor(loss_node.output_symbol,
-                                           loss_node.output_format,
+    training_loss_monitor = AverageMonitor(loss_node,
                                            callbacks=[print_loss,
                                                       training_loss_logger])
 
@@ -603,10 +601,9 @@ def main():
     model = SerializableModel([image_uint8_node], [output_node])
     saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
 
-    validation_loss_monitor = AverageMonitor(
-        loss_node.output_symbol,
-        loss_node.output_format,
-        callbacks=[validation_loss_logger, saves_best])
+    validation_loss_monitor = AverageMonitor(loss_node,
+                                             callbacks=[validation_loss_logger,
+                                                        saves_best])
 
     validation_callback = ValidationCallback(
         inputs=[image_uint8_node.output_symbol, label_node.output_symbol],

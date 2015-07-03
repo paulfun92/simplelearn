@@ -425,8 +425,6 @@ class Monitor(EpochCallback):
                      "nodes_to_monitor contains repeated elements: %s" %
                      str(nodes_to_monitor))
 
-        assert_greater(len(nodes_to_monitor), 0)
-
         if not isinstance(callbacks, Sequence):
             callbacks = [callbacks]
         else:
