@@ -216,13 +216,14 @@ class ValidationCallback(EpochCallback):
 
         self._input_iterator = input_iterator
 
-        outputs = []
+        monitored_symbols = []
         for monitor in monitors:
-            outputs.extend(monitor.monitored_values)
+            for node in monitor._monitored_nodes:
+                monitored_symbols.append(node.output_symbol)
 
         self._monitors = monitors
 
-        self._update_function = theano.function(inputs, outputs)
+        self._update_function = theano.function(inputs, monitored_symbols)
 
     def on_start_training(self):
         self.on_epoch()
@@ -244,18 +245,17 @@ class ValidationCallback(EpochCallback):
             keep_going = not self._input_iterator.next_is_new_epoch()
 
             # pylint: disable=star-args
-            outputs = self._update_function(*input_batches)
+            monitored_values = self._update_function(*input_batches)
 
-            output_index = 0
+            value_index = 0
             for monitor in self._monitors:
-                new_output_index = (output_index +
-                                    len(monitor.monitored_values))
-                assert_less_equal(new_output_index, len(outputs))
-                monitored_values = outputs[output_index:new_output_index]
+                new_value_index = value_index + len(monitor._monitored_nodes)
+                assert_less_equal(new_value_index, len(monitored_values))
 
-                monitor.on_batch(input_batches, monitored_values)
+                values = monitored_values[value_index:new_value_index]
+                monitor.on_batch(input_batches, values)
 
-                output_index = new_output_index
+                value_index = new_value_index
 
         # Calls monitors' on_epoch() methods.
         for monitor in self._monitors:
@@ -433,7 +433,7 @@ class Monitor(EpochCallback):
             callbacks = tuple(callbacks)
 
         for callback in callbacks:
-            assert_in('__call__', callback.__dict__)
+            assert_true(callable(callback))
 
         #
         # Sets members
@@ -459,8 +459,9 @@ class Monitor(EpochCallback):
         assert_equal(len(monitored_value_batches),
                      len(self._monitored_nodes))
 
-        for batch, fmt in safe_izip(monitored_value_batches, self._formats):
-            fmt.check(batch)
+        for batch, node in safe_izip(monitored_value_batches,
+                                     self._monitored_nodes):
+            node.output_format.check(batch)
 
         self._on_batch(tuple(input_batches), tuple(monitored_value_batches))
 
@@ -493,7 +494,8 @@ class Monitor(EpochCallback):
                              % (type(self), type(values_to_report)))
 
         for callback in self._callbacks:
-            callback(values_to_report, self._formats)
+            formats = [node.output_format for node in self._monitored_nodes]
+            callback(values_to_report, formats)
 
     def _on_epoch(self):
         '''
@@ -514,10 +516,12 @@ class ReduceMonitor(Monitor):
     that operate by applying a reduction operator (e.g. max, min)
     along the batch axis for each batch.
 
-    Override _reduce_batch to reduce a single batch along its batch axis.
+    Subclasses must override _update_reduction, which updates the current
+    epoch's reduction with the newest batch.
 
-    Override _update_reduction to update the current epoch's reduction with
-    that reduced batch.
+    The dtypes of self._reductions may not be the same as the dtypes of the
+    corresponding batches. For example, AverageMonitor will compute the
+    average values of int batches as floats.
     '''
 
     def __init__(self, nodes_to_monitor, callbacks):
@@ -528,52 +532,89 @@ class ReduceMonitor(Monitor):
 
         self._reductions = None
 
+        self._expected_reduction_shapes = []  # for sanity-checking
+        for node_to_monitor in nodes_to_monitor:
+            fmt = node_to_monitor.output_format
+            batch_axis = fmt.axes.index('b')
+            expected_shape = list(fmt.shape)
+            expected_shape[batch_axis] = 1
+            self._expected_reduction_shapes.append(tuple(expected_shape))
+
     def on_start_training(self):
+        # initialize with zero-sized batches
         self._reductions = None
+        # self._reductions = None # [None] * len(self._monitored_nodes)
 
-    def _reduce_batch(self, input_batch, batch_axis):
-        '''
-        Reduce input_batch along its batch_axis, and return the result.
+    # def _reduce_batch(self, input_batch, batch_axis):
+    #     '''
+    #     Reduce input_batch along its batch_axis, and return the result.
 
-        The result should collapse its 'b' (batch) axis to size 1, but not
-        remove it.
-        '''
-        raise NotImplementedError("%s._reduce_batch() not yet implemented." %
-                                  type(self))
+    #     The result should collapse its 'b' (batch) axis to size 1, but not
+    #     remove it.
+    #     '''
+    #     raise NotImplementedError("%s._reduce_batch() not yet implemented." %
+    #                               type(self))
 
-    def _update_reduction(self, reduced_value, batch_axis, reduction):
+    def _update_reduction(self, batch, fmt, old_reduction):
         '''
-        Updates a reduction (one of self._reductions) using a reduced batch.
+        Returns the value of <old_reduction>, updated by <batch>.
+
+        Parameters:
+        -----------
+        batch: numpy.ndarray
+          A batch of outputs from one of self._monitored_nodes.
+
+        fmt: DenseFormat
+          The format of batch.
+
+        old_reduction: numpy.ndarray or None
+          The old reduced value in self.reductions to update.
+          This will be None if this is the first call in an epoch.
+
+        Returns:
+        --------
+        rval: numpy.ndarray
+          The new value to replace old_reduction with. Must be the same
+          shape and dtype as old_reduction.
         '''
         raise NotImplementedError("%s._update_reduction() not yet implemented."
                                   % type(self))
 
     def _on_batch(self, input_batches, monitored_value_batches):
-        batch_axes = [fmt.axes.index('b') for fmt in self._formats]
+        batch_axes = [node.output_format.axes.index('b')
+                      for node in self._monitored_nodes]
 
+        old_reductions = ([None] * len(self._monitored_nodes)
+                          if self._reductions is None
+                          else self._reductions)
         new_reductions = []
-        for batch, fmt, batch_axis in safe_izip(monitored_value_batches,
-                                                self._formats,
-                                                batch_axes):
-            new_reduction = self._reduce_batch(batch, batch_axis)
-            fmt.check(new_reduction)
-            assert_equal(new_reduction.shape[batch_axis], 1)
+
+        for batch, old_reduction, expected_reduction_shape \
+            in safe_izip(monitored_value_batches,
+                         old_reductions,
+                         self._expected_reduction_shapes):
+            new_reduction = self._update_reduction(batch,
+                                                   node.output_format,
+                                                   old_reduction)
+            assert_equal(new_reduction.shape, expected_reduction_shape)
 
             new_reductions.append(new_reduction)
 
-        new_reductions = tuple(new_reductions)
+        self._reductions = new_reductions
 
-        if self._reductions is None:
-            self._reductions = new_reductions
-        else:
-            for (new_reduction,
-                 old_reduction,
-                 batch_axis) in safe_izip(new_reductions,
-                                          self._reductions,
-                                          batch_axes):
-                self._update_reduction(new_reduction,
-                                       batch_axis,
-                                       old_reduction)
+        # new_reductions = tuple(new_reductions)
+
+        # if self._reductions is None:
+        #     self._reductions = new_reductions
+        # else:
+        #     for (new_reduction,
+        #          old_reduction,
+        #          batch_axis) in safe_izip(new_reductions,
+        #                                   self._reductions,
+        #                                   batch_axes):
+        #         self._update_reduction(new_reduction,
+        #                                batch_axis,
+        #                                old_reduction)
 
     def _on_epoch(self):
         assert_is_not(self._reductions, None)
@@ -589,15 +630,16 @@ class MaxMonitor(ReduceMonitor):
     Computes the elementwise maximum of monitored values, over the batch axis.
     '''
 
-    def __init__(self, values_to_monitor, formats, callbacks):
-        super(MaxMonitor, self).__init__(values_to_monitor, formats, callbacks)
+    def __init__(self, nodes_to_monitor, callbacks):
+        super(MaxMonitor, self).__init__(nodes_to_monitor, callbacks)
 
-    def _reduce_batch(self, input_batch, batch_axis):
-        return numpy.max(input_batch, axis=batch_axis)
+    # def _reduce_batch(self, input_batch, batch_axis):
+    #     return numpy.max(input_batch, axis=batch_axis)
 
-    def _update_reduction(self, reduced_value, batch_axis, reduction):
-        stack = numpy.concatenate((reduced_value, reduction), axis=batch_axis)
-        reduction[...] = numpy.max(stack, axis=batch_axis, keepdims=True)
+    def _update_reduction(self, batch, fmt, reduction):
+        batch_axis = fmt.axes.index('b')
+        stack = numpy.concatenate((batch, reduction), axis=batch_axis)
+        return numpy.max(stack, axis=batch_axis, keepdims=True)
 
 
 class MinMonitor(ReduceMonitor):
@@ -605,71 +647,107 @@ class MinMonitor(ReduceMonitor):
     Computes the elementwise minimum of monitored values, over the batch axis.
     '''
 
-    def __init__(self, values_to_monitor, formats, callbacks):
-        super(MinMonitor, self).__init__(values_to_monitor, formats, callbacks)
+    def __init__(self, nodes_to_monitor, callbacks):
+        super(MinMonitor, self).__init__(nodes_to_monitor, callbacks)
 
-    def _reduce_batch(self, input_batch, batch_axis):
-        return numpy.min(input_batch, axis=batch_axis)
+    # def _reduce_batch(self, input_batch, batch_axis):
+    #     return numpy.min(input_batch, axis=batch_axis)
 
-    def _update_reduction(self, reduced_value, batch_axis, reduction):
-        stack = numpy.concatenate((reduced_value, reduction), axis=batch_axis)
-        reduction[...] = numpy.min(stack, axis=batch_axis, keepdims=True)
+    def _update_reduction(self, batch, fmt, reduction):
+        batch_axis = fmt.axes.index('b')
+
+        if reduction is None:
+            stack = batch
+        else:
+            stack = numpy.concatenate((batch, reduction), axis=batch_axis)
+
+        return numpy.min(stack, axis=batch_axis, keepdims=True)
 
 
 class SumMonitor(ReduceMonitor):
     '''
     Computes the elementwise sum of monitored values over the batch axis.
+
+    Integer dtypes smaller than int64 will be cast to int64 before summing,
+    to avoid overflow.
     '''
 
-    def __init__(self, values_to_monitor, formats, callbacks):
-        if not isinstance(formats, Sequence):
-            formats = [formats]
-            assert not isinstance(values_to_monitor, Sequence)
-            values_to_monitor = [values_to_monitor]
+    def __init__(self, nodes_to_monitor, callbacks):
+        if isinstance(nodes_to_monitor, Node):
+            nodes_to_monitor = [nodes_to_monitor]
+
+        # for node in nodes_to_monitor:
+        #     if str(node.output_symbol.dtype) in ('uint8', 'int8'):
+        #         warnings.warn("Applying a SumMonitor to a {} node can be "
+        #                       "risky, as that dtype easily overflows. "
+        #                       "Consider using a CastNode to cast to a larger "
+        #                       "integer dtype.".format(node.output_symbol.dtype))
+
+        # if not isinstance(nodes_to_monitor, Sequence):
+        #     formats = [formats]
+        #     assert not isinstance(values_to_monitor, Sequence)
+        #     values_to_monitor = [values_to_monitor]
 
         # _reduce_batch() upgrades small int dtypes (e.g. uint8) to larger int
         # dtypes to avoid over/underflow when summing large numbers of them.
         # We need to make their corresponding formats agnostic to dtype, so
         # that they don't raise a stink about batch/reduction dtypes being
         # different from the format's expected dtype.
-        def remove_small_int_dtype(fmt):
-            '''
-            Return a copy of fmt, with dtype=None if orig. dtype was small int.
-            '''
-            if fmt.dtype is not None and numpy.issubdtype(fmt.dtype,
-                                                          numpy.integer):
-                result = copy.deepcopy(fmt)
-                result.dtype = None
-                return result
-            else:
-                return fmt
+        # def remove_small_int_dtype(fmt):
+        #     '''
+        #     Return a copy of fmt, with dtype=None if orig. dtype was small int.
+        #     '''
+        #     if fmt.dtype is not None and numpy.issubdtype(fmt.dtype,
+        #                                                   numpy.integer):
+        #         result = copy.deepcopy(fmt)
+        #         result.dtype = None
+        #         return result
+        #     else:
+        #         return fmt
 
-        formats = [remove_small_int_dtype(fmt) for fmt in formats]
+        # formats = [remove_small_int_dtype(fmt) for fmt in formats]
 
-        super(SumMonitor, self).__init__(values_to_monitor,
-                                         formats,
-                                         callbacks)
+        super(SumMonitor, self).__init__(nodes_to_monitor, callbacks)
         self._count = None
 
-    def _reduce_batch(self, input_batch, batch_axis):
+    # def _reduce_batch(self, input_batch, batch_axis):
 
-        def upcast_if_integer(input_batch):
-            '''
-            Cast to int64 iff input_batch.dtype is an integral dtype.
+    #     def upcast_if_integer(input_batch):
+    #         '''
+    #         Cast to int64 iff input_batch.dtype is an integral dtype.
 
-            Lowers the risk of integer over/underflow (esp. if dtype is uint8).
-            '''
-            if numpy.issubdtype(input_batch.dtype, numpy.integer):
-                return numpy.cast['int64'](input_batch)
-            else:
-                return input_batch
+    #         Lowers the risk of integer over/underflow (esp. if dtype is uint8).
+    #         '''
+    #         if numpy.issubdtype(input_batch.dtype, numpy.integer):
+    #             return numpy.cast['int64'](input_batch)
+    #         else:
+    #             return input_batch
 
-        return numpy.sum(upcast_if_integer(input_batch),
-                         axis=batch_axis,
-                         keepdims=True)
+    #     return numpy.sum(upcast_if_integer(input_batch),
+    #                      axis=batch_axis,
+    #                      keepdims=True)
 
-    def _update_reduction(self, reduced_value, batch_axis, reduction):
-        reduction += reduced_value
+    def _update_reduction(self, batch, fmt, old_reduction):
+        def is_small_int(dtype):
+            dtype = numpy.dtype(dtype)
+            return (numpy.issubdtype(dtype, numpy.integer) and
+                    dtype.itemsize < numpy.dtype('int').itemsize)
+
+        # Upcast small int dtypes to int, to avoid overflow.
+        if is_small_int(batch.dtype):
+            batch = numpy.cast['int'](batch)
+
+            if old_reduction is not None:
+                assert_equal(old_reduction.dtype, numpy.dtype('int'))
+
+        batch_axis = fmt.axes.index('b')
+
+        if old_reduction is None:
+            stack = batch
+        else:
+            stack = numpy.concatenate((batch, old_reduction), axis=batch_axis)
+
+        return numpy.sum(stack, axis=batch_axis, keepdims=True)
 
 
 class AverageMonitor(SumMonitor):
@@ -677,25 +755,24 @@ class AverageMonitor(SumMonitor):
     Computes the elementwise average of monitored values over the batch axis.
     '''
 
-    def __init__(self, values_to_monitor, formats, callbacks):
-        super(AverageMonitor, self).__init__(values_to_monitor,
-                                             formats,
-                                             callbacks)
+    def __init__(self, nodes_to_monitor, callbacks):
+        super(AverageMonitor, self).__init__(nodes_to_monitor, callbacks)
         self._count = 0
 
     def _on_batch(self, input_batches, monitored_value_batches):
         # Update self._reductions
         super(AverageMonitor, self)._on_batch(input_batches,
                                               monitored_value_batches)
-        assert_is_instance(self._reductions, Sequence)
 
-        batch_axes = [fmt.axes.index('b') for fmt in self._formats]
+        batch_sizes = []
+        for (monitored_value_batch,
+             monitored_node) in safe_izip(monitored_value_batches,
+                                          self._monitored_nodes):
+            batch_axis = monitored_node.output_format.axes.index('b')
+            batch_sizes.append(monitored_value_batch.shape[batch_axis])
 
-        # Update self._count
-        batch_sizes = numpy.asarray([batch.shape[batch_axis]
-                                     for batch, batch_axis
-                                     in safe_izip(monitored_value_batches,
-                                                  batch_axes)])
+        batch_sizes = numpy.asarray(batch_sizes)
+
         assert_true(numpy.all(batch_sizes[0] == batch_sizes[1:]),
                     "Unequal batch sizes: %s" % str(batch_sizes))
         self._count += batch_sizes[0]
@@ -1111,7 +1188,8 @@ class Sgd(object):
         monitored_symbols = []
         for epoch_callback in self.epoch_callbacks:
             if isinstance(epoch_callback, Monitor):
-                monitored_symbols.extend(epoch_callback.monitored_values)
+                for monitored_node in epoch_callback._monitored_nodes:
+                    monitored_symbols.append(monitored_node.output_symbol)
 
         parameter_updates = OrderedDict()
         for parameter_updater in self._parameter_updaters:
@@ -1172,19 +1250,19 @@ class Sgd(object):
 
                 # fprop-bprop, updates parameters
                 # pylint: disable=star-args
-                outputs = update_function(*cost_arguments)
+                monitored_values = update_function(*cost_arguments)
 
                 # updates monitors
-                output_index = 0
+                value_index = 0
                 for monitor in monitors:
-                    new_output_index = (output_index +
-                                        len(monitor.monitored_values))
-                    assert_less_equal(new_output_index, len(outputs))
-                    monitored_values = outputs[output_index:new_output_index]
+                    new_value_index = (value_index +
+                                        len(monitor._monitored_nodes))
+                    assert_less_equal(new_value_index, len(monitored_values))
+                    values = monitored_values[value_index:new_value_index]
 
-                    monitor.on_batch(cost_arguments, monitored_values)
+                    monitor.on_batch(cost_arguments, values)
 
-                    output_index = new_output_index
+                    value_index = new_value_index
 
                 # calls epoch callbacks, if we've iterated through an epoch
                 if self._input_iterator.next_is_new_epoch():

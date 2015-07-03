@@ -328,26 +328,32 @@ def print_mcr(values, _):
     print("Misclassification rate: %s" % str(values))
 
 
-class UpdateNormMonitor(Monitor):
-    def __init__(self, name, update):
-        update = update.reshape(shape=(1, -1))
-        update_norm = theano.tensor.sqrt((update ** 2).sum(axis=1))
+# class UpdateNormMonitor(Monitor):
+#     '''
+#     Monitors the norm of parameter updates.
+#     '''
 
-        # just something to satisfy the checks of Monitor.__init__.
-        # Because we overrride on_batch(), this is never used.
-        dummy_fmt = DenseFormat(axes=('b',),
-                                shape=(-1,),
-                                dtype=update_norm.dtype)
-        self.name = name
-        super(UpdateNormMonitor, self).__init__([update_norm],
-                                                [dummy_fmt],
-                                                [])
+#     def __init__(self, name, update):
+#         update = update.reshape(shape=(1, -1))
+#         update_norm = theano.tensor.sqrt((update ** 2).sum(axis=1))
 
-    def _on_batch(self, input_batches, monitored_value_batches):
-        print("%s update norm: %s" % (self.name, str(monitored_value_batches)))
+#         # just something to satisfy the checks of Monitor.__init__.
+#         # Because we overrride on_batch(), this is never used.
+#         dummy_fmt = DenseFormat(axes=('b',),
+#                                 shape=(-1,),
+#                                 dtype=update_norm.dtype)
+#         node = Node(self, [], update_norm, dummy_fmt)
+#         self.name = name
+#         super(UpdateNormMonitor, self).__init__(node, callbacks=[])
+#         # super(UpdateNormMonitor, self).__init__([update_norm],
+#         #                                         [dummy_fmt],
+#         #                                         [])
 
-    def _on_epoch(self):
-        return tuple()
+#     def _on_batch(self, input_batches, monitored_value_batches):
+#         print("%s update norm: %s" % (self.name, str(monitored_value_batches)))
+
+#     def _on_epoch(self):
+#         return tuple()
 
 
 def main():
@@ -429,12 +435,12 @@ def main():
 
     updates = [updater.updates.values()[0] - updater.updates.keys()[0]
                for updater in parameter_updaters]
-    update_norm_monitors = [UpdateNormMonitor("layer %d %s" %
-                                              (i // 2,
-                                               "weights" if i % 2 == 0 else
-                                               "bias"),
-                                              update)
-                            for i, update in enumerate(updates)]
+    # update_norm_monitors = [UpdateNormMonitor("layer %d %s" %
+    #                                           (i // 2,
+    #                                            "weights" if i % 2 == 0 else
+    #                                            "bias"),
+    #                                           update)
+    #                         for i, update in enumerate(updates)]
 
     #
     # Makes batch and epoch callbacks
@@ -444,16 +450,14 @@ def main():
     mcr_logger = LogsToLists()
     training_stopper = StopsOnStagnation(max_epochs=10,
                                          min_proportional_decrease=0.0)
-    mcr_monitor = AverageMonitor(misclassification_node.output_symbol,
-                                 misclassification_node.output_format,
+    mcr_monitor = AverageMonitor(misclassification_node,
                                  callbacks=[print_mcr,
                                             mcr_logger,
                                             training_stopper])
 
     # batch callback (monitor)
     training_loss_logger = LogsToLists()
-    training_loss_monitor = AverageMonitor(loss_node.output_symbol,
-                                           loss_node.output_format,
+    training_loss_monitor = AverageMonitor(loss_node,
                                            callbacks=[print_loss,
                                                       training_loss_logger])
 
@@ -488,10 +492,9 @@ def main():
     model = SerializableModel([image_uint8_node], [output_node])
     saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
 
-    validation_loss_monitor = AverageMonitor(
-        loss_node.output_symbol,
-        loss_node.output_format,
-        callbacks=[validation_loss_logger, saves_best])
+    validation_loss_monitor = AverageMonitor(loss_node,
+                                             callbacks=[validation_loss_logger,
+                                                        saves_best])
 
     validation_callback = ValidationCallback(
         inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
