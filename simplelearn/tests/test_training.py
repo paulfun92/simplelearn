@@ -102,8 +102,8 @@ def test_average_monitor():
                   iterator,
                   parameters=[],
                   parameter_updaters=[],
-                  monitors=[average_monitor],
-                  epoch_callbacks=[LimitsNumEpochs(3),
+                  epoch_callbacks=[average_monitor,
+                                   LimitsNumEpochs(3),
                                    DatasetRandomizer()])
 
     trainer.train()
@@ -283,9 +283,8 @@ def test_limit_param_norms():
                   input_iterator=training_iterator,
                   parameters=[weights],
                   parameter_updaters=[param_updater],
-                  monitors=[average_cost_monitor],
                   # monitors=[average_cost_monitor, weight_monitor],
-                  epoch_callbacks=[])
+                  epoch_callbacks=[average_cost_monitor])
         sgd.train()
 
         weight_norm = numpy.sqrt((weights.get_value() ** 2.0).sum())
