@@ -390,60 +390,57 @@ class Monitor(EpochCallback):
               AverageMonitor reports Y, elementwise-averaged over the epoch.
     '''
 
-    def __init__(self, values_to_monitor, formats, callbacks):
+    def __init__(self, nodes_to_monitor, callbacks):
         '''
         Parameters
         ----------
-        values_to_monitor: theano expression, or a Sequence of them
-          A sequence of theano expressions to monitor. These should be
-          functions of the input variables.
+        nodes_to_monitor: Sequence of Nodes.
+          Nodes whose values you want to monitor. These must lie upstream
+          in the computational graph from the data iterator's nodes.
 
           Must not be empty.
 
-        formats: a Format, or a Sequence of them
-          A sequence of the above values' Formats.
+        callbacks: a __call__-able, or a Sequence of them.
 
-        callbacks: a __call__-able, or a Sequence of them
-          The values returned by self._on_epoch() get fed to these callbacks.
-          These must have the call signature f(values, formats).
-          Values is the Sequence returned by self._on_epoch().
-          Formats are the values' formats, also a Sequence.
+          The call signature of these must be f(values, formats), where:
+
+          values: Sequence of numpy.ndarrays
+            The values computed by nodes_to_monitor.
+
+          formats: Sequence of DenseFormats
+            The corresponding formats of the above values.
         '''
 
         #
         # Checks args
         #
 
-        if isinstance(values_to_monitor, theano.gof.Variable):
-            values_to_monitor = [values_to_monitor]
+        if isinstance(nodes_to_monitor, Node):
+            nodes_to_monitor = [nodes_to_monitor]
+        else:
+            nodes_to_monitor = tuple(nodes_to_monitor)
+            assert_all_is_instance(nodes_to_monitor, Node)
 
-        if isinstance(formats, Format):
-            formats = [formats]
+        assert_equal(len(nodes_to_monitor), len(frozenset(nodes_to_monitor)),
+                     "nodes_to_monitor contains repeated elements: %s" %
+                     str(nodes_to_monitor))
+
+        assert_greater(len(nodes_to_monitor), 0)
 
         if not isinstance(callbacks, Sequence):
             callbacks = [callbacks]
+        else:
+            callbacks = tuple(callbacks)
 
-        assert_is_instance(values_to_monitor, Sequence)
-        assert_is_instance(formats, Sequence)
-        assert_is_instance(callbacks, Sequence)
-
-        assert_equal(len(values_to_monitor), len(formats))
-        assert_equal(len(values_to_monitor),
-                     len(frozenset(values_to_monitor)),
-                     "values_to_monitor contains repeated elements: %s" %
-                     str(values_to_monitor))
-
-        for value, fmt in safe_izip(values_to_monitor, formats):
-            assert_is_instance(value, theano.gof.Variable)
-            assert_is_instance(fmt, Format)
+        for callback in callbacks:
+            assert_in('__call__', callback.__dict__)
 
         #
         # Sets members
         #
 
-        self.monitored_values = tuple(values_to_monitor)
-        self._formats = tuple(formats)
-        self._callbacks = list(callbacks)
+        self._monitored_nodes = nodes_to_monitor
+        self._callbacks = callbacks
 
     def on_batch(self, input_batches, monitored_value_batches):
         '''
@@ -459,13 +456,13 @@ class Monitor(EpochCallback):
           The numerical values, for this batch, of the values_to_monitor
           arguments to __init__().
         '''
-        assert_equal(len(monitored_value_batches), len(self._formats))
+        assert_equal(len(monitored_value_batches),
+                     len(self._monitored_nodes))
 
         for batch, fmt in safe_izip(monitored_value_batches, self._formats):
             fmt.check(batch)
 
-        self._on_batch(tuple(input_batches),
-                       tuple(monitored_value_batches))
+        self._on_batch(tuple(input_batches), tuple(monitored_value_batches))
 
     def _on_batch(self, input_batches, monitored_value_batches):
         '''
@@ -516,23 +513,23 @@ class ReduceMonitor(Monitor):
     An abstract superclass of monitors like MaxMonitor, MinMonitor,
     that operate by applying a reduction operator (e.g. max, min)
     along the batch axis for each batch.
+
+    Override _reduce_batch to reduce a single batch along its batch axis.
+
+    Override _update_reduction to update the current epoch's reduction with
+    that reduced batch.
     '''
 
-    def __init__(self, values_to_monitor, formats, callbacks):
-        super(ReduceMonitor, self).__init__(values_to_monitor,
-                                            formats,
-                                            callbacks)
+    def __init__(self, nodes_to_monitor, callbacks):
+        for node_to_monitor in nodes_to_monitor:
+            assert_in('b', node_to_monitor.output_format.axes)
 
-        assert_greater(len(self._formats), 0)
-        assert_greater(len(self._callbacks), 0)
+        super(ReduceMonitor, self).__init__(nodes_to_monitor, callbacks)
 
-        for fmt in self._formats:
-            assert_in('b', fmt.axes)
-
-        self._tallies = None
+        self._reductions = None
 
     def on_start_training(self):
-        self._tallies = None
+        self._reductions = None
 
     def _reduce_batch(self, input_batch, batch_axis):
         '''
@@ -544,41 +541,45 @@ class ReduceMonitor(Monitor):
         raise NotImplementedError("%s._reduce_batch() not yet implemented." %
                                   type(self))
 
-    def _update_tally(self, reduced_value, batch_axis, tally):
+    def _update_reduction(self, reduced_value, batch_axis, reduction):
         '''
-        Updates a tally (one of self._tallies) using a reduced batch.
+        Updates a reduction (one of self._reductions) using a reduced batch.
         '''
-        raise NotImplementedError("%s._update_tally() not yet implemented." %
-                                  type(self))
+        raise NotImplementedError("%s._update_reduction() not yet implemented."
+                                  % type(self))
 
     def _on_batch(self, input_batches, monitored_value_batches):
         batch_axes = [fmt.axes.index('b') for fmt in self._formats]
 
-        new_tallies = []
+        new_reductions = []
         for batch, fmt, batch_axis in safe_izip(monitored_value_batches,
                                                 self._formats,
                                                 batch_axes):
-            new_tally = self._reduce_batch(batch, batch_axis)
-            fmt.check(new_tally)
-            assert_equal(new_tally.shape[batch_axis], 1)
+            new_reduction = self._reduce_batch(batch, batch_axis)
+            fmt.check(new_reduction)
+            assert_equal(new_reduction.shape[batch_axis], 1)
 
-            new_tallies.append(new_tally)
+            new_reductions.append(new_reduction)
 
-        new_tallies = tuple(new_tallies)
+        new_reductions = tuple(new_reductions)
 
-        if self._tallies is None:
-            self._tallies = new_tallies
+        if self._reductions is None:
+            self._reductions = new_reductions
         else:
-            for new_tally, old_tally, batch_axis in safe_izip(new_tallies,
-                                                              self._tallies,
-                                                              batch_axes):
-                self._update_tally(new_tally, batch_axis, old_tally)
+            for (new_reduction,
+                 old_reduction,
+                 batch_axis) in safe_izip(new_reductions,
+                                          self._reductions,
+                                          batch_axes):
+                self._update_reduction(new_reduction,
+                                       batch_axis,
+                                       old_reduction)
 
     def _on_epoch(self):
-        assert_is_not(self._tallies, None)
+        assert_is_not(self._reductions, None)
 
-        result = self._tallies
-        self._tallies = None
+        result = self._reductions
+        self._reductions = None
 
         return result
 
@@ -594,9 +595,9 @@ class MaxMonitor(ReduceMonitor):
     def _reduce_batch(self, input_batch, batch_axis):
         return numpy.max(input_batch, axis=batch_axis)
 
-    def _update_tally(self, reduced_value, batch_axis, tally):
-        stack = numpy.concatenate((reduced_value, tally), axis=batch_axis)
-        tally[...] = numpy.max(stack, axis=batch_axis, keepdims=True)
+    def _update_reduction(self, reduced_value, batch_axis, reduction):
+        stack = numpy.concatenate((reduced_value, reduction), axis=batch_axis)
+        reduction[...] = numpy.max(stack, axis=batch_axis, keepdims=True)
 
 
 class MinMonitor(ReduceMonitor):
@@ -610,9 +611,9 @@ class MinMonitor(ReduceMonitor):
     def _reduce_batch(self, input_batch, batch_axis):
         return numpy.min(input_batch, axis=batch_axis)
 
-    def _update_tally(self, reduced_value, batch_axis, tally):
-        stack = numpy.concatenate((reduced_value, tally), axis=batch_axis)
-        tally[...] = numpy.min(stack, axis=batch_axis, keepdims=True)
+    def _update_reduction(self, reduced_value, batch_axis, reduction):
+        stack = numpy.concatenate((reduced_value, reduction), axis=batch_axis)
+        reduction[...] = numpy.min(stack, axis=batch_axis, keepdims=True)
 
 
 class SumMonitor(ReduceMonitor):
@@ -629,7 +630,7 @@ class SumMonitor(ReduceMonitor):
         # _reduce_batch() upgrades small int dtypes (e.g. uint8) to larger int
         # dtypes to avoid over/underflow when summing large numbers of them.
         # We need to make their corresponding formats agnostic to dtype, so
-        # that they don't raise a stink about batch/tally dtypes being
+        # that they don't raise a stink about batch/reduction dtypes being
         # different from the format's expected dtype.
         def remove_small_int_dtype(fmt):
             '''
@@ -667,8 +668,8 @@ class SumMonitor(ReduceMonitor):
                          axis=batch_axis,
                          keepdims=True)
 
-    def _update_tally(self, reduced_value, batch_axis, tally):
-        tally += reduced_value
+    def _update_reduction(self, reduced_value, batch_axis, reduction):
+        reduction += reduced_value
 
 
 class AverageMonitor(SumMonitor):
@@ -683,10 +684,10 @@ class AverageMonitor(SumMonitor):
         self._count = 0
 
     def _on_batch(self, input_batches, monitored_value_batches):
-        # Update self._tallies
+        # Update self._reductions
         super(AverageMonitor, self)._on_batch(input_batches,
                                               monitored_value_batches)
-        assert_is_instance(self._tallies, Sequence)
+        assert_is_instance(self._reductions, Sequence)
 
         batch_axes = [fmt.axes.index('b') for fmt in self._formats]
 
