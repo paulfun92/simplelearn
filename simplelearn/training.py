@@ -541,17 +541,6 @@ class ReduceMonitor(Monitor):
     def on_start_training(self):
         # initialize with zero-sized batches
         self._reductions = None
-        # self._reductions = None # [None] * len(self._monitored_nodes)
-
-    # def _reduce_batch(self, input_batch, batch_axis):
-    #     '''
-    #     Reduce input_batch along its batch_axis, and return the result.
-
-    #     The result should collapse its 'b' (batch) axis to size 1, but not
-    #     remove it.
-    #     '''
-    #     raise NotImplementedError("%s._reduce_batch() not yet implemented." %
-    #                               type(self))
 
     def _update_reduction(self, batch, fmt, old_reduction):
         '''
@@ -600,20 +589,6 @@ class ReduceMonitor(Monitor):
 
         self._reductions = new_reductions
 
-        # new_reductions = tuple(new_reductions)
-
-        # if self._reductions is None:
-        #     self._reductions = new_reductions
-        # else:
-        #     for (new_reduction,
-        #          old_reduction,
-        #          batch_axis) in safe_izip(new_reductions,
-        #                                   self._reductions,
-        #                                   batch_axes):
-        #         self._update_reduction(new_reduction,
-        #                                batch_axis,
-        #                                old_reduction)
-
     def _on_epoch(self):
         assert_is_not(self._reductions, None)
 
@@ -631,9 +606,6 @@ class MaxMonitor(ReduceMonitor):
     def __init__(self, nodes_to_monitor, callbacks):
         super(MaxMonitor, self).__init__(nodes_to_monitor, callbacks)
 
-    # def _reduce_batch(self, input_batch, batch_axis):
-    #     return numpy.max(input_batch, axis=batch_axis)
-
     def _update_reduction(self, batch, fmt, reduction):
         batch_axis = fmt.axes.index('b')
         stack = numpy.concatenate((batch, reduction), axis=batch_axis)
@@ -647,9 +619,6 @@ class MinMonitor(ReduceMonitor):
 
     def __init__(self, nodes_to_monitor, callbacks):
         super(MinMonitor, self).__init__(nodes_to_monitor, callbacks)
-
-    # def _reduce_batch(self, input_batch, batch_axis):
-    #     return numpy.min(input_batch, axis=batch_axis)
 
     def _update_reduction(self, batch, fmt, reduction):
         batch_axis = fmt.axes.index('b')
@@ -674,56 +643,8 @@ class SumMonitor(ReduceMonitor):
         if isinstance(nodes_to_monitor, Node):
             nodes_to_monitor = [nodes_to_monitor]
 
-        # for node in nodes_to_monitor:
-        #     if str(node.output_symbol.dtype) in ('uint8', 'int8'):
-        #         warnings.warn("Applying a SumMonitor to a {} node can be "
-        #                       "risky, as that dtype easily overflows. "
-        #                       "Consider using a CastNode to cast to a larger "
-        #                       "integer dtype.".format(node.output_symbol.dtype))
-
-        # if not isinstance(nodes_to_monitor, Sequence):
-        #     formats = [formats]
-        #     assert not isinstance(values_to_monitor, Sequence)
-        #     values_to_monitor = [values_to_monitor]
-
-        # _reduce_batch() upgrades small int dtypes (e.g. uint8) to larger int
-        # dtypes to avoid over/underflow when summing large numbers of them.
-        # We need to make their corresponding formats agnostic to dtype, so
-        # that they don't raise a stink about batch/reduction dtypes being
-        # different from the format's expected dtype.
-        # def remove_small_int_dtype(fmt):
-        #     '''
-        #     Return a copy of fmt, with dtype=None if orig. dtype was small int.
-        #     '''
-        #     if fmt.dtype is not None and numpy.issubdtype(fmt.dtype,
-        #                                                   numpy.integer):
-        #         result = copy.deepcopy(fmt)
-        #         result.dtype = None
-        #         return result
-        #     else:
-        #         return fmt
-
-        # formats = [remove_small_int_dtype(fmt) for fmt in formats]
-
         super(SumMonitor, self).__init__(nodes_to_monitor, callbacks)
         self._count = None
-
-    # def _reduce_batch(self, input_batch, batch_axis):
-
-    #     def upcast_if_integer(input_batch):
-    #         '''
-    #         Cast to int64 iff input_batch.dtype is an integral dtype.
-
-    #         Lowers the risk of integer over/underflow (esp. if dtype is uint8).
-    #         '''
-    #         if numpy.issubdtype(input_batch.dtype, numpy.integer):
-    #             return numpy.cast['int64'](input_batch)
-    #         else:
-    #             return input_batch
-
-    #     return numpy.sum(upcast_if_integer(input_batch),
-    #                      axis=batch_axis,
-    #                      keepdims=True)
 
     def _update_reduction(self, batch, fmt, old_reduction):
         def is_small_int(dtype):
