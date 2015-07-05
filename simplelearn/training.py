@@ -823,9 +823,12 @@ class LogsToLists(object):
 
 
 class EpochLogger(Monitor):
-    '''
-    Logs the
-    '''
+    """
+    Logs the outputs of some Monitors to an HDF5 file.
+
+    Runs the same monitors on training and / or testing sets in between each
+    training epoch.
+    """
 
     def _log_batch(self, values, _):  # ignore formats
         assert_equal(len(values), len(formats))
@@ -835,7 +838,29 @@ class EpochLogger(Monitor):
 
         self.h5_file.flush()
 
-    def __init__(self, nodes, names, file_path):
+    def __init__(self,
+                 nodes,
+                 names,
+                 file_path,
+                 log_testing=True,
+                 log_validation=True):
+        '''
+        Parameters
+        ----------
+        nodes: Sequence of Node
+
+        names: Sequence of basestring
+
+        file_path: basestring
+          Path to save the .h5 file to.
+
+        log_testing: bool
+          Default: True. Evaluate monitors over the testing set if True.
+
+        log_vaidation: bool
+          Default: True. Evaluate monitors over the training set if True.
+        '''
+
         assert_all_is_instance(monitors, Monitor)
         assert_all_is_instance(names, basestring)
         assert_equal(len(nodes), len(names))
@@ -861,6 +886,10 @@ class EpochLogger(Monitor):
                                 dtype=node.output_symbol.dtype)
 
         super(EpochLogger, self).__init__(nodes, callbacks=_log_batch)
+
+    def _on_epoch(self):
+        # process monitors on training data
+        super(EpochLogger, self)._on_epoch(self)
 
 
 class SgdParameterUpdater(object):
