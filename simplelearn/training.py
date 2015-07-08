@@ -31,7 +31,8 @@ from simplelearn.asserts import (assert_integer,
                                  assert_all_greater_equal,
                                  assert_all_integer,
                                  assert_is_subdtype,
-                                 assert_all_is_instance)
+                                 assert_all_is_instance,
+                                 assert_parent_dir_exists)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.formats import Format
@@ -825,70 +826,176 @@ class LogsToLists(object):
 class EpochLogger(Monitor):
     """
     Logs the outputs of some Monitors to an HDF5 file.
-
-    Runs the same monitors on training and / or testing sets in between each
-    training epoch.
     """
 
-    def _log_batch(self, values, _):  # ignore formats
-        assert_equal(len(values), len(formats))
+    def _log_batch(self, new_values, formats):  # ignore formats
+        assert_equal(len(new_values), len(formats))
 
-        for name, value, in safe_izip(self.names, self.values):
-            self.h5_file[name]log.append(value)
+        logs = self.h5_file['logs']
+        log_names = logs.keys()
+
+        for new_value, fmt, log_name in safe_izip(new_values,
+                                                  formats,
+                                                  log_names):
+            log = logs[log_name]
+
+            # Grow log by 1 along the batch axis
+            shape = list(log.shape)
+            shape[fmt.axes.index('b')] += 1
+            log.resize(shape)
+
+            # Copy new_value to the newly appended log value
+            slice = tuple(-1 if axis == b else None for axis in fmt.axes)
+            log[slice] = value
 
         self.h5_file.flush()
 
     def __init__(self,
-                 nodes,
-                 names,
-                 file_path,
-                 log_testing=True,
-                 log_validation=True):
+                 inputs,
+                 training_monitors,
+                 validation_monitors,
+                 file_path):
         '''
+        Example:
+
+        Let M1 be a monitor class with one output node of shape () (a scalar).
+        Let M2 be a monitor class with 2 output nodes of shapes () and (2, 3).
+
+        epoch_logger = EpochLogger([image_node, label_node],
+                                   OrderedDict([['m1', M1()], ['M2', M2()]]),
+                                   OrderedDict([['m2', M2()]]),
+                                   "/tmp/training_log.h5")
+
+        After E epochs, this EpochLogger will have written an .h5 file
+        '/tmp/training_log.h5' with the following internal structure:
+
+        </tmp/training_log.h5>/
+          'logs':  <a h5py.Group>
+            'training m1: <a h5py.Dataset of shape (E, )>
+            'training m2': <a h5py.Dataset of shape (E, (), (2, 3))>
+            'validation m2': <a h5py.Dataset of shape (E, (), (2, 3))>
+          'log names' (a h5py.Dataset):
+            ['training m1', 'training m2', 'validation m2']
+
+        The 'log names' dataset is there just to record the original order of
+        the monitors. ('logs', as an h5py.Group, doesn't offer any guarantees
+        that it preserves the order of its elements.)
+
+        It is assumed that each output node of each monitor produces a
+        fixed-sized tensor or scalar per epoch, with shape S. These are
+        recorded in h5py.Datasets of shape (E, ) + S, where E is the number of
+        epochs. If a single monitor has multiple output nodes, the associated
+        h5py.Dataset will be a structured array that contains all of their
+        values.
+
         Parameters
         ----------
-        nodes: Sequence of Node
+        inputs: Sequence of Theano variables
+          The Theano variables that recieve values from the Dataset iterator.
 
-        names: Sequence of basestring
+        training_monitors: OrderedDict
+          A set of named monitors to be run on the training set.
+          The OrderedDict keys are the names. "training " will be prefixed
+          onto each of the names.
 
-        file_path: basestring
-          Path to save the .h5 file to.
+        validation_monitors: OrderedDict
+          A set of named monitors to be run on the training set.
+          The OrderedDict keys are the names.
 
-        log_testing: bool
-          Default: True. Evaluate monitors over the testing set if True.
-
-        log_vaidation: bool
-          Default: True. Evaluate monitors over the training set if True.
+        file_path:
+          Path to save the HDF5 file to. Must end in '.h5'.
         '''
 
-        assert_all_is_instance(monitors, Monitor)
-        assert_all_is_instance(names, basestring)
-        assert_equal(len(nodes), len(names))
+        #
+        # Sanity-check args
+        #
 
-        self._names = names
-        self._nodes = nodes
-        self.h5_file = h5py.File(file_path, mode='w+')
+        assert_all_is_instance(inputs, theano.gof.Variable)
+        assert_is_instance(training_monitors, OrderedDict)
+        assert_is_instance(validation_monitors, OrderedDict)
 
-        logs = self.h5_file.create_group("logs")
+        for monitor_dict in (training_monitors, validation_monitors):
+            for key, value in monitor_dict.iteritems():
+                assert_is_instance(key, basestring)
+                assert_is_instance(value, Monitor)
+                assert_equal(len(value._callbacks), 0)
 
-        for name, node in safe_izip(names, nodes):
-            batch_dim = node.output_format.axes.index('b')
+        assert_is_instance(file_path, basestring)
+        assert_parent_dir_exists(file_path)
 
-            initial_shape = list(node.output_format.shape)
-            initial_shape[batch_dim] = 0
+        #
+        # Create the h5 file and add its h5py.Datasets
+        #
 
-            max_shape = list(initial_shape)
-            max_shape[batch_dim] = None
+        def make_callbacks():
+            num_monitored_nodes = 0
 
-            logs.create_dataset(name,
-                                initial_shape,
-                                max_shape=max_shape,
-                                dtype=node.output_symbol.dtype)
+            for monitor_dict in (training_monitors, validation_monitors):
+                for monitor in monitor_dict.itervalues():
+                    num_monitored_nodes += nodes
+                    for callback in monitor._callbacks:
+                        callback_wrapper = lambda
+                    monitor_outputs = monitor._monitored_nodes
 
-        super(EpochLogger, self).__init__(nodes, callbacks=_log_batch)
+        def make_h5_file():
+            h5_file = h5py.File(file_path, mode='w+')
+
+            logs = self.h5_file.create_group("logs")
+
+            log_names = []
+            callbacks = []
+
+            for monitor_dict, dict_name in safe_izip((training_monitors,
+                                                      validation_monitors),
+                                                     ('training',
+                                                      'validation')):
+                for monitor_name, monitor in monitor_dict.iteritems():
+                    monitored_nodes = monitor._monitored_nodes
+                    monitor_callbacks = monitor._callbacks
+
+                    for node_index, node in enumerate(monitored_nodes):
+                        batch_dim = node.output_format.axes.index('b')
+
+                        # initial shape has 0 batch size
+                        initial_shape = list(node.output_format.shape)
+                        initial_shape[batch_dim] = 0
+
+                        # max shape has unlimited batch size
+                        max_shape = list(initial_shape)
+                        max_shape[batch_dim] = None
+
+                        log_name = dict_name + " " + monitor_name
+                        if len(monitor._monitored_nodes) > 1:
+                            log_name += " {}".format(node_index)
+
+                        logs.create_dataset(log_name,
+                                            initial_shape,
+                                            max_shape=max_shape,
+                                            dtype=node.output_symbol.dtype)
+                        log_names.append(log_name)
+
+            # Create ordered list of log names in h5 file
+            max_name_length = max(len(name) for name in log_names)
+            name_dtype = 'S{}'.format(max_name_length)
+            h5_log_names = self.h5_file.create_dataset('log names',
+                                                       len(log_names),
+                                                       dtype=name_dtype)
+            for n, name in enumerate(log_names):
+                h5_log_names[n] = name
+
+        self.h5_file = make_h5_file()
+        callbacks = make_callbacks()
+
+        super(EpochLogger, self).__init__(nodes, callbacks=callbacks)
 
     def _on_epoch(self):
-        # process monitors on training data
+
+        # log validation monitors, call their callbacks... (how do they get logged?)
+        self._validation_callback.on_epoch(self)
+
+        # Superclass' on_epoch calls the testing monitors' callbacks.  Also
+        # calls this monitor's callback, which logs values (again, what about
+        # validation callback vaues?)
         super(EpochLogger, self)._on_epoch(self)
 
 

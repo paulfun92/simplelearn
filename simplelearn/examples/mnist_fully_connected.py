@@ -39,7 +39,9 @@ from simplelearn.training import (SgdParameterUpdater,
                                   LinearlyInterpolatesOverEpochs,
                                   PicklesOnEpoch,
                                   ValidationCallback,
-                                  StopsOnStagnation)
+                                  StopsOnStagnation,
+                                  EpochLogger)
+
 import pdb
 
 
@@ -447,19 +449,19 @@ def main():
     #
 
     misclassification_node = Misclassification(output_node, label_node)
-    mcr_logger = LogsToLists()
+    # mcr_logger = LogsToLists()
     training_stopper = StopsOnStagnation(max_epochs=10,
                                          min_proportional_decrease=0.0)
-    mcr_monitor = AverageMonitor(misclassification_node,
-                                 callbacks=[print_mcr,
-                                            mcr_logger,
-                                            training_stopper])
+    # mcr_monitor = AverageMonitor(misclassification_node,
+    #                              callbacks=[print_mcr,
+    #                                         mcr_logger,
+    #                                         training_stopper])
 
-    # batch callback (monitor)
-    training_loss_logger = LogsToLists()
-    training_loss_monitor = AverageMonitor(loss_node,
-                                           callbacks=[print_loss,
-                                                      training_loss_logger])
+    # # batch callback (monitor)
+    # training_loss_logger = LogsToLists()
+    # training_loss_monitor = AverageMonitor(loss_node,
+    #                                        callbacks=[print_loss,
+    #                                                   training_loss_logger])
 
     # print out 10-D feature vector
     # feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
@@ -467,9 +469,9 @@ def main():
     #                                         callbacks=[print_feature_vector])
 
     # epoch callbacks
-    validation_loss_logger = LogsToLists()
+    # validation_loss_logger = LogsToLists()
 
-    def make_output_filename(args, best=False):
+    def make_output_filename(args, suffix, best=False):
         assert_equal(os.path.splitext(args.output_prefix)[1], "")
         if os.path.isdir(args.output_prefix) and \
            not args.output_prefix.endswith('/'):
@@ -481,36 +483,49 @@ def main():
 
         output_prefix = os.path.join(output_dir, output_prefix)
 
-        return ("%slr-%g_mom-%g_nesterov-%s_bs-%d%s.pkl" %
+        return ("%slr-%g_mom-%g_nesterov-%s_bs-%d%s.%s" %
                 (output_prefix,
                  args.learning_rate,
                  args.initial_momentum,
                  args.nesterov,
                  args.batch_size,
-                 "_best" if best else ""))
+                 "_best" if best else "",
+                 suffix))
+
+    saves_best = SavesAtMinimum(model,
+                                make_output_filename(args, '.pkl', best=True))
+
+    # validation_loss_monitor = AverageMonitor(loss_node,
+    #                                          callbacks=[validation_loss_logger,
+    #                                                     saves_best])
+
+    # validation_callback = ValidationCallback(
+    #     inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
+    #     input_iterator=mnist_validation_iterator,
+    #     monitors=[validation_loss_monitor, mcr_monitor])
+
+    # Put any monitors whose callback values should be logged here.
+    epoch_logger = EpochLogger(
+        inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
+
+        training_monitors=OrderedDict([
+            ("misclassification rate", AverageMonitor(misclassification_node)),
+            ("avg. cross-entropy": AverageMonitor(loss_node))]),
+
+        validation_monitors=OrderedDict([
+            ("misclassification rate", AverageMonitor(
+                misclassification_node,
+                callbacks=[saves_best, training_stopper])),
+            ("avg. cross-entropy", AverageMonitor(loss_node))]),
+
+        file_path=make_output_filename(args, '.h5'))
 
     model = SerializableModel([image_uint8_node], [output_node])
-    saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
+    stuff_to_pickle = OrderedDict([('model', model)])
 
-    validation_loss_monitor = AverageMonitor(loss_node,
-                                             callbacks=[validation_loss_logger,
-                                                        saves_best])
-
-    validation_callback = ValidationCallback(
-        inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
-        input_iterator=mnist_validation_iterator,
-        monitors=[validation_loss_monitor, mcr_monitor])
-
-    trainer = Sgd([image_uint8_node, label_node],
-                  mnist_training.iterator(iterator_type='sequential',
-                                          batch_size=args.batch_size),
-                  parameters,
-                  parameter_updaters,
-                  epoch_callbacks=[training_loss_monitor])
-
-    stuff_to_pickle = OrderedDict(
-        (('model', model),
-         ('validation_loss_logger', validation_loss_logger)))
+    # stuff_to_pickle = OrderedDict(
+    #     (('model', model),
+    #      ('validation_loss_logger', validation_loss_logger)))
 
     # Pickling the trainer doesn't work when there are Dropout nodes.
     # stuff_to_pickle = OrderedDict(
@@ -518,12 +533,25 @@ def main():
     #      ('validation_loss_logger', validation_loss_logger),
     #      ('model', model)))
 
-    trainer.epoch_callbacks += (momentum_updaters +
-                                [PicklesOnEpoch(stuff_to_pickle,
-                                                make_output_filename(args),
-                                                overwrite=False),
-                                 validation_callback,
-                                 LimitsNumEpochs(max_epochs)])
+    trainer = Sgd([image_uint8_node, label_node],
+                  mnist_training.iterator(iterator_type='sequential',
+                                          batch_size=args.batch_size),
+                  parameters,
+                  parameter_updaters,
+                  epoch_callbacks=(momentum_updaters +
+                                   [epoch_logger,
+                                    PicklesOnEpoch(stuff_to_pickle),
+                                    LimitsNumEpochs(max_epochs)]))
+                  # epoch_callbacks=[training_loss_monitor])
+
+
+
+    # trainer.epoch_callbacks += (momentum_updaters +
+    #                             [PicklesOnEpoch(stuff_to_pickle,
+    #                                             make_output_filename(args),
+    #                                             overwrite=False),
+    #                              validation_callback,
+    #                              LimitsNumEpochs(max_epochs)])
 
     trainer.train()
 
