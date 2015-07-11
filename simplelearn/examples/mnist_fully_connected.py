@@ -5,7 +5,6 @@ import argparse
 import numpy
 import theano
 from theano.tensor.shared_randomstreams import RandomStreams
-from collections import OrderedDict
 from nose.tools import (assert_true,
                         assert_is_instance,
                         assert_greater,
@@ -18,8 +17,7 @@ from simplelearn.nodes import (Node,
                                Dropout,
                                CrossEntropy,
                                Misclassification,
-                               SoftmaxLayer,
-                               RescaleImage)
+                               SoftmaxLayer)
 from simplelearn.utils import safe_izip
 from simplelearn.asserts import (assert_all_greater,
                                  assert_all_less_equal,
@@ -30,14 +28,15 @@ from simplelearn.data.mnist import load_mnist
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
-                                  LogsToLists,
+                                  # LogsToLists,
                                   SavesAtMinimum,
                                   MeanOverEpoch,
                                   LimitsNumEpochs,
                                   LinearlyInterpolatesOverEpochs,
-                                  PicklesOnEpoch,
+                                  # PicklesOnEpoch,
                                   ValidationCallback,
-                                  StopsOnStagnation)
+                                  StopsOnStagnation,
+                                  EpochLogger)
 import pdb
 
 
@@ -412,24 +411,7 @@ def main():
     # Makes batch and epoch callbacks
     #
 
-    misclassification_node = Misclassification(output_node, label_node)
-    mcr_logger = LogsToLists()
-    training_stopper = StopsOnStagnation(max_epochs=10,
-                                         min_proportional_decrease=0.0)
-    mcr_monitor = MeanOverEpoch(misclassification_node,
-                                callbacks=[print_mcr,
-                                           mcr_logger,
-                                           training_stopper])
-
-    # batch callback (monitor)
-    training_loss_logger = LogsToLists()
-    training_loss_monitor = MeanOverEpoch(loss_node,
-                                          callbacks=[print_loss,
-                                                     training_loss_logger])
-    # epoch callbacks
-    validation_loss_logger = LogsToLists()
-
-    def make_output_filename(args, best=False):
+    def make_output_basename(args):
         assert_equal(os.path.splitext(args.output_prefix)[1], "")
         if os.path.isdir(args.output_prefix) and \
            not args.output_prefix.endswith('/'):
@@ -441,34 +423,80 @@ def main():
 
         output_prefix = os.path.join(output_dir, output_prefix)
 
-        return ("%slr-%g_mom-%g_nesterov-%s_bs-%d%s.pkl" %
-                (output_prefix,
-                 args.learning_rate,
-                 args.initial_momentum,
-                 args.nesterov,
-                 args.batch_size,
-                 "_best" if best else ""))
+        return "{}lr-{}_mom-{}_nesterov-{}_bs-{}".format(
+            output_prefix,
+            args.learning_rate,
+            args.initial_momentum,
+            args.nesterov,
+            args.batch_size)
+
+    epoch_logger = EpochLogger(make_output_basename(args) + "_log.h5")
+
+    # misclassification_node = Misclassification(output_node, label_node)
+    # mcr_logger = LogsToLists()
+    # training_stopper = StopsOnStagnation(max_epochs=10,
+    #                                      min_proportional_decrease=0.0)
+    misclassification_node = Misclassification(output_node, label_node)
+
+    validation_loss_monitor = MeanOverEpoch(loss_node, callbacks=[])
+    epoch_logger.subscribe_to('validation mean loss', validation_loss_monitor)
+
+    validation_misclassification_monitor = MeanOverEpoch(
+        misclassification_node,
+        callbacks=[print_mcr,
+                   StopsOnStagnation(max_epochs=10,
+                                     min_proportional_decrease=0.0)])
+
+    epoch_logger.subscribe_to('validation misclassification',
+                              validation_misclassification_monitor)
+
+    # batch callback (monitor)
+    # training_loss_logger = LogsToLists()
+    training_loss_monitor = MeanOverEpoch(loss_node, callbacks=[print_loss])
+    epoch_logger.subscribe_to('training mean loss', training_loss_monitor)
+
+    training_misclassification_monitor = MeanOverEpoch(misclassification_node,
+                                                       callbacks=[])
+    epoch_logger.subscribe_to('training misclassification %',
+                              training_misclassification_monitor)
+
+    # epoch callbacks
+    # validation_loss_logger = LogsToLists()
+
+
+    def make_output_filename(args, best=False):
+        basename = make_output_basename(args)
+        return "{}{}.pkl".format(basename, '_best' if best else "")
 
     model = SerializableModel([image_uint8_node], [output_node])
     saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
 
-    validation_loss_monitor = MeanOverEpoch(loss_node,
-                                            callbacks=[validation_loss_logger,
-                                                       saves_best])
+    validation_loss_monitor = MeanOverEpoch(
+        loss_node,
+        callbacks=[saves_best])
+
+    epoch_logger.subscribe_to('validation loss', validation_loss_monitor)
 
     validation_callback = ValidationCallback(
         inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_validation_iterator,
-        epoch_callbacks=[validation_loss_monitor, mcr_monitor])
+        epoch_callbacks=[validation_loss_monitor,
+                         validation_misclassification_monitor])
 
     trainer = Sgd([image_uint8_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
                                           batch_size=args.batch_size),
-                  callbacks=(parameter_updaters + [training_loss_monitor]))
+                  callbacks=(parameter_updaters +
+                             momentum_updaters +
+                             [training_loss_monitor,
+                              training_misclassification_monitor,
+                              validation_callback,
+                              LimitsNumEpochs(max_epochs)]))
+                                                   # validation_loss_monitor]))
 
-    stuff_to_pickle = OrderedDict(
-        (('model', model),
-         ('validation_loss_logger', validation_loss_logger)))
+    # stuff_to_pickle = OrderedDict(
+    #     (('model', model),
+    #      ('validation_loss_logger', validation_loss_logger)))
 
     # Pickling the trainer doesn't work when there are Dropout nodes.
     # stuff_to_pickle = OrderedDict(
@@ -476,12 +504,12 @@ def main():
     #      ('validation_loss_logger', validation_loss_logger),
     #      ('model', model)))
 
-    trainer.epoch_callbacks += (momentum_updaters +
-                                [PicklesOnEpoch(stuff_to_pickle,
-                                                make_output_filename(args),
-                                                overwrite=False),
-                                 validation_callback,
-                                 LimitsNumEpochs(max_epochs)])
+    # trainer.epoch_callbacks += (momentum_updaters +
+    #                             [PicklesOnEpoch(stuff_to_pickle,
+    #                                             make_output_filename(args),
+    #                                             overwrite=False),
+    #                              validation_callback,
+    #                              LimitsNumEpochs(max_epochs)])
 
     trainer.train()
 

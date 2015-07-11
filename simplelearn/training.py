@@ -452,19 +452,6 @@ class IterationCallback(EpochCallback):
         pass  # ok to leave unimplemented
 
 
-class ParameterUpdater(IterationCallback):
-    '''
-    An IterationCallback limited to just updating shared variables.
-    '''
-
-    def __init__(self, update_pairs):
-        assert_greater(len(update_pairs), 0)
-        super(ParameterUpdater, self).__init__(update_pairs=update_pairs)
-
-    def _on_iteration(self, computed_values):
-        assert_equal(len(computed_values), 0)
-
-
 class ReduceOverEpoch(IterationCallback):
     '''
     Superclass of IterationCallbacks like MaxOverEpoch, MeanOverEpoch.
@@ -877,6 +864,19 @@ class LogsToLists(object):
         self.log.append(value)
 
 
+class ParameterUpdater(IterationCallback):
+    '''
+    An IterationCallback limited to just updating shared variables.
+    '''
+
+    def __init__(self, update_pairs):
+        assert_greater(len(update_pairs), 0)
+        super(ParameterUpdater, self).__init__(update_pairs=update_pairs)
+
+    def _on_iteration(self, computed_values):
+        assert_equal(len(computed_values), 0)
+
+
 class SgdParameterUpdater(ParameterUpdater):
     '''
     Defines how to update parameters using SGD with momentum.
@@ -1020,7 +1020,7 @@ def limit_param_norms(parameter_updater, param, max_norm, input_axes):
     Parameters
     ----------
 
-    parameter_updater: simplelearn.training.SgdParameterUpdater
+    parameter_updater: simplelearn.training.ParameterUpdater
       The parameter updater whose updates this will modify.
 
     param: theano shared variable
@@ -1039,7 +1039,7 @@ def limit_param_norms(parameter_updater, param, max_norm, input_axes):
       L2 norm of the updated params.
     '''
 
-    assert_is_instance(parameter_updater, SgdParameterUpdater)
+    assert_is_instance(parameter_updater, ParameterUpdater)
     assert_in(param, parameter_updater.update_pairs)
 
     assert_floating(max_norm)
@@ -1242,3 +1242,69 @@ class Sgd(object):
                 return
             else:
                 raise
+
+class EpochLogger(object):
+
+    def __init__(self, file_path):
+        assert_is_instance(file_path, basestring)
+        assert_parent_dir_exists(file_path)
+
+        self.h5_file = h5py.File(file_path, mode='w')
+        self.h5_file.add_group('logs')
+
+    def subscribe_to(value_name, value_provider):
+        '''
+        Registers this logger to recieve values from a ReduceOverEpoch object.
+
+        Does this by creating a callback function and adding it to
+        the *beginning* of value_provider.calbacks. We add to the beginning
+        to avoid being pre-empted by some other callback that might stop
+        the training.
+
+        Parameters
+        ----------
+        value_name: string
+          Name of this value (e.g. "mean misclassficiation rate").
+
+        value_provider: ReduceOverEpoch
+          Computes some value per epoch, and provides it to its callbacks.
+        '''
+
+        assert_is_instance(value_name, basestring)
+        assert_is_instance(value_provider, ReduceOverEpoch)
+
+        fmt = copy.deepcopy(value_provider.output_format)
+        batch_axis = fmt.axes.index('b')
+
+        def add_dataset(name, group):
+            assert_is_not(fmt.dtype, None)
+
+            max_shape = list(fmt.shape)
+            max_shape[batch_axis] = None
+
+            initial_shape = list(fmt.shape)
+            initial_shape[batch_axis] = 0
+
+            dataset = group.add_dataset(name,
+                                        shape=initial_shape,
+                                        maxshape=max_shape,
+                                        dtype=fmt.dtype)
+
+        log = add_dataset(value_name, self.h5_file['logs'])
+
+        def append_to_log(value_to_log):
+            assert_equal(value_to_log.shape[batch_axis], 1)
+
+            new_size = list(log.shape)
+            new_size[batch_axis] += 1
+            log.resize(new_size)
+
+            new_element_slice = [None] * len(log.shape)
+            new_element_slice[batch_axis] = slice(-1, None)
+            new_element_slice = tuple(new_element_slice)
+
+            log[new_element_slice] = value_to_log
+
+            # for now, don't self.h5file.flush()
+
+        value_provider.callbacks = [append_to_log] + value_provider.callbacks
