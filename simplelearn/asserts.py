@@ -312,11 +312,9 @@ def assert_all_less_equal(arg0, arg1):
                           "Element %d: %s was greater than %s." %
                           (index, elem0, elem1))
 
-def assert_parent_dir_exists(file_path):
-    '''
-    Checks that the file path's parent dir exists.
-    '''
-
-    parent_dir = os.path.split(os.path.abspath(file_path))[0]
-    assert_true(os.path.isdir(parent_dir),
-                "Couldn't find parent directory of '{}'".format(file_path))
+def assert_parent_dir_exists(arg):
+    abspath = os.path.abspath(arg)
+    parent_dir, filename = os.path.split(arg)
+    if not os.path.isdir(parent_dir):
+        raise AssertionError(("Couldn't find parent directory '{}' of file "
+                              "{}.".format(parent_dir, filename)))
