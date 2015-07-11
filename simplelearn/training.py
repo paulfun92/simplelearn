@@ -14,6 +14,7 @@ import copy
 import warnings
 import cPickle
 from collections import Sequence, OrderedDict
+import h5py
 import numpy
 import theano
 import theano.tensor as T
@@ -33,7 +34,8 @@ from simplelearn.asserts import (assert_integer,
                                  assert_all_greater_equal,
                                  assert_all_integer,
                                  assert_is_subdtype,
-                                 assert_all_is_instance)
+                                 assert_all_is_instance,
+                                 assert_parent_dir_exists)
 from simplelearn.data import DataIterator
 from simplelearn.utils import safe_izip
 from simplelearn.formats import DenseFormat
@@ -487,15 +489,17 @@ class ReduceOverEpoch(IterationCallback):
            F(reduction, reduction_format)
 
         reduction_format: DenseFormat
-           The format of self._reduction. If omitted, this is assumed to be the
-           same as per_batch_node.output_format.
+           The format of self._reduction. Must specify dtype.
+           If omitted, this is copied from per_batch_node.output_format, with
+           the dtype set to be the same as node_to_reduce.output_format.dtype.
 
            Example: in SumOverFormat, if the batches have dtype=uint8,
                     reduction_format has dtype=int64, to prevent overflow.
 
         output_format: DenseFormat
            The format of the value passed to the callbacks at the end of each
-           epoch. If omitted, this is assumed to be the same as reduction_format.
+           epoch. Must specify dtype. If omitted, this is assumed to be the
+           same as reduction_format.
 
            Example: in MeanOverFormat, if the batches have integer dtype, the
                     reduction_format (sum over batches) also has integer dtype,
@@ -516,20 +520,25 @@ class ReduceOverEpoch(IterationCallback):
 
         if reduction_format is None:
             reduction_format = node_to_reduce.output_format
+            if reduction_format.dtype is None:
+                reduction_format = copy.deepcopy(reduction_format)
+                reduction_format.dtype = node_to_reduce.output_symbol.dtype
         else:
             assert_is_instance(reduction_format, DenseFormat)
+            assert_is_not(reduction_format.dtype, None)
 
         if output_format is None:
             output_format = reduction_format
         else:
-            assert_is_instance(reduction_format, DenseFormat)
+            assert_is_instance(output_format, DenseFormat)
+            assert_is_not(output_format.dtype, None)
 
         #
         # Done sanity-checking args
         #
 
         self.node_to_reduce = node_to_reduce
-        self._callbacks = callbacks
+        self.callbacks = callbacks
         self.reduction_format = reduction_format
         self.output_format = output_format
         self._reduction = None
@@ -598,24 +607,16 @@ class ReduceOverEpoch(IterationCallback):
         self._reduction = None
 
         self.output_format.check(output)
-        for callback in self._callbacks:
+        for callback in self.callbacks:
             callback(output, self.output_format)
 
     def _on_epoch(self):
         '''
-        Returns the output value to pass to self._callbacks.
+        Returns the output value to pass to self.callbacks.
 
         Override if this value isn't just self._reduction.
         '''
         return self._reduction
-        # raise NotImplementedError("{}._on_epoch() not "
-        #                           "implemented.".format(type(self)))
-
-        # result = self._reduction
-        # self._reduction = None
-
-        # for callback in self._callbacks:
-        #     callback(result, self.reduction_format)
 
 
 class MaxOverEpoch(ReduceOverEpoch):
@@ -1250,9 +1251,9 @@ class EpochLogger(object):
         assert_parent_dir_exists(file_path)
 
         self.h5_file = h5py.File(file_path, mode='w')
-        self.h5_file.add_group('logs')
+        self.h5_file.create_group('logs')
 
-    def subscribe_to(value_name, value_provider):
+    def subscribe_to(self, value_name, value_provider):
         '''
         Registers this logger to recieve values from a ReduceOverEpoch object.
 
@@ -1285,14 +1286,14 @@ class EpochLogger(object):
             initial_shape = list(fmt.shape)
             initial_shape[batch_axis] = 0
 
-            dataset = group.add_dataset(name,
+            return group.create_dataset(name,
                                         shape=initial_shape,
                                         maxshape=max_shape,
                                         dtype=fmt.dtype)
 
         log = add_dataset(value_name, self.h5_file['logs'])
 
-        def append_to_log(value_to_log):
+        def append_to_log(value_to_log, _):  # ignore value_format
             assert_equal(value_to_log.shape[batch_axis], 1)
 
             new_size = list(log.shape)

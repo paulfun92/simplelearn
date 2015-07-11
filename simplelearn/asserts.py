@@ -7,6 +7,7 @@ to import them all as "from simplelearn.asserts import *".
 
 import itertools
 import collections
+import os
 import numpy
 import h5py
 import theano
