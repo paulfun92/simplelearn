@@ -15,7 +15,6 @@ from nose.tools import (assert_true,
 from simplelearn.nodes import (Node,
                                AffineLayer,
                                CastNode,
-                               ReLU,
                                Dropout,
                                CrossEntropy,
                                Misclassification,
@@ -33,8 +32,7 @@ from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
                                   LogsToLists,
                                   SavesAtMinimum,
-                                  Monitor,
-                                  AverageMonitor,
+                                  MeanOverEpoch,
                                   LimitsNumEpochs,
                                   LinearlyInterpolatesOverEpochs,
                                   PicklesOnEpoch,
@@ -214,6 +212,8 @@ def build_fc_classifier(input_node,
       AffineNodes, in order, and output_node is the final node, a Softmax.
     '''
     assert_is_instance(input_node, Node)
+
+    # pylint: disable=no-member
     assert_equal(input_node.output_format.dtype,
                  numpy.dtype(theano.config.floatX))
 
@@ -248,6 +248,8 @@ def build_fc_classifier(input_node,
 
         affine_nodes.append(last_node.affine_node)
 
+    # Not used in this demo, but keeping it in in case we want to start using
+    # it again.
     def init_sparse_bias(shared_variable, num_nonzeros, rng):
         '''
         Mimics the sparse initialization in
@@ -288,18 +290,19 @@ def build_fc_classifier(input_node,
                                  size=num_nonzeros,
                                  replace=False)
 
-            # normal dist with stddev=1.0
-            params[indices, c] = rng.randn(num_nonzeros)
-
-        # TODO: it's somewhat worrisome that the tutorial in
-        # pylearn2.scripts.tutorials.multilayer_perceptron/
-        #   multilayer_perceptron.ipynb
-        # seems to do fine without scaling the weights like this
-        if num_nonzeros > 0:
-            params /= float(num_nonzeros)
-            # Interestingly, while this seems more correct (normalize
-            # columns to norm=1), it prevents the NN from converging.
-            # params /= numpy.sqrt(float(num_nonzeros))
+            # normal dist with stddev=1.0, divided by 255.0
+            #
+            # We need to divide by 255 for convergence. This is because
+            # we're using unnormalized (i.e. 0 to 255) pixel values, unlike the
+            # 0.0-to-1.0 pixels in
+            # pylearn2.scripts.tutorials.multilayer_perceptron/
+            #
+            # We could just do as the above tutorial does and normalize the
+            # pixels to [0.0, 1.0], and not rescale the weights. However,
+            # experiments show that this converges to a higher error, and also
+            # makes mnist_visualizer.py's results look very "staticky", without
+            # any recognizable digit hallucinations.
+            params[indices, c] = rng.randn(num_nonzeros) / 255.0
 
         shared_variable.set_value(params)
 
@@ -326,34 +329,6 @@ def print_feature_vector(values, _):
 
 def print_mcr(values, _):
     print("Misclassification rate: %s" % str(values))
-
-
-# class UpdateNormMonitor(Monitor):
-#     '''
-#     Monitors the norm of parameter updates.
-#     '''
-
-#     def __init__(self, name, update):
-#         update = update.reshape(shape=(1, -1))
-#         update_norm = theano.tensor.sqrt((update ** 2).sum(axis=1))
-
-#         # just something to satisfy the checks of Monitor.__init__.
-#         # Because we overrride on_batch(), this is never used.
-#         dummy_fmt = DenseFormat(axes=('b',),
-#                                 shape=(-1,),
-#                                 dtype=update_norm.dtype)
-#         node = Node(self, [], update_norm, dummy_fmt)
-#         self.name = name
-#         super(UpdateNormMonitor, self).__init__(node, callbacks=[])
-#         # super(UpdateNormMonitor, self).__init__([update_norm],
-#         #                                         [dummy_fmt],
-#         #                                         [])
-
-#     def _on_batch(self, input_batches, monitored_value_batches):
-#         print("%s update norm: %s" % (self.name, str(monitored_value_batches)))
-
-#     def _on_epoch(self):
-#         return tuple()
 
 
 def main():
@@ -433,15 +408,6 @@ def main():
                 args.final_momentum,
                 args.epochs_to_momentum_saturation))
 
-    updates = [updater.updates.values()[0] - updater.updates.keys()[0]
-               for updater in parameter_updaters]
-    # update_norm_monitors = [UpdateNormMonitor("layer %d %s" %
-    #                                           (i // 2,
-    #                                            "weights" if i % 2 == 0 else
-    #                                            "bias"),
-    #                                           update)
-    #                         for i, update in enumerate(updates)]
-
     #
     # Makes batch and epoch callbacks
     #
@@ -450,22 +416,16 @@ def main():
     mcr_logger = LogsToLists()
     training_stopper = StopsOnStagnation(max_epochs=10,
                                          min_proportional_decrease=0.0)
-    mcr_monitor = AverageMonitor(misclassification_node,
-                                 callbacks=[print_mcr,
-                                            mcr_logger,
-                                            training_stopper])
+    mcr_monitor = MeanOverEpoch(misclassification_node,
+                                callbacks=[print_mcr,
+                                           mcr_logger,
+                                           training_stopper])
 
     # batch callback (monitor)
     training_loss_logger = LogsToLists()
-    training_loss_monitor = AverageMonitor(loss_node,
-                                           callbacks=[print_loss,
-                                                      training_loss_logger])
-
-    # print out 10-D feature vector
-    # feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
-    #                                         affine_nodes[-1].output_format,
-    #                                         callbacks=[print_feature_vector])
-
+    training_loss_monitor = MeanOverEpoch(loss_node,
+                                          callbacks=[print_loss,
+                                                     training_loss_logger])
     # epoch callbacks
     validation_loss_logger = LogsToLists()
 
@@ -492,21 +452,19 @@ def main():
     model = SerializableModel([image_uint8_node], [output_node])
     saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
 
-    validation_loss_monitor = AverageMonitor(loss_node,
-                                             callbacks=[validation_loss_logger,
-                                                        saves_best])
+    validation_loss_monitor = MeanOverEpoch(loss_node,
+                                            callbacks=[validation_loss_logger,
+                                                       saves_best])
 
     validation_callback = ValidationCallback(
         inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_validation_iterator,
-        monitors=[validation_loss_monitor, mcr_monitor])
+        epoch_callbacks=[validation_loss_monitor, mcr_monitor])
 
     trainer = Sgd([image_uint8_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
                                           batch_size=args.batch_size),
-                  parameters,
-                  parameter_updaters,
-                  epoch_callbacks=[training_loss_monitor])
+                  callbacks=(parameter_updaters + [training_loss_monitor]))
 
     stuff_to_pickle = OrderedDict(
         (('model', model),
