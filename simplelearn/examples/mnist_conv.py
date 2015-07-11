@@ -40,7 +40,7 @@ from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
                                   LogsToLists,
                                   SavesAtMinimum,
-                                  AverageMonitor,
+                                  MeanOverEpoch,
                                   EpochCallback,
                                   LimitsNumEpochs,
                                   LinearlyInterpolatesOverEpochs,
@@ -529,7 +529,7 @@ def main():
                      momentum_updaters)
         if args.max_col_norm != numpy.inf:
             limit_param_norms(parameter_updater=parameter_updaters[-1],
-                              params=weights,
+                              param=weights,
                               max_norm=args.max_col_norm,
                               input_axes=[0])
 
@@ -546,29 +546,24 @@ def main():
 
     def make_misclassification_monitor():
         '''
-        Returns an AverageMonitor of the misclassification rate.
+        Returns an MeanOverEpoch of the misclassification rate.
         '''
         misclassification_node = Misclassification(output_node, label_node)
         mcr_logger = LogsToLists()
         training_stopper = StopsOnStagnation(max_epochs=10,
                                              min_proportional_decrease=0.0)
-        return AverageMonitor(misclassification_node,
-                              callbacks=[print_misclassification_rate,
-                                         mcr_logger,
-                                         training_stopper])
+        return MeanOverEpoch(misclassification_node,
+                             callbacks=[print_misclassification_rate,
+                                        mcr_logger,
+                                        training_stopper])
 
     mcr_monitor = make_misclassification_monitor()
 
     # batch callback (monitor)
     training_loss_logger = LogsToLists()
-    training_loss_monitor = AverageMonitor(loss_node,
-                                           callbacks=[print_loss,
-                                                      training_loss_logger])
-
-    # print out 10-D feature vector
-    # feature_vector_monitor = AverageMonitor(affine_nodes[-1].output_symbol,
-    #                                         affine_nodes[-1].output_format,
-    #                                         callbacks=[print_feature_vector])
+    training_loss_monitor = MeanOverEpoch(loss_node,
+                                          callbacks=[print_loss,
+                                                     training_loss_logger])
 
     # epoch callbacks
     validation_loss_logger = LogsToLists()
@@ -601,23 +596,21 @@ def main():
     model = SerializableModel([image_uint8_node], [output_node])
     saves_best = SavesAtMinimum(model, make_output_filename(args, best=True))
 
-    validation_loss_monitor = AverageMonitor(loss_node,
-                                             callbacks=[validation_loss_logger,
-                                                        saves_best])
+    validation_loss_monitor = MeanOverEpoch(loss_node,
+                                            callbacks=[validation_loss_logger,
+                                                       saves_best])
 
     validation_callback = ValidationCallback(
         inputs=[image_uint8_node.output_symbol, label_node.output_symbol],
         input_iterator=mnist_validation_iterator,
-        monitors=[validation_loss_monitor, mcr_monitor])
+        epoch_callbacks=[validation_loss_monitor, mcr_monitor])
 
     # trainer = Sgd((image_node.output_symbol, label_node.output_symbol),
     trainer = Sgd([image_uint8_node, label_node],
                   mnist_training.iterator(iterator_type='sequential',
                                           loop_style='divisible',
                                           batch_size=args.batch_size),
-                  parameters,
-                  parameter_updaters,
-                  epoch_callbacks=[training_loss_monitor])
+                  callbacks=(parameter_updaters + [training_loss_monitor]))
 
     stuff_to_pickle = OrderedDict(
         (('model', model),

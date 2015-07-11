@@ -816,10 +816,10 @@ class SumOverEpoch(ReduceOverEpoch):
         # thing being summed is of a lesser precision integral type. This is
         # exactly what we want, but we need to adjust the reduction_format's
         # dtype accordingly.
-        batch_dtype = node.output_symbol.dtype
+        batch_dtype = numpy.dtype(node.output_symbol.dtype)
 
         if numpy.issubdtype(batch_dtype, numpy.integer) and \
-           batch.dtype.itemsize < numpy.dtype('int').itemsize:
+           batch_dtype.itemsize < numpy.dtype('int').itemsize:
 
             reduction_format = copy.deepcopy(node.output_format)
             reduction_format.dtype = numpy.dtype('int')
@@ -1110,7 +1110,7 @@ class LogsToLists(object):
         if self.log is None:
             self.log = list()
 
-        log.append(value)
+        self.log.append(value)
 
 
 class SgdParameterUpdater(ParameterUpdater):
