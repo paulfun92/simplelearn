@@ -465,138 +465,6 @@ class ParameterUpdater(IterationCallback):
         assert_equal(len(computed_values), 0)
 
 
-# class Monitor(IterationCallback):
-#     '''
-#     Monitors some value over an epoch (e.g. average loss)
-#     '''
-#     # On each epoch, this reports statistics about some monitored value Y.
-
-#     # Examples: Y might be the output of layer 3 of a 6-layer net.
-
-#     #           MaxMonitor reports the elementwise maximum of Y encountered
-#     #           over the epoch.
-
-#     #           AverageMonitor reports Y, elementwise-averaged over the epoch.
-#     # '''
-
-#     def __init__(self, nodes_to_monitor, callbacks):
-#         '''
-#         Parameters
-#         ----------
-#         nodes_to_monitor: Sequence of Nodes.
-#           Nodes whose values you want to monitor. These must lie upstream
-#           in the computational graph from the data iterator's nodes.
-
-#           Must not be empty.
-
-#         callbacks: a __call__-able, or a Sequence of them.
-
-#           The call signature of these must be f(values, formats), where:
-
-#           values: Sequence of numpy.ndarrays
-#             The values computed by nodes_to_monitor.
-
-#           formats: Sequence of DenseFormats
-#             The corresponding formats of the above values.
-#         '''
-
-#         #
-#         # Checks args
-#         #
-
-#         if isinstance(nodes_to_monitor, Node):
-#             nodes_to_monitor = [nodes_to_monitor]
-#         else:
-#             nodes_to_monitor = tuple(nodes_to_monitor)
-#             assert_all_is_instance(nodes_to_monitor, Node)
-
-#         assert_equal(len(nodes_to_monitor), len(frozenset(nodes_to_monitor)),
-#                      "nodes_to_monitor contains repeated elements: %s" %
-#                      str(nodes_to_monitor))
-
-#         if not isinstance(callbacks, Sequence):
-#             callbacks = [callbacks]
-#         else:
-#             callbacks = tuple(callbacks)
-
-#         for callback in callbacks:
-#             assert_true(callable(callback))
-
-#         #
-#         # Sets members
-#         #
-
-#         self._monitored_nodes = nodes_to_monitor
-#         self._callbacks = callbacks
-
-#     def on_batch(self, input_batches, monitored_value_batches):
-#         '''
-#         Updates the values to report at the end of the epoch.
-
-#         Parameters
-#         ----------
-#         input_batches: Sequence of numpy.ndarrays
-#           The input batches coming in from the dataset's iterator.
-#           Typically these are (values, labels)
-
-#         monitored_value_batches: Sequence of numpy.ndarrays
-#           The numerical values, for this batch, of the values_to_monitor
-#           arguments to __init__().
-#         '''
-#         assert_equal(len(monitored_value_batches),
-#                      len(self._monitored_nodes))
-
-#         for batch, node in safe_izip(monitored_value_batches,
-#                                      self._monitored_nodes):
-#             node.output_format.check(batch)
-
-#         self._on_batch(tuple(input_batches), tuple(monitored_value_batches))
-
-#     def _on_batch(self, input_batches, monitored_value_batches):
-#         '''
-#         Implementation of self.on_batch(). See that method's docs.
-
-#         Parameters
-#         ----------
-#         input_batches: tuple of numpy.ndarrays.
-
-#         monitored_value_batches: tuple of numpy.ndarrays.
-#         '''
-#         raise NotImplementedError("%s._on_batch() not yet implemented." %
-#                                   type(self))
-
-#     def on_start_training(self):
-#         pass
-
-#     def on_epoch(self):
-#         '''
-#         Feeds monitored values to self._callbacks
-#         '''
-#         # compute values to report
-#         values_to_report = self._on_epoch()
-
-#         if not isinstance(values_to_report, tuple):
-#             raise ValueError("%s._on_epoch() implemented incorrectly. It "
-#                              "should return a tuple, but it returned %s."
-#                              % (type(self), type(values_to_report)))
-
-#         for callback in self._callbacks:
-#             formats = [node.output_format for node in self._monitored_nodes]
-#             callback(values_to_report, formats)
-
-#     def _on_epoch(self):
-#         '''
-#         Returns a tuple of values to feed to self._callbacks as arguments.
-
-#         Returns
-#         -------
-#         rval: tuple of numpy.ndarrays
-#            Arguments to feed to self._callbacks' __call__(self, *args)
-#         '''
-#         raise NotImplementedError("%s._on_epoch() not yet implemented" %
-#                                   type(self))
-
-
 class ReduceOverEpoch(IterationCallback):
     '''
     Superclass of IterationCallbacks like MaxOverEpoch, MeanOverEpoch.
@@ -792,16 +660,6 @@ class MinOverEpoch(ReduceOverEpoch):
         super(MinOverEpoch, self).__init__(node, callbacks)
         self._reduce = numpy.min
 
-    # def _update_reduction(self, batch, reduction):
-    #     batch_axis = self.nodes_to_compute[0].axes.index('b')
-
-    #     if reduction is None:
-    #         stack = batch
-    #     else:
-    #         stack = numpy.concatenate((batch, reduction), axis=batch_axis)
-
-    #     return numpy.min(stack, axis=batch_axis, keepdims=True)
-
 
 class SumOverEpoch(ReduceOverEpoch):
     '''
@@ -834,32 +692,6 @@ class SumOverEpoch(ReduceOverEpoch):
         self._reduce = numpy.sum
 
 
-        # self._count = None
-
-
-    # def _update_reduction(self, batch, fmt, old_reduction):
-    #     def is_small_int(dtype):
-    #         dtype = numpy.dtype(dtype)
-    #         return (numpy.issubdtype(dtype, numpy.integer) and
-    #                 dtype.itemsize < numpy.dtype('int').itemsize)
-
-    #     # Upcast small int dtypes to int, to avoid overflow.
-    #     if is_small_int(batch.dtype):
-    #         batch = numpy.cast['int'](batch)
-
-    #         if old_reduction is not None:
-    #             assert_equal(old_reduction.dtype, numpy.dtype('int'))
-
-    #     batch_axis = fmt.axes.index('b')
-
-    #     if old_reduction is None:
-    #         stack = batch
-    #     else:
-    #         stack = numpy.concatenate((batch, old_reduction), axis=batch_axis)
-
-    #     return numpy.sum(stack, axis=batch_axis, keepdims=True)
-
-
 class MeanOverEpoch(SumOverEpoch):
     '''
     Computes the elementwise mean of monitored values over the batch axis.
@@ -888,19 +720,6 @@ class MeanOverEpoch(SumOverEpoch):
         assert_equal(len(batches_to_reduce), 1)
         self._count += batches_to_reduce[0].shape[batch_axis]
 
-        # batch_sizes = []
-        # for (monitored_value_batch,
-        #      monitored_node) in safe_izip(monitored_value_batches,
-        #                                   self._monitored_nodes):
-        #     batch_axis = monitored_node.output_format.axes.index('b')
-        #     batch_sizes.append(monitored_value_batch.shape[batch_axis])
-
-        # batch_sizes = numpy.asarray(batch_sizes)
-
-        # assert_true(numpy.all(batch_sizes[0] == batch_sizes[1:]),
-        #             "Unequal batch sizes: %s" % str(batch_sizes))
-        # self._count += batch_sizes[0]
-
     def _on_epoch(self):
         total = super(MeanOverEpoch, self)._on_epoch()
         mean = total / float(self._count)
@@ -926,8 +745,6 @@ class DoesSomethingAtMinimum(object):
 
         assert_is_instance(fmt, DenseFormat)
         assert_equal(fmt.axes, ('b',))
-
-        # old_min_value = self._min_value
 
         if self._min_value is None or value < self._min_value:
             self._min_value = value
@@ -973,33 +790,6 @@ class SavesAtMinimum(DoesSomethingAtMinimum):
         cPickle.dump(self._object_to_save,
                      pickle_file,
                      protocol=cPickle.HIGHEST_PROTOCOL)
-
-    # def __call__(self, value, fmt):
-    #     assert_is_instance(value, numpy.ndarray)
-    #     assert_equal(value.shape, (1, ))
-    #     value = value[0]
-
-    #     assert_is_instance(fmt, DenseFormat)
-    #     assert_equal(fmt.axes, ('b',))
-    #     # assert_equal(len(values), 1)
-    #     # assert_equal(len(values), len(formats))
-
-    #     # fmt = formats[0]
-    #     # assert_equal(fmt.axes, ('b', ))
-
-    #     # assert_equal(values[0].shape, (1, ))
-    #     # value = values[0][0]
-
-    #     old_min_value = self._min_value
-
-    #     if self._min_value is None or value < self._min_value:
-    #         self._min_value = value
-
-    #     if old_min_value != self._min_value:
-    #         pickle_file = file(self._output_filepath, 'wb')
-    #         cPickle.dump(self._object_to_save,
-    #                      pickle_file,
-    #                      protocol=cPickle.HIGHEST_PROTOCOL)
 
 
 class StopsOnStagnation(DoesSomethingAtMinimum):
@@ -1072,29 +862,6 @@ class StopsOnStagnation(DoesSomethingAtMinimum):
             raise StopTraining("ok", message)
 
 
-
-        # fmt = formats[0]
-        # assert_equal(fmt.axes, ('b', ))
-
-        # assert_equal(values[0].shape, (1, ))
-        # value = values[0][0]
-
-        # if self._min_value is None or \
-        #    value < (1.0 - self._min_proportional_decrease) * self._min_value:
-        #     self._epochs_since_min = 0
-        #     self._min_value = value
-        # else:
-        #     self._epochs_since_min += 1
-
-        # if self._epochs_since_min >= self._max_epochs_since_min:
-        #     message = ("{} stopping training. Value did not lower by "
-        #                "a fraction exceeding {} for {} epochs.".format(
-        #                    self._min_proportional_decrease,
-        #                    self._min_value,
-        #                    self._epochs_since_min))
-
-        #     raise StopTraining("ok", message)
-
 # TODO: replace with EpochLogger
 class LogsToLists(object):
     '''
@@ -1104,9 +871,6 @@ class LogsToLists(object):
         self.log = None
 
     def __call__(self, value, fmt):
-        # assert_equal(len(values), len(formats))
-        # assert_greater(len(values), 0)
-
         if self.log is None:
             self.log = list()
 
@@ -1356,23 +1120,6 @@ class Sgd(object):
                                           input_iterator.make_input_nodes()):
             assert_equal(input.output_format, iterator_input.output_format)
 
-        # assert_is_instance(parameter_updaters, Sequence)
-        # assert_all_is_instance(parameter_updaters, ParameterUpdater)
-        # for parameter_updater in parameter_updaters:
-        #     assert_is_instace(parameter_updater, IterationCallback)
-        #     assert_equal(len(parameter_updater.nodes_to_compute), 0)
-        # assert_all_is_instance(parameter_updaters, IterationCallback)
-
-        # assert_is_instance(parameters, Sequence)
-        # assert_is_instance(parameter_updaters, Sequence)
-        # for parameter, updater in safe_izip(parameters, parameter_updaters):
-        #     assert_is_instance(parameter,
-        #                        theano.tensor.sharedvar.SharedVariable)
-
-        #     assert_is_instance(updater, SgdParameterUpdater)
-
-        #     assert_in(parameter, updater.updates)
-
         assert_equal(len(callbacks),
                      len(frozenset(callbacks)),
                      "There were duplicate callbacks.")
@@ -1385,8 +1132,6 @@ class Sgd(object):
 
         self._inputs = inputs
         self._input_iterator = input_iterator
-        # self._parameters = tuple(parameters)
-        # self._parameter_updaters = tuple(parameter_updaters)
         self._theano_function_mode = theano_function_mode
         self.epoch_callbacks = list(callbacks)
         self._train_called = False
