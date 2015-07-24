@@ -7,6 +7,7 @@ to import them all as "from simplelearn.asserts import *".
 
 import itertools
 import collections
+import os
 import numpy
 import h5py
 import theano
@@ -311,3 +312,10 @@ def assert_all_less_equal(arg0, arg1):
                           elem1,
                           "Element %d: %s was greater than %s." %
                           (index, elem0, elem1))
+
+def assert_parent_dir_exists(arg):
+    abspath = os.path.abspath(arg)
+    parent_dir, filename = os.path.split(arg)
+    if not os.path.isdir(parent_dir):
+        raise AssertionError(("Couldn't find parent directory '{}' of file "
+                              "{}.".format(parent_dir, filename)))

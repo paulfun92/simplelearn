@@ -168,11 +168,9 @@ def main():
                 use_nesterov=args.nesterov)
 
             sgd = Sgd(inputs=[],
-                      parameters=[shared_input_float],
-                      parameter_updaters=[param_updater],
                       input_iterator=DummyIterator(),
-                      monitors=[],
-                      epoch_callbacks=[LimitsNumEpochs(args.max_iterations)])
+                      callbacks=[param_updater,
+                                 LimitsNumEpochs(args.max_iterations)])
 
             shared_input_float.set_value(float_image)
             shared_label.set_value(numpy.asarray([i],
@@ -206,7 +204,7 @@ def main():
         # original signal, and doesn't make progress (comment out to see).
         float_image /= 255.0
 
-        normalize_images = False
+        normalize_images = True
         norm = (None if normalize_images
                 else matplotlib.colors.NoNorm())
 

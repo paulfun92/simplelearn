@@ -24,10 +24,10 @@ from simplelearn.data.dataset import Dataset
 from simplelearn.formats import DenseFormat
 from simplelearn.training import (SgdParameterUpdater,
                                   Sgd,
+                                  IterationCallback,
                                   LimitsNumEpochs,
                                   LogsToLists,
-                                  Monitor,
-                                  AverageMonitor,
+                                  MeanOverEpoch,
                                   ValidationCallback,
                                   StopsOnStagnation)
 import pdb
@@ -115,7 +115,7 @@ def main():
 
     args = parse_args()
 
-    # pylint: disable=invalid-name
+    # pylint: disable=invalid-name, no-member
     floatX = numpy.dtype(theano.config.floatX)
 
     def affine_transform(matrix, bias, inputs):
@@ -248,6 +248,7 @@ def main():
                                  samples_per_dimension)
                   for i in range(2))
 
+        # pylint: disable=unbalanced-tuple-unpacking
         grid_xs, grid_ys = numpy.meshgrid(xs, ys)
 
         inputs = numpy.vstack((grid_xs.flat, grid_ys.flat)).T
@@ -357,18 +358,19 @@ def main():
                                                  color=[1, .5, .5, .5])
         return model_surface
 
-    class Replotter(Monitor):
+    class Replotter(IterationCallback):
         '''
         Callback that replots the model surface after each batch.
         '''
 
         def __init__(self):
-            super(Replotter, self).__init__([], [], [])
+            super(Replotter, self).__init__()
             self.model_surface = [plot_model_surface()]
             self.logger_plots = []
             points_axes.set_title("Hit space to optimize. q to quit.")
 
-        def _on_batch(self, input_batches, monitored_value_batches):
+        def _on_iteration(self, computed_values):
+            assert_equal(len(computed_values), 0)
 
             if len(self.model_surface) > 0:
                 self.model_surface[0].remove()
@@ -385,7 +387,7 @@ def main():
 
             figure.canvas.draw()
 
-        def _on_epoch(self):
+        def on_epoch(self):
             for plot in self.logger_plots:
                 plot.remove()
 
@@ -398,8 +400,8 @@ def main():
                     values,
                     '%s-' % color))
 
-            plot_log(training_loss_logger.logs[0], 'b')
-            plot_log(validation_loss_logger.logs[0], 'r')
+            plot_log(training_loss_logger.log, 'b')
+            plot_log(validation_loss_logger.log, 'r')
 
             logger_axes.legend(self.logger_plots, ["train loss", "test loss"])
             return ()
@@ -408,31 +410,28 @@ def main():
 
     input_symbols = [n.output_symbol for n in (input_node, label_node)]
 
-    training_loss_monitor = AverageMonitor(loss_node.output_symbol,
-                                           loss_node.output_format,
-                                           callbacks=[training_loss_logger])
+    training_loss_monitor = MeanOverEpoch(loss_node,
+                                          callbacks=[training_loss_logger])
 
     training_stopper = StopsOnStagnation(max_epochs=10,
                                          min_proportional_decrease=.01)
-    validation_loss_monitor = AverageMonitor(
-        loss_node.output_symbol,
-        loss_node.output_format,
-        callbacks=[validation_loss_logger, training_stopper])
+    validation_loss_monitor = MeanOverEpoch(loss_node,
+                                            callbacks=[validation_loss_logger,
+                                                       training_stopper])
 
     validation_callback = ValidationCallback(
         inputs=input_symbols,
         input_iterator=testing_set.iterator(
             iterator_type='sequential',
             batch_size=testing_inputs.shape[0]),
-        monitors=[validation_loss_monitor])
+        epoch_callbacks=[validation_loss_monitor])
 
     sgd = Sgd(inputs=[input_node, label_node],
               input_iterator=training_iterator,
-              parameters=[affine_node.linear_node.params,
-                          affine_node.bias_node.params],
-              parameter_updaters=parameter_updaters,
-              monitors=[training_loss_monitor, Replotter()],
-              epoch_callbacks=[LimitsNumEpochs(100), validation_callback])
+              callbacks=(parameter_updaters + [training_loss_monitor,
+                                               Replotter(),
+                                               LimitsNumEpochs(100),
+                                               validation_callback]))
 
     def on_key_press(event):
         '''

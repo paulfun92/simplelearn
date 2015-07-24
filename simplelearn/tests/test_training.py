@@ -13,7 +13,10 @@ import numpy
 from numpy.testing import assert_allclose, assert_almost_equal
 import theano
 import theano.tensor as T
-from nose.tools import (assert_equal, assert_raises_regexp, assert_is_instance)
+from nose.tools import (assert_true, 
+                        assert_equal, 
+                        assert_raises_regexp,
+                        assert_is_instance)
 from simplelearn.utils import safe_izip
 from simplelearn.training import (StopsOnStagnation,
                                   StopTraining,
@@ -23,8 +26,7 @@ from simplelearn.training import (StopsOnStagnation,
                                   SgdParameterUpdater,
                                   limit_param_norms,
                                   Sgd,
-                                  Monitor,
-                                  AverageMonitor,
+                                  MeanOverEpoch,
                                   EpochCallback)
 from simplelearn.formats import DenseFormat
 from simplelearn.nodes import Node
@@ -56,7 +58,7 @@ class L2Norm(Node):
                                      output_format)
 
 
-def test_average_monitor():
+def test_mean_over_epoch():
 
     rng = numpy.random.RandomState(3851)
 
@@ -72,7 +74,7 @@ def test_average_monitor():
 
     num_averages_compared = [0]
 
-    def compare_with_expected_average(values, _):  # ignore formats arg
+    def compare_with_expected_average(values, _):  # ignore format argument
         assert_equal(len(values), 1)
         average = values[0]
 
@@ -83,9 +85,8 @@ def test_average_monitor():
         assert_allclose(average, expected_average)
         num_averages_compared[0] += 1
 
-    average_monitor = AverageMonitor([l2_norm_node.output_symbol],
-                                     [l2_norm_node.output_format],
-                                     [compare_with_expected_average])
+    average_monitor = MeanOverEpoch(l2_norm_node,
+                                    [compare_with_expected_average])
 
     class DatasetRandomizer(EpochCallback):
         '''
@@ -100,11 +101,9 @@ def test_average_monitor():
 
     trainer = Sgd([input_node],
                   iterator,
-                  parameters=[],
-                  parameter_updaters=[],
-                  monitors=[average_monitor],
-                  epoch_callbacks=[LimitsNumEpochs(3),
-                                   DatasetRandomizer()])
+                  callbacks=[average_monitor,
+                             LimitsNumEpochs(3),
+                             DatasetRandomizer()])
 
     trainer.train()
 
@@ -145,30 +144,18 @@ def test_stops_on_stagnation():
                                             min_proportional_decrease)
     fmt = DenseFormat(axes=['b'], shape=[-1], dtype=None)
 
+    training_stopped = False
     try:
         for value in values:
             index += 1
-            stops_on_stagnation([value], [fmt])
+            stops_on_stagnation(value, fmt)
     except StopTraining, st:
         assert_equal(index, kink_index + num_epochs)
         assert_equal(st.status, 'ok')
         assert "Value did not lower" in st.message
+        training_stopped = True
 
-
-class WeightMonitor(Monitor):
-
-    def __init__(self, weights, callbacks):
-        fmt = DenseFormat(axes=[str(d) for d in range(weights.ndim)],
-                          shape=weights.get_value().shape,
-                          dtype=weights.dtype)
-        super(WeightMonitor, self).__init__(weights, fmt, callbacks)
-
-    def _on_batch(self, input_batches, monitored_value_batches):
-        pass
-
-    def _on_epoch(self):
-        assert_equal(len(self.monitored_values), 1)
-        return (self.monitored_values[0], )
+    assert_true(training_stopped)
 
 
 def test_limit_param_norms():
@@ -272,20 +259,12 @@ def test_limit_param_norms():
         limit_param_norms(param_updater, weights, max_norm, input_axes)
 
         stops_on_stagnation = StopsOnStagnation(max_epochs=10)
-        average_cost_monitor = AverageMonitor(costs_node.output_symbol,
-                                              costs_node.output_format,
-                                              callbacks=[stops_on_stagnation])
-                                              # callbacks=[stops_on_stagnation,
-                                              #            print_cost])
-        # weight_monitor = WeightMonitor(weights, [print_weight_norm])
+        average_cost_monitor = MeanOverEpoch(costs_node,
+                                             callbacks=[stops_on_stagnation])
 
         sgd = Sgd(inputs=input_nodes,
                   input_iterator=training_iterator,
-                  parameters=[weights],
-                  parameter_updaters=[param_updater],
-                  monitors=[average_cost_monitor],
-                  # monitors=[average_cost_monitor, weight_monitor],
-                  epoch_callbacks=[])
+                  callbacks=[param_updater, average_cost_monitor])
         sgd.train()
 
         weight_norm = numpy.sqrt((weights.get_value() ** 2.0).sum())

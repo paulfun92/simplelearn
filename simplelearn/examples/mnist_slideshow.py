@@ -60,10 +60,10 @@ def main():
 
         image_axes.imshow(image, cmap='gray')
 
-        image_num = index[0] % dataset.size
+        image_num = index[0] % dataset.num_examples()
 
         image_axes.set_title('label: %d (%d of %d)' %
-                             (label, image_num + 1, dataset.size))
+                             (label, image_num + 1, dataset.num_examples()))
 
         figure.canvas.draw()
         index[0] += 1

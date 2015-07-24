@@ -10,21 +10,21 @@ import numpy
 import theano
 from matplotlib import pyplot
 from nose.tools import (assert_equal,
-                        assert_is_not,
                         assert_greater,
-                        assert_greater_equal,
-                        assert_is_instance)
+                        assert_greater_equal)
 from simplelearn.utils import safe_izip
-from simplelearn.data import DataIterator, DummyIterator
+from simplelearn.data import DummyIterator
 from simplelearn.formats import DenseFormat
-from simplelearn.training import (Monitor,
-                                  AverageMonitor,
+from simplelearn.nodes import Node
+from simplelearn.training import (MeanOverEpoch,
                                   LogsToLists,
                                   LimitsNumEpochs,
                                   StopsOnStagnation,
                                   SgdParameterUpdater,
                                   Sgd)
 import pdb
+
+floatX = theano.config.floatX  # pylint: disable=no-member
 
 
 def parse_args():
@@ -105,51 +105,6 @@ def parse_args():
     return result
 
 
-class RecordingMonitor(Monitor):
-    '''
-    Logs the values of given symbolic expressions on each training batch.
-    '''
-
-    def __init__(self, values_to_record, formats, callbacks):
-        super(RecordingMonitor, self).__init__(values_to_record,
-                                               formats,
-                                               callbacks)
-        self.logs = None
-        self.epoch_start_indices = None
-        # self.clear()  # initializes logs, epoch_start_indices
-
-    def _on_batch(self, _, value_batches):
-        assert_greater(len(value_batches), 0)
-        self.num_batches += 1
-
-        if self.logs is None:
-            self.logs = [[batch] for batch in value_batches]
-        else:
-            for log, batch in safe_izip(self.logs, value_batches):
-                log.append(batch)
-
-    # def on_start_training(self):
-    #     self.on_epoch()
-
-    def _on_epoch(self):
-        if self.logs is not None:
-            self.epoch_start_indices.append(len(self.logs[0]))
-
-    # def clear(self):
-    def on_start_training(self):
-        '''
-        Resets the logs.
-        '''
-        self.logs = None
-
-        # Note that these are batch indices, NOT example indices.
-        self.epoch_start_indices = [0]
-
-        self.num_batches = 0
-
-        self.on_epoch()
-
-
 def matrix_weighted_norm(covariance, batch_of_vectors):
     '''
     Returns v^T C v for a batch of vectors v.
@@ -188,10 +143,6 @@ def create_cost_batch(singular_values, angle, point):
     angle: float
       Rotation angle of the energy basin.
     '''
-    # assert_op = theano.tensor.opt.Assert()
-    # eq_op = theano.tensor.eq
-
-    # point = assert_op(point, eq_op(point.ndim, 2))
     assert_equal(point.ndim, 2)
     covariance = numpy.diag(singular_values)
 
@@ -208,7 +159,7 @@ def create_cost_batch(singular_values, angle, point):
                            numpy.dot(covariance, rotation_matrix.T))
 
     batch_of_costs = matrix_weighted_norm(covariance, point)
-    return theano.tensor.cast(batch_of_costs, theano.config.floatX)
+    return theano.tensor.cast(batch_of_costs, floatX)
 
 
 def optimize_without_trainer(point, update_function, num_iterations):
@@ -226,21 +177,30 @@ def optimize_without_trainer(point, update_function, num_iterations):
     return outputs
 
 
-def optimize_with_trainer(trainer, logger, formats):
+def optimize_with_trainer(trainer,
+                          point_logger,
+                          loss_logger,
+                          point_format,
+                          loss_format):
     trainer.train()
 
-    point_log, cost_log = (numpy.concatenate(log, axis=fmt.axes.index('b'))
-                           for log, fmt
-                           in safe_izip(logger.logs, formats))
+    point_log, cost_log = (numpy.concatenate(logger.log,
+                                             axis=fmt.axes.index('b'))
+                           for logger, fmt
+                           in safe_izip([point_logger, loss_logger],
+                                        [point_format, loss_format]))
 
     cost_log = cost_log[:, numpy.newaxis]
-    return numpy.hstack((point_log, cost_log))
+    try:
+        return numpy.hstack((point_log, cost_log))
+    except ValueError:
+        pdb.set_trace()
 
 
 def main():
     args = parse_args()
 
-    point = theano.shared(numpy.zeros((1, 2), dtype=theano.config.floatX))
+    point = theano.shared(numpy.zeros((1, 2), dtype=floatX))
     cost_batch = create_cost_batch(singular_values=args.singular_values,
                                    angle=args.angle,
                                    point=point)
@@ -251,12 +211,11 @@ def main():
     # can't use shared variable <point> as an explicit input to a function;
     # must tell it to replace the shared variable's value with some non-shared
     # variable's
-    non_shared_point = theano.tensor.matrix(dtype=theano.config.floatX)
+    non_shared_point = theano.tensor.matrix(dtype=floatX)
     cost_function = theano.function([non_shared_point, ],
                                     cost_batch,
                                     givens=[(point, non_shared_point)])
 
-    floatX = numpy.dtype(theano.config.floatX)
     cast_to_floatX = numpy.cast[floatX]
 
     learning_rates = cast_to_floatX(numpy.linspace(args.lambda_range[0],
@@ -300,8 +259,9 @@ def main():
         grid_x = numpy.linspace(-max_x, max_x, 20)
         grid_y = numpy.linspace(-max_y, max_y, 20)
 
+        # pylint: disable=unbalanced-tuple-unpacking
         x_grid, y_grid = numpy.meshgrid(grid_x, grid_y)
-        cast_to_floatX = numpy.cast[theano.config.floatX]
+        cast_to_floatX = numpy.cast[floatX]
         x_grid, y_grid = (cast_to_floatX(a) for a in (x_grid, y_grid))
 
         xys = numpy.vstack((x_grid.flat, y_grid.flat)).T
@@ -311,7 +271,7 @@ def main():
 
         return tuple(cast_to_floatX(a) for a in result)
 
-    initial_point = numpy.array([1.3, .5], dtype=theano.config.floatX)
+    initial_point = numpy.array([1.3, .5], dtype=floatX)
     aspect_ratio = float(figsize[1]) / float(figsize[0])
     aspect_ratio *= (float(len(momenta)) / float(len(learning_rates)))
     x_limit = numpy.sqrt((initial_point ** 2).sum()) * 2.0
@@ -344,45 +304,54 @@ def main():
                 point.set_value(initial_point[numpy.newaxis, :])
 
                 if args.use_trainer:
-                    cost_format = DenseFormat(axes=['b'],
-                                              shape=[-1],
-                                              dtype=floatX)
-
-                    loss_monitor = AverageMonitor(
-                        cost_batch,
-                        cost_format,
-                        StopsOnStagnation(
-                            max_epochs=args.stagnation_iters,
-                            min_proportional_decrease=args.stagnation_threshold))
-
                     point_format = DenseFormat(axes=['b', 'f'],
                                                shape=[-1, 2],
                                                dtype=floatX)
+                    point_node = Node(input_nodes=[],
+                                      output_symbol=point,
+                                      output_format=point_format)
 
-                    logger = LogsToLists()
-                    point_and_loss_monitor = AverageMonitor(
-                        [point, cost_batch],
-                        [point_format, cost_format],
-                        [logger])
+                    point_logger = LogsToLists()
+
+                    cost_format = DenseFormat(axes=['b'],
+                                              shape=[-1],
+                                              dtype=floatX)
+                    cost_node = Node(input_nodes=[],
+                                     output_symbol=cost_batch,
+                                     output_format=cost_format)
+                    cost_logger = LogsToLists()
+
+                    cost_monitor = MeanOverEpoch(
+                        cost_node,
+                        [cost_logger,
+                         StopsOnStagnation(
+                             max_epochs=args.stagnation_iters,
+                             min_proportional_decrease=args.stagnation_threshold)])
+
+
+                    # We're not actually computing the mean over the epoch, but
+                    # the point itself. When batch size is 1, they're the same
+                    # thing.
+                    point_monitor = MeanOverEpoch(point_node, [point_logger])
+                    # cost_monitor = MeanOverEpoch(cost_node, [cost_logger])
 
                     trainer = Sgd(inputs=[],
-                                  parameters=[point],
-                                  parameter_updaters=[param_updater],
                                   input_iterator=DummyIterator(),
-                                  monitors=[loss_monitor,
-                                            point_and_loss_monitor],
-                                  epoch_callbacks=[
-                                      LimitsNumEpochs(args.max_iters)])
+                                  callbacks=[param_updater,
+                                             point_monitor,
+                                             cost_monitor,
+                                             LimitsNumEpochs(args.max_iters)])
 
                     trajectory = optimize_with_trainer(trainer,
-                                                       logger,
-                                                       [point_format,
-                                                        cost_format])
+                                                       point_logger,
+                                                       cost_logger,
+                                                       point_format,
+                                                       cost_format)
                 else:
                     update_function = \
                         theano.function([],
                                         cost_batch,
-                                        updates=param_updater.updates)
+                                        updates=param_updater.update_pairs)
                     trajectory = optimize_without_trainer(point,
                                                           update_function,
                                                           args.max_iters)
