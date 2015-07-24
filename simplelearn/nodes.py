@@ -390,7 +390,7 @@ class Linear(Function1dTo1d):
     Applies a linear transformation to the input.
     '''
 
-    def __init__(self, input_node, output_format, weights, **kwargs):
+    def __init__(self, input_node, output_format, weights=None, **kwargs):
         get_bf_shape = Function1dTo1d._get_bf_shape
 
         # set in _get_output_bf_node()
@@ -402,6 +402,12 @@ class Linear(Function1dTo1d):
                             input_bf_node,
                             input_bf_format,
                             output_bf_format):
+
+        if self.params == None:
+            params = numpy.zeros((input_bf_format.shape[1],
+                                  output_bf_format.shape[1]),
+                                 dtype=input_bf_node.output_symbol.dtype)
+            self.params = theano.shared(params)
 
         output_symbol = theano.tensor.dot(input_bf_node.output_symbol,
                                           self.params)
@@ -421,16 +427,10 @@ class Bias(Function1dTo1d):
     Adds a bias to the input.
     '''
 
-    def __init__(self, input_node, output_format, bias, **kwargs):
+    def __init__(self, input_node, output_format, bias=None, **kwargs):
 
-		# set in _get_output_bf_node()
-        if bias == None:
-            self.params = None
-            super(Bias, self).__init__(input_node, output_format, **kwargs)
-
-        else:
-            self.params = bias
-            super(Bias, self).__init__(input_node, output_format, **kwargs)
+        self.params = bias
+        super(Bias, self).__init__(input_node, output_format, **kwargs)
 
     def _get_output_bf_node(self,
                             input_bf_node,
@@ -462,7 +462,7 @@ class AffineTransform(Function1dTo1d):
     Implements dot(X, M) + B (multiplying by a matrix, then adding a bias)
     '''
 
-    def __init__(self, input_node, output_format, weights, bias, **kwargs):
+    def __init__(self, input_node, output_format, weights=None, bias=None, **kwargs):
 
         self.weights = weights
         self.bias = bias
@@ -662,11 +662,11 @@ class CuDnnConv2d(Node):
     '''
 
     def __init__(self,
-                 filters,
                  input_node,
                  filter_shape,
                  num_filters,
                  pads,
+                 filters=None,
                  strides=(1, 1),
                  axis_map=None,
                  **kwargs):
@@ -807,6 +807,7 @@ class Conv2d(Node):
                  filter_shape,
                  num_filters,
                  pads,
+                 filters=None,
                  strides=(1, 1),
                  axis_map=None,
                  **kwargs):
@@ -876,13 +877,16 @@ class Conv2d(Node):
             num_filters,
             pads)
 
-        self.filters = theano.shared(
-            # num filters, num input channels, filter rows, filter columns
-            numpy.zeros((num_filters,
-                         input_format_node.output_format.shape[1],
-                         filter_shape[0],
-                         filter_shape[1]),
-                        dtype=theano.config.floatX))
+        if filters == None:
+            self.filters = theano.shared(
+                # num filters, num input channels, filter rows, filter columns
+                numpy.zeros((num_filters,
+                             input_format_node.output_format.shape[1],
+                             filter_shape[0],
+                             filter_shape[1]),
+                            dtype=theano.config.floatX))
+        else:
+            self.filters=filters
 
         def make_output_symbol(bc01_input_node, filters, pads, strides):
             assert_is_instance(pads, basestring)
@@ -1256,8 +1260,8 @@ class AffineLayer(Function1dTo1d):
     def __init__(self,
                  input_node,
                  output_format,
-                 weights,
-                 bias,
+                 weights=None,
+                 bias=None,
                  input_to_bf_map=None,
                  bf_to_output_map=None):
         '''
@@ -1291,8 +1295,8 @@ class SoftmaxLayer(Function1dTo1d):
     def __init__(self,
                  input_node,
                  output_format,
-                 weights,
-                 bias,
+                 weights=None,
+                 bias=None,
                  input_to_bf_map=None,
                  bf_to_output_map=None):
 
@@ -1317,8 +1321,6 @@ class Conv2dLayer(Node):
     A sequence of conv2d -> channel-wise bias -> ReLU -> pool2d
     '''
     def __init__(self,
-                 filters,
-                 bias,
                  input_node,
                  filter_shape,
                  num_filters,
@@ -1330,6 +1332,8 @@ class Conv2dLayer(Node):
                  filter_strides=(1, 1),
                  channel_axis='c',
                  axis_map=None,
+                 filters=None,
+                 bias=None,
                  **kwargs):
         '''
         Parameters
@@ -1345,11 +1349,11 @@ class Conv2dLayer(Node):
 
         ConvNodeClass = (CuDnnConv2d if cudnn_available('conv') else Conv2d)
 
-        self.conv2d_node = ConvNodeClass(filters,
-                                         input_node,
+        self.conv2d_node = ConvNodeClass(input_node,
                                          filter_shape,
                                          num_filters,
                                          conv_pads,
+                                         filters,
                                          strides=filter_strides,
                                          axis_map=axis_map,
                                          **kwargs)
