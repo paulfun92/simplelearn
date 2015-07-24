@@ -516,7 +516,7 @@ class DenseFormat(Format):
                 return len(batch.shape)
 
         if get_ndim(batch) != len(self.axes):
-            pdb.set_trace()
+            #pdb.set_trace()
             raise ValueError("Expected a %d-D tensor, with axes %s, but batch "
                              "had %d dimensions." % (len(self.axes),
                                                      str(self.axes),

@@ -83,7 +83,8 @@ def parse_args():
 
     parser.add_argument("--output-prefix",
                         type=legit_prefix,
-                        required=True,
+                        required=False,
+                        default='/home/paul/output',
                         help=("Directory and optional prefix of filename to "
                               "save the log to."))
 
