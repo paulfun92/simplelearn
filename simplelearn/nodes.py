@@ -1353,7 +1353,7 @@ class Conv2dLayer(Node):
                                          filter_shape,
                                          num_filters,
                                          conv_pads,
-                                         filters,
+                                         filters=filters,
                                          strides=filter_strides,
                                          axis_map=axis_map,
                                          **kwargs)
@@ -1376,7 +1376,7 @@ class Conv2dLayer(Node):
                                                channel_axis: 'f'},
                               bf_to_output_map={'b': non_channel_axes,
                                                 'f': channel_axis})
-        assert_equal(self.bias_node.params.get_value().shape, (num_filters, ))
+        #assert_equal(self.bias_node.params.get_value().shape, (num_filters, ))
 
         self.relu_node = ReLU(self.bias_node)
         self.pool2d_node = Pool2D(input_node=self.relu_node,
