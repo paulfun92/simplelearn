@@ -13,6 +13,7 @@ import os
 import copy
 import warnings
 import cPickle
+import time
 from collections import Sequence, OrderedDict
 import h5py
 import numpy
@@ -1141,7 +1142,7 @@ class Sgd(object):
         input_symbols = [i.output_symbol for i in self._inputs]
 
         iteration_callbacks = [e for e in self.epoch_callbacks
-                               if isinstance(e, IterationCallback)]
+                               if (isinstance(e, IterationCallback) and not isinstance(e, EpochTimer2))]
 
         output_symbols = []
         for iteration_callback in iteration_callbacks:
@@ -1195,8 +1196,8 @@ class Sgd(object):
         update_function = self._compile_update_function()
 
         # Overlaps with self.epoch_callbacks
-        iteration_callbacks = [c for c in self.epoch_callbacks
-                               if isinstance(c, IterationCallback)]
+        iteration_callbacks = [e for e in self.epoch_callbacks
+                               if (isinstance(e, IterationCallback) and not isinstance(e, EpochTimer2))]
 
         try:
             for epoch_callback in self.epoch_callbacks:
@@ -1234,7 +1235,9 @@ class Sgd(object):
                 # on_epoch() methods.
                 if self._input_iterator.next_is_new_epoch():
                     for epoch_callback in self.epoch_callbacks:
-                        epoch_callback.on_epoch()
+                        x = epoch_callback.on_epoch()
+
+                    self.epoch_callbacks[-1].callbacks[0](x, None)
 
         except StopTraining, exception:
             if exception.status == 'ok':
@@ -1309,3 +1312,49 @@ class EpochLogger(object):
             # for now, don't self.h5file.flush()
 
         value_provider.callbacks = [append_to_log] + value_provider.callbacks
+
+
+class EpochTimer2(ReduceOverEpoch):
+
+        def __init__(self):
+
+            self.epoch_start_time = None
+            self.epoch_number = None
+
+            node_temp = Node(input_nodes=[], output_symbol=theano.tensor.vector(),
+                                           output_format=DenseFormat(axes=['b'],
+                                                                     shape=[-1],
+                                                                     dtype=theano.config.floatX))
+            super(EpochTimer2, self).__init__(node_to_reduce=node_temp,
+                                              callbacks=[])
+
+        def reduce(self):
+            pass
+
+        def on_start_training(self):
+            self.epoch_start_time = time.time()
+            self.epoch_number = 0
+
+        def on_epoch(self):
+            current_time = time.time()
+            duration = current_time - self.epoch_start_time
+            print("Epoch {} duration: {}".format(self.epoch_number,duration))
+            self.epoch_start_time = current_time
+            self.epoch_number += 1
+            return numpy.asarray([duration])
+
+        def _reduce(self):
+            pass
+
+        def _on_start_training(self):
+            self.epoch_start_time = time.time()
+            self.epoch_number = 0
+
+        def _on_epoch(self):
+            current_time = time.time()
+            duration = current_time - self.epoch_start_time
+            print("Epoch {} duration: {}".format(self.epoch_number,duration))
+            self.epoch_start_time = current_time
+            self.epoch_number += 1
+            self.append_to_log([duration])
+            return numpy.asarray([duration])
